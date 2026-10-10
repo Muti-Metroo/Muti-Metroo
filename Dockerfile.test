@@ -1,5 +1,5 @@
 # Test stage - runs all tests with coverage
-FROM golang:1.24-alpine
+FROM golang:1.26-alpine
 
 WORKDIR /app
 
