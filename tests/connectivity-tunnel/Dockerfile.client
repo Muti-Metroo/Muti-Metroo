@@ -12,8 +12,9 @@ RUN go mod download && \
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS muti-metroo-builder
 WORKDIR /build
 COPY Muti-Metroo/ .
-RUN go mod download && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /muti-metroo ./cmd/muti-metroo
+RUN apk add --no-cache git && go mod download && \
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev") && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=$VERSION" -o /muti-metroo ./cmd/muti-metroo
 
 # Stage 3: Runtime with diagnostic tools
 FROM --platform=linux/amd64 debian:bookworm-slim
