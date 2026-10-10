@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "@marp-team/marp-cli": "^4.0.0"
+  },
+  "overrides": {
+    "basic-ftp": "^6.2.3"
   }
 }
