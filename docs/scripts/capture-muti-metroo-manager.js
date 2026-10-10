@@ -12,7 +12,7 @@
 //     01-topology              metro map, no panel, default view
 //     02-topology-search       search dropdown open
 //     03-agent-info            agent panel: Info tab
-//     04-agent-peers           agent panel: Peers tab
+//     04-agent-peers           agent panel: Connectivity tab > Peers
 //     05-agent-routes          agent panel: Routes tab
 //     06-agent-forwards        agent panel: Forwards tab (seeds a paired forward)
 //     07-routes-table          top-level Routes tab
@@ -20,15 +20,18 @@
 //     09-footer-mesh-health    footer "Mesh: N/M reachable" indicator
 //     12-domains-tab           DNS tab > Hosts (seeds two mesh hosts)
 //     13-routes-test-routing   Routes tab > Test routing (seeded mesh-host trace)
-//     15-mesh-test-modal       Mesh Connectivity Test modal
+//     15-mesh-test-modal       Mesh Connectivity Test results dialog
 //     16-agent-ping            agent panel: Ping tab with active session
 //     17-dns-tlds              DNS tab > TLDs sub-tab
 //
 //   Skipped if upstream feature is off:
-//     10-agent-shell-powershell  Windows agent + management signing key
-//     11-agent-files             Windows agent + management signing key
 //     14-downloads-tab           muti-metroo-downloads-bundle.zip deployed
 //     18-config-wizard-entry     Downloads tab present (uses Create config button)
+//
+//   10-agent-shell-powershell / 11-agent-files need an agent with shell /
+//   file-transfer management enabled. A Windows agent is preferred (the
+//   docs show PowerShell); when the mesh has none, the first agent with a
+//   shell list is used and the first offered shell is started instead.
 //
 // Usage:
 //   npm install
@@ -101,7 +104,7 @@ async function main() {
   const page = await context.newPage();
 
   // Pick agent IDs deterministically (lexicographically lowest id) so
-  // the #/agents/<id> deep-link in the panel shots is stable across runs.
+  // the ?agent=<id> deep-link in the panel shots is stable across runs.
   // mainId hosts the seeded forward endpoint; secondaryId hosts the
   // matching listener so the forwards tables show a paired row.
   const {
@@ -114,6 +117,7 @@ async function main() {
     pingId,
     pingCandidates,
     windowsId,
+    shellId,
   } = await pickAgentShortIds(context);
   if (!mainId) {
     console.error(
@@ -142,6 +146,8 @@ async function main() {
     console.log(`Using agent short_id=${pingId} for ping panel.`);
   if (windowsId)
     console.log(`Using windows agent short_id=${windowsId} for shell/files.`);
+  else if (shellId)
+    console.log(`No windows agent; using short_id=${shellId} for shell/files.`);
 
   const captured = [];
   const skipped = [];
@@ -167,34 +173,35 @@ async function main() {
     });
   }
 
-  async function switchMainTab(label) {
-    await page
-      .locator(".tabs-bar .tab-button", { hasText: label })
+  // The major tab strip is the first tablist inside <main>; the agent
+  // panel and in-tab sub-strips render additional tablists elsewhere.
+  function mainTab(label) {
+    return page
+      .locator("main > div [role=tablist]")
       .first()
-      .click();
+      .locator("button[role=tab]", { hasText: new RegExp(`^${label}$`) })
+      .first();
   }
 
-  async function openAgentPanel(id = mainId) {
-    // Muti Metroo Manager v0.2.25+ uses path + ?agent=<id> instead of the legacy
-    // #/agents/<id> hash. Navigate directly so the router parses the URL
-    // on initial load and opens the panel.
-    await page.goto(`${BASE_URL}/topology?agent=${id}`, {
-      waitUntil: "domcontentloaded",
-    });
+  async function switchMainTab(label) {
+    await mainTab(label).click();
+  }
+
+  async function openAgentPanel(id = mainId, panel) {
+    const url = `${BASE_URL}/topology?agent=${id}${panel ? `&panel=${panel}` : ""}`;
+    await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.addStyleTag({ content: FREEZE_CSS });
     await page.waitForSelector(".metro-svg .station", {
       timeout: STEP_TIMEOUT,
     });
-    await page.waitForSelector(".agent-panel .agent-panel-title", {
-      timeout: STEP_TIMEOUT,
-    });
+    await page.waitForSelector(".agent-panel", { timeout: STEP_TIMEOUT });
   }
 
   async function switchAgentTab(label) {
     await page
-      .locator(".agent-panel .agent-panel-tab", {
-        hasText: new RegExp(`^${label}$`),
-      })
+      .locator(".agent-panel [role=tablist]")
+      .first()
+      .locator("button[role=tab]", { hasText: new RegExp(`^${label}$`) })
       .first()
       .click();
   }
@@ -208,10 +215,15 @@ async function main() {
   // 02 - Topology with the in-corner search dropdown visible.
   await capture("02-topology-search", async (out) => {
     await openTopology();
-    const search = page.locator(".agent-search-input").first();
-    await search.click();
-    await search.fill("a");
-    await page.waitForSelector(".agent-search-results", {
+    const input = page.locator('input[placeholder^="Search agents"]').first();
+    // The search field starts collapsed (w-0); the icon button expands it.
+    await page
+      .locator('button:has(span[class*="tabler--search"])')
+      .first()
+      .click();
+    await input.click();
+    await input.fill("a");
+    await page.waitForSelector('ul[role="listbox"]', {
       timeout: STEP_TIMEOUT,
     });
     await page.screenshot({ path: out });
@@ -222,50 +234,47 @@ async function main() {
     await openTopology();
     await openAgentPanel();
     await switchAgentTab("Info");
-    await page.waitForSelector(".agent-panel .info-section-header.notes", {
-      timeout: STEP_TIMEOUT,
-    });
+    await page.waitForSelector(
+      '.agent-panel textarea[placeholder^="Free-form notes"]',
+      { timeout: STEP_TIMEOUT },
+    );
     await page.screenshot({ path: out });
   });
 
-  // 04 - Peers tab.
+  // 04 - Connectivity tab, Peers sub-tab (the default view of the tab).
   await capture("04-agent-peers", async (out) => {
     await openTopology();
     await openAgentPanel();
-    await switchAgentTab("Peers");
-    await page.waitForSelector(
-      ".agent-panel .peers-remote-id, .agent-panel .tab-empty",
-      {
-        timeout: STEP_TIMEOUT,
-      },
-    );
-    await page.screenshot({ path: out });
-  });
-
-  // 05 - Routes tab on the agent panel. Wait for the async fetch to land
-  // so the "Loading routes..." placeholder is gone.
-  await capture("05-agent-routes", async (out) => {
-    await openTopology();
-    await openAgentPanel();
-    await switchAgentTab("Routes");
-    await page.waitForSelector(
-      ".agent-panel .routes-list, .agent-panel .tab-empty",
-      {
-        timeout: STEP_TIMEOUT,
-      },
-    );
+    await switchAgentTab("Connectivity");
+    await page.waitForSelector(".agent-panel .routes-tab", {
+      timeout: STEP_TIMEOUT,
+    });
     await page
-      .waitForSelector(".agent-panel .tab-loading", { state: "detached" })
+      .waitForSelector(".agent-panel .ui-loading", { state: "detached" })
       .catch(() => {});
     await page.screenshot({ path: out });
   });
 
-  // 06 - Forwards tab with listener/endpoint subtab bar visible. Same
-  // loading-placeholder handling as the routes tab. Seed a paired
-  // listener+endpoint so the table is non-empty, regardless of whether
-  // the operator has any persistent forwards configured. Opens the
+  // 05 - Routes tab on the agent panel. Wait for the async fetch to land
+  // so the "Loading..." placeholder is gone.
+  await capture("05-agent-routes", async (out) => {
+    await openTopology();
+    await openAgentPanel();
+    await switchAgentTab("Routes");
+    await page.waitForSelector(".agent-panel .routes-tab", {
+      timeout: STEP_TIMEOUT,
+    });
+    await page
+      .waitForSelector(".agent-panel .ui-loading", { state: "detached" })
+      .catch(() => {});
+    await page.screenshot({ path: out });
+  });
+
+  // 06 - Forwards tab with listener/endpoint subtab bar visible. Seed a
+  // paired listener+endpoint so the table is non-empty, regardless of
+  // whether the operator has any persistent forwards configured. Opens the
   // panel on the secondary agent (where the LISTENER landed) so the
-  // default LISTENERS sub-tab shows a populated row.
+  // default Listeners sub-tab shows a populated row.
   await capture("06-agent-forwards", async (out) => {
     const seeded = secondaryFullId !== null;
     if (seeded) {
@@ -285,22 +294,17 @@ async function main() {
       if (seeded) await page.waitForTimeout(1500);
       await openTopology();
       // Open the panel on the listener-side agent so the default
-      // LISTENERS sub-tab shows the seeded entry. Fall back to mainId
+      // Listeners sub-tab shows the seeded entry. Fall back to mainId
       // when there is no secondary agent.
       const panelId = secondaryId || mainId;
       await openAgentPanel(panelId);
       await switchAgentTab("Forwards");
-      await page.waitForSelector(".agent-panel .forwards-subtabs", {
-        timeout: STEP_TIMEOUT,
-      });
       await page.waitForSelector(
-        ".agent-panel .routes-list, .agent-panel .tab-empty",
-        {
-          timeout: STEP_TIMEOUT,
-        },
+        '.agent-panel [role=tablist] button[role=tab]:has-text("Listeners")',
+        { timeout: STEP_TIMEOUT },
       );
       await page
-        .waitForSelector(".agent-panel .tab-loading", { state: "detached" })
+        .waitForSelector(".agent-panel .ui-loading", { state: "detached" })
         .catch(() => {});
       await page.screenshot({ path: out });
     } finally {
@@ -315,7 +319,7 @@ async function main() {
   await capture("07-routes-table", async (out) => {
     await openTopology();
     await switchMainTab("Routes");
-    await page.waitForSelector(".table-container, .no-data", {
+    await page.waitForSelector(".ui-table-frame, .ui-empty", {
       timeout: STEP_TIMEOUT,
     });
     await page.screenshot({ path: out });
@@ -340,7 +344,7 @@ async function main() {
       if (seeded) await page.waitForTimeout(1500);
       await openTopology();
       await switchMainTab("Port Forwarding");
-      await page.waitForSelector(".table-container, .no-data", {
+      await page.waitForSelector(".ui-table-frame, .ui-empty", {
         timeout: STEP_TIMEOUT,
       });
       await page.screenshot({ path: out });
@@ -352,27 +356,38 @@ async function main() {
     }
   });
 
-  // 10 - Management commands on the Windows workstation with PowerShell picked.
-  // Requires the upstream agent to have management.signing_private_key
-  // configured and the target agent to be reachable with shell enabled.
+  // 10 - Management commands on an agent with shell enabled. A Windows
+  // agent gets powershell.exe picked (the documented view); without one,
+  // the first agent exposing shells is used with its first offered shell.
   await capture("10-agent-shell-powershell", async (out) => {
-    if (!windowsId) throw new Error("no windows agent in topology");
+    const targetId = windowsId || shellId;
+    if (!targetId) throw new Error("no agent with shell enabled in topology");
     await openTopology();
-    await openAgentPanel(windowsId);
+    await openAgentPanel(targetId);
     const shellTab = page
-      .locator(".agent-panel .agent-panel-tab", { hasText: /^Shell$/ })
+      .locator(".agent-panel [role=tablist]")
+      .first()
+      .locator("button[role=tab]", { hasText: /^Shell$/ })
       .first();
     if ((await shellTab.getAttribute("disabled")) !== null) {
       throw new Error("shell tab is disabled (no management signing key?)");
     }
     await shellTab.click();
-    await page
-      .locator(".agent-panel .shell-picker-btn", {
-        hasText: /^powershell\.exe$/,
-      })
-      .first()
-      .click();
-    await page.waitForSelector(".agent-panel .shell-status-connected", {
+    const picker = page.locator(
+      ".agent-panel .ui-section button:has(span[class*='tabler--terminal'])",
+    );
+    await picker.first().waitFor({ timeout: STEP_TIMEOUT });
+    if (windowsId) {
+      await picker.filter({ hasText: /^powershell\.exe$/ }).first().click();
+    } else {
+      const bash = picker.filter({ hasText: /^bash$|^\/bin\/bash$/ });
+      if ((await bash.count()) > 0) await bash.first().click();
+      else await picker.first().click();
+    }
+    await page.waitForSelector(".agent-panel .shell-terminal", {
+      timeout: STEP_TIMEOUT,
+    });
+    await page.waitForSelector(".agent-panel .text-success", {
       timeout: STEP_TIMEOUT,
     });
     // Give the remote PTY a moment to render its banner/prompt.
@@ -380,40 +395,45 @@ async function main() {
     await page.screenshot({ path: out });
   });
 
-  // 11 - File browser on the Windows workstation, navigated into C:\ so
+  // 11 - File browser on the same agent, navigated into the first root so
   // the directory listing is shown rather than the roots selector. Same
   // capability requirements as the shell.
   await capture("11-agent-files", async (out) => {
-    if (!windowsId) throw new Error("no windows agent in topology");
+    const targetId = windowsId || shellId;
+    if (!targetId) throw new Error("no agent with file transfer enabled in topology");
     await openTopology();
-    await openAgentPanel(windowsId);
+    await openAgentPanel(targetId);
     const filesTab = page
-      .locator(".agent-panel .agent-panel-tab", { hasText: /^Files$/ })
+      .locator(".agent-panel [role=tablist]")
+      .first()
+      .locator("button[role=tab]", { hasText: /^Files$/ })
       .first();
     if ((await filesTab.getAttribute("disabled")) !== null) {
       throw new Error("files tab is disabled (no management signing key?)");
     }
     await filesTab.click();
-    // Wait for the roots list, then click the first root (C:\).
-    await page.waitForSelector(".agent-panel .files-root-item", {
-      timeout: STEP_TIMEOUT,
-    });
-    await page.locator(".agent-panel .files-root-item").first().click();
+    // Windows agents show a roots selector first (C:\ etc.); Linux agents
+    // with open allowed_paths land directly in "/". Only click a root
+    // when the selector is what's on screen.
+    const root = page.locator(".agent-panel .files-root-item").first();
+    if (await root.waitFor({ timeout: 2000 }).then(() => true).catch(() => false)) {
+      await root.click();
+    }
     // Wait for the directory listing to land and the loading placeholder
     // to clear before snapping.
     await page.waitForSelector(
-      ".agent-panel .files-list, .agent-panel .files-empty, .agent-panel .files-tab .tab-error",
+      ".agent-panel .ui-table-frame, .agent-panel .ui-empty, .agent-panel .ui-error",
       { timeout: STEP_TIMEOUT },
     );
     await page
-      .waitForSelector(".agent-panel .files-loading", { state: "detached" })
+      .waitForSelector(".agent-panel .ui-loading", { state: "detached" })
       .catch(() => {});
     await page.screenshot({ path: out });
   });
 
-  // 12 - Top-level Domains tab. Seed two entries via /hosts/manage so the
-  // table has content; cleanup runs in the finally block to keep re-runs
-  // idempotent.
+  // 12 - Top-level DNS tab > Hosts. Seed two entries via /hosts/manage so
+  // the table has content; cleanup runs in the finally block to keep
+  // re-runs idempotent.
   await capture("12-domains-tab", async (out) => {
     await seedDomain(context, "gateway.mesh", {
       ipv4: "10.0.0.1",
@@ -427,11 +447,12 @@ async function main() {
     try {
       await openTopology();
       await switchMainTab("DNS");
-      // Wait for the loaded table: a route-domain cell only renders when
-      // hosts.length > 0, so this skips the "Loading..." state.
-      await page.waitForSelector(".dns-tab tbody td.route-domain", {
-        timeout: STEP_TIMEOUT,
-      });
+      // Wait for the seeded row: proves the table finished loading and
+      // is not the empty or "Loading..." state.
+      await page
+        .locator("td", { hasText: "gateway.mesh" })
+        .first()
+        .waitFor({ timeout: STEP_TIMEOUT });
       await page.screenshot({ path: out });
     } finally {
       await unseedDomain(context, "gateway.mesh");
@@ -448,18 +469,23 @@ async function main() {
       await openTopology();
       await switchMainTab("Routes");
       await page
-        .locator(".routes-sub-tab", { hasText: /^Test routing$/ })
+        .locator("main section [role=tablist]")
+        .first()
+        .locator("button[role=tab]", { hasText: /^Test routing$/ })
         .first()
         .click();
-      const input = page.locator(".route-trace-input").first();
+      const input = page
+        .locator('input[placeholder^="IP address or hostname"]')
+        .first();
       await input.fill("gateway.mesh");
       await page
-        .locator(".route-trace-form .panel-btn", { hasText: /^Trace$/ })
+        .locator("button", { hasText: /^Trace$/ })
         .first()
         .click();
-      await page.waitForSelector(".route-trace-section .trace-views", {
-        timeout: STEP_TIMEOUT,
-      });
+      await page
+        .locator(".ui-section", { hasText: "Resolution:" })
+        .first()
+        .waitFor({ timeout: STEP_TIMEOUT });
       await page.screenshot({ path: out });
     } finally {
       await unseedDomain(context, "gateway.mesh");
@@ -470,7 +496,7 @@ async function main() {
   // screenshot focuses on the "Mesh: N/M reachable" summary.
   await capture("09-footer-mesh-health", async (out) => {
     await openTopology();
-    const footer = page.locator("footer, .footer-status").first();
+    const footer = page.locator("footer").first();
     await footer.waitFor({ timeout: STEP_TIMEOUT });
     const box = await footer.boundingBox();
     if (!box) throw new Error("footer not measurable");
@@ -491,53 +517,45 @@ async function main() {
   // without a bundle.
   await capture("14-downloads-tab", async (out) => {
     await openTopology();
-    const tab = page
-      .locator(".tabs-bar .tab-button", { hasText: /^Downloads$/ })
-      .first();
+    const tab = mainTab("Downloads");
     if ((await tab.count()) === 0) {
       throw new Error(
         "Downloads tab not present (no downloads bundle deployed)",
       );
     }
     await tab.click();
-    await page.waitForSelector(".downloads-tab", { timeout: STEP_TIMEOUT });
-    // The downloads listing renders one section per binary group; wait
-    // until at least one row is visible so the snap is non-empty.
-    await page.waitForSelector(
-      ".downloads-tab .downloads-row-name, .downloads-tab .no-data",
-      {
-        timeout: STEP_TIMEOUT,
-      },
-    );
+    // The downloads listing renders one section per binary group with a
+    // plain table each; wait until at least one artifact row is visible.
+    await page.waitForSelector("main section table tbody tr", {
+      timeout: STEP_TIMEOUT,
+    });
     await page.screenshot({ path: out });
   });
 
-  // 15 - Mesh Connectivity Test modal. Triggered from the kebab menu. Waits
-  // for the per-pair table to populate so the captured modal shows real
-  // latency rows, not the running spinner.
+  // 15 - Mesh Connectivity Test results dialog. Triggered from the actions
+  // menu. Waits for the results dialog so the capture shows real latency
+  // rows, not the running spinner.
   await capture("15-mesh-test-modal", async (out) => {
     await openTopology();
-    await page.locator(".actions-menu-trigger").first().click();
-    await page.waitForSelector(".actions-menu-dropdown", {
-      timeout: STEP_TIMEOUT,
-    });
+    await page.locator('button[aria-label="Actions"]').first().click();
+    await page.waitForSelector('[role="menu"]', { timeout: STEP_TIMEOUT });
     await page
-      .locator(".actions-menu-item", {
-        hasText: /Mesh Connectivity Test|Testing\.\.\./,
+      .locator('[role="menuitem"]', {
+        hasText: /Mesh connectivity test|Testing\.\.\./,
       })
       .first()
       .click();
-    await page.waitForSelector(".test-modal", { timeout: STEP_TIMEOUT });
-    // The modal renders an N x N grid of agent-pair cells once the
-    // backend POST /api/mesh-test returns. Wait for a populated cell.
-    await page.waitForSelector(".test-modal-list", { timeout: STEP_TIMEOUT });
+    await page
+      .locator('[role="dialog"]', { hasText: "Mesh test results" })
+      .first()
+      .waitFor({ timeout: STEP_TIMEOUT * 3 });
     // Give the in-flight test a moment to land before snapping; mesh-test
     // probes are quick (~1s/pair) but bursty.
     await page.waitForTimeout(2500);
     await page.screenshot({ path: out });
-    // Close the modal so subsequent shots are not contaminated.
+    // Close the dialog so subsequent shots are not contaminated.
     await page
-      .locator(".test-modal-close")
+      .locator('[role="dialog"] button[aria-label="Close"]')
       .first()
       .click()
       .catch(() => {});
@@ -563,19 +581,22 @@ async function main() {
         await openTopology();
         await openAgentPanel(candidate);
         const pingTab = page
-          .locator(".agent-panel .agent-panel-tab", { hasText: /^Ping$/ })
+          .locator(".agent-panel [role=tablist]")
+          .first()
+          .locator("button[role=tab]", { hasText: /^Ping$/ })
           .first();
         if ((await pingTab.getAttribute("disabled")) !== null) {
           lastError = `ping tab disabled on ${candidate}`;
           continue;
         }
         await pingTab.click();
-        await page.waitForSelector(".ping-tab .ping-input", {
-          timeout: STEP_TIMEOUT,
-        });
-        await page.locator(".ping-tab .ping-input").first().fill(destIp);
+        const input = page
+          .locator('.agent-panel input[placeholder^="IP address"]')
+          .first();
+        await input.waitFor({ timeout: STEP_TIMEOUT });
+        await input.fill(destIp);
         await page
-          .locator(".ping-tab .panel-btn", { hasText: /^Start$/ })
+          .locator(".agent-panel button", { hasText: /^Start$/ })
           .first()
           .click();
         // Wait for at least 3 successful (rtt-bearing) rows. If the
@@ -584,10 +605,16 @@ async function main() {
         const ok = await page
           .waitForFunction(
             () => {
-              return (
-                document.querySelectorAll(".ping-tab .ping-row.ping-row-ok")
-                  .length >= 3
+              const rows = document.querySelectorAll(
+                ".agent-panel .ui-table-frame tbody tr",
               );
+              let rttRows = 0;
+              for (const row of rows) {
+                const cells = row.querySelectorAll("td");
+                if (cells.length >= 2 && /ms|s/.test(cells[1].textContent))
+                  rttRows += 1;
+              }
+              return rttRows >= 3;
             },
             { timeout: STEP_TIMEOUT * 3 },
           )
@@ -596,7 +623,7 @@ async function main() {
         if (ok) {
           await page.screenshot({ path: out });
           await page
-            .locator(".ping-tab .ping-stop-btn")
+            .locator(".agent-panel button", { hasText: /^Stop$/ })
             .first()
             .click()
             .catch(() => {});
@@ -606,7 +633,7 @@ async function main() {
         // Stop and move on to the next candidate.
         lastError = `no successful echoes on ${candidate}`;
         await page
-          .locator(".ping-tab .ping-stop-btn")
+          .locator(".agent-panel button", { hasText: /^Stop$/ })
           .first()
           .click()
           .catch(() => {});
@@ -620,29 +647,24 @@ async function main() {
   });
 
   // 17 - DNS tab > TLDs sub-tab. Companion to 12 (Hosts). Wait for the
-  // table to populate (a route-domain cell appears once the suffixes
-  // list has loaded) so the screenshot is not the "Loading..." state.
+  // table to populate (or the empty state) so the screenshot is not the
+  // "Loading..." state.
   await capture("17-dns-tlds", async (out) => {
     await openTopology();
     await switchMainTab("DNS");
     await page
-      .locator(".dns-tab .routes-sub-tab", { hasText: /^TLDs$/ })
+      .locator("main section [role=tablist]")
+      .first()
+      .locator("button[role=tab]", { hasText: /^TLDs$/ })
       .first()
       .click();
-    // Wait until the loading placeholder is gone -- either a real row
-    // (.route-domain) renders, or the empty state ("no data") replaces
-    // it. Both are documentation-worthy; "Loading..." is not.
+    // The loading placeholder itself is a .ui-empty cell, so key off the
+    // section text: done when "Loading..." is gone (rows or empty state).
     await page.waitForFunction(
       () => {
-        const table = document.querySelector(
-          ".dns-tab table, .dns-tab .table-container",
-        );
-        if (!table) return false;
-        const text = table.textContent || "";
-        // Filled list shows ".mesh" style rows; empty state shows e.g.
-        // "No suffixes configured". Either is fine; reject only the
-        // transitional "Loading..." text.
-        return !text.includes("Loading");
+        const section = document.querySelector("main section");
+        if (!section) return false;
+        return !section.textContent.includes("Loading");
       },
       { timeout: STEP_TIMEOUT * 2 },
     );
@@ -650,31 +672,29 @@ async function main() {
   });
 
   // 18 - Entry config wizard, first step (TUN interface). Triggered from
-  // the kebab menu's "Generate Mutiauk Config..." item. The wizard
-  // is a modal so the rest of the dashboard is dimmed in the background,
+  // the actions menu's "Generate Mutiauk config..." item. The wizard is an
+  // overlay so the rest of the dashboard is dimmed in the background,
   // which is fine for a feature-introduction screenshot.
   await capture("18-config-wizard-entry", async (out) => {
     await openTopology();
-    await page.locator(".actions-menu-trigger").first().click();
-    await page.waitForSelector(".actions-menu-dropdown", {
-      timeout: STEP_TIMEOUT,
-    });
+    await page.locator('button[aria-label="Actions"]').first().click();
+    await page.waitForSelector('[role="menu"]', { timeout: STEP_TIMEOUT });
     await page
-      .locator(".actions-menu-item", { hasText: /Generate Mutiauk Config/ })
+      .locator('[role="menuitem"]', { hasText: /Generate Mutiauk config/ })
       .first()
       .click();
-    await page.waitForSelector(".wizard-modal", { timeout: STEP_TIMEOUT });
     // First step is "TUN interface" - confirm the heading is present.
-    await page.waitForSelector(".wizard-step-heading", {
-      timeout: STEP_TIMEOUT,
-    });
-    await page.screenshot({ path: out });
-    // Close the modal so subsequent shots are clean.
     await page
-      .locator(".wizard-close")
+      .locator(".ui-overlay h3", { hasText: /^TUN interface$/ })
+      .first()
+      .waitFor({ timeout: STEP_TIMEOUT });
+    await page.screenshot({ path: out });
+    // Close the overlay so subsequent shots are clean.
+    await page
+      .locator('.ui-overlay button[aria-label="Close"]')
       .first()
       .click()
-      .catch(() => {});
+      .catch(() => page.keyboard.press("Escape").catch(() => {}));
   });
 
   console.log("");
@@ -794,9 +814,7 @@ async function seedForwardEndpoint(context, agentFullId, { key, target }) {
     timeout: NAV_TIMEOUT,
   });
   if (!resp.ok() && resp.status() !== 409) {
-    throw new Error(
-      `seed endpoint ${key}: HTTP ${resp.status()} ${await resp.text()}`,
-    );
+    throw new Error(`seed endpoint ${key}: HTTP ${resp.status()} ${await resp.text()}`);
   }
 }
 
@@ -825,6 +843,7 @@ async function pickAgentShortIds(context) {
     pingId: null,
     pingCandidates: [],
     windowsId: null,
+    shellId: null,
   };
   try {
     const resp = await context.request.get(
@@ -840,6 +859,11 @@ async function pickAgentShortIds(context) {
     const sorted = [...agents].sort((a, b) => a.id.localeCompare(b.id));
     // Windows agent by OS, sorted for determinism across re-runs.
     const windows = sorted.find((a) => a.os === "windows");
+    // Agent with shell/file management enabled (for the shell/files shots
+    // when no Windows workstation is in the mesh).
+    const withShells = sorted.find(
+      (a) => Array.isArray(a.shells) && a.shells.length > 0,
+    );
     // Pick two distinct non-Windows agents so paired forward seeds (one
     // listener + one endpoint) can land on different agents and produce
     // a populated forward-routes row in the dashboard.
@@ -866,6 +890,7 @@ async function pickAgentShortIds(context) {
       pingId: ping ? ping.short_id : null,
       pingCandidates: linuxAgents.map((a) => a.short_id),
       windowsId: windows ? windows.short_id : null,
+      shellId: withShells ? withShells.short_id : null,
     };
   } catch {
     return empty;

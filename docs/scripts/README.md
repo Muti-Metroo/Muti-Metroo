@@ -54,8 +54,9 @@ docs/static/img/screenshots/muti-metroo-manager/
   07-routes-table.png
   08-port-forwarding.png
   09-footer-mesh-health.png
-  10-agent-shell-powershell.png      (skipped if no Windows agent)
-  11-agent-files.png                 (skipped if no Windows agent)
+  10-agent-shell-powershell.png      (Windows agent preferred; falls back to
+                                      the first shell on any shell-enabled agent)
+  11-agent-files.png                 (same fallback as 10)
   12-domains-tab.png
   13-routes-test-routing.png
 ```
