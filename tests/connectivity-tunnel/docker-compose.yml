@@ -1,0 +1,112 @@
+# TCP/UDP connectivity through Mutiauk TUN + Muti Metroo test environment
+#
+# Architecture:
+#   client (Mutiauk TUN + Muti Metroo ingress)
+#     -> transit (Muti Metroo relay)
+#       -> exit (Muti Metroo exit with CIDR routes)
+#         -> target (local container with TCP/UDP services)
+#
+# Usage:
+#   docker compose build
+#   docker compose up -d
+#   docker compose exec client /scripts/start-client.sh
+#
+# Target services:
+#   - TCP 22: SSH (dropbear)
+#   - TCP 80: HTTP (nginx)
+#   - TCP 443: HTTPS (nginx)
+#   - UDP 53: DNS (dnsmasq)
+#   - UDP 123: NTP response simulator
+
+services:
+  # Local target with TCP and UDP services
+  target:
+    image: alpine:latest
+    container_name: tunnel-target
+    hostname: target
+    command: |
+      sh -c '
+        apk add --no-cache nginx dnsmasq dropbear netcat-openbsd &&
+        # Configure nginx
+        mkdir -p /run/nginx &&
+        echo "server { listen 80; listen 443; location / { return 200 \"OK\"; } }" > /etc/nginx/http.d/default.conf &&
+        # Configure dnsmasq for UDP 53
+        echo "port=53" > /etc/dnsmasq.conf &&
+        echo "no-resolv" >> /etc/dnsmasq.conf &&
+        echo "address=/#/127.0.0.1" >> /etc/dnsmasq.conf &&
+        # Start services
+        nginx &&
+        dnsmasq &&
+        dropbear -R -F -E -p 22 &
+        # UDP 123 responder (simulates NTP)
+        while true; do nc -u -l -p 123 -e echo "NTP OK" 2>/dev/null; done &
+        # Keep container running
+        tail -f /dev/null
+      '
+    networks:
+      mesh:
+        ipv4_address: 192.168.107.100
+    restart: unless-stopped
+  # Exit agent - handles traffic to specific CIDRs
+  exit:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: tunnel-exit
+    hostname: exit
+    volumes:
+      - ./configs/exit.yaml:/app/config.yaml:ro
+    ports:
+      - "28083:8080" # Health/Dashboard
+    networks:
+      - mesh
+    restart: unless-stopped
+
+  # Transit agent - relays between client and exit
+  transit:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: tunnel-transit
+    hostname: transit
+    volumes:
+      - ./configs/transit.yaml:/app/config.yaml:ro
+    ports:
+      - "28082:8080" # Health/Dashboard
+    networks:
+      - mesh
+    depends_on:
+      - exit
+    restart: unless-stopped
+
+  # Client container with Mutiauk TUN and Muti Metroo ingress
+  client:
+    build:
+      context: ../../.. # Parent dir containing the Muti-Metroo and Mutiauk checkouts
+      dockerfile: Muti-Metroo/tests/connectivity-tunnel/Dockerfile.client
+    container_name: tunnel-client
+    hostname: client
+    cap_add:
+      - NET_ADMIN # Required for TUN interface
+    devices:
+      - /dev/net/tun # Required for TUN interface
+    volumes:
+      - ./configs/client-mm.yaml:/etc/muti-metroo/config.yaml:ro
+      - ./configs/client-mutiauk.yaml:/etc/mutiauk/config.yaml:ro
+      - ./scripts:/scripts:ro
+    ports:
+      - "28081:8080" # Health/Dashboard
+      - "21080:1080" # SOCKS5 (for external testing)
+    networks:
+      - mesh
+    depends_on:
+      - transit
+    stdin_open: true
+    tty: true
+
+networks:
+  mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.107.0/24

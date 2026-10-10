@@ -1,0 +1,13 @@
+{
+  "name": "muti-metroo-operator-slides",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Muti Metroo Operator Slides - Marp deck for new operators",
+  "scripts": {
+    "build": "make pdf",
+    "clean": "make clean"
+  },
+  "devDependencies": {
+    "@marp-team/marp-cli": "^4.0.0"
+  }
+}

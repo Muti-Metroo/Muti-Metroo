@@ -1,0 +1,30 @@
+# Agent 5: Branch Office Transit
+agent:
+  id: "eeee555555555555eeee555555555555"
+  display_name: "agent5-branch"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+peers:
+  - id: "ffff666666666666ffff666666666666"
+    transport: quic
+    address: "agent6:4433"
+
+shell:
+  enabled: true
+  whitelist: ["*"]
+
+file_transfer:
+  enabled: true
+  allowed_paths: ["*"]
+
+forward:
+  endpoints:
+    - key: "branch-logs"
+      target: "localhost:8080"
+
+http:
+  enabled: true
+  address: ":8080"

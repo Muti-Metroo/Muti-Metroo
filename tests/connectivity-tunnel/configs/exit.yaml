@@ -1,0 +1,25 @@
+# Exit Agent - handles traffic to local scan target
+agent:
+  id: "eeee000000000000eeee000000000000"
+  display_name: "exit-node"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+exit:
+  enabled: true
+  routes:
+    - "192.168.107.100/32" # Local scan target
+    - "0.0.0.0/0" # Default route - required for SOCKS5 UDP ASSOCIATE
+
+udp:
+  enabled: true
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
+
+logging:
+  level: debug

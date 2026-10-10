@@ -1,0 +1,6 @@
+build/
+node_modules/
+npm-debug.log*
+.DS_Store
+# Mirror of ../docs/static/img/screenshots/muti-metroo-manager populated by `make screenshots`.
+assets/screenshots/

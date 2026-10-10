@@ -1,0 +1,32 @@
+# Mutiauk TUN Configuration - routes target IPs through SOCKS5
+daemon:
+  pid_file: /var/run/mutiauk.pid
+  socket_path: /var/run/mutiauk.sock
+
+tun:
+  name: tun0
+  mtu: 1400
+  address: 10.200.200.1/24
+
+socks5:
+  server: "ws://127.0.0.1:8081/socks5" # WebSocket URL (ws:// for plaintext)
+  username: "testuser" # Same credentials for HTTP Basic Auth + SOCKS5 auth
+  password: "testpass"
+  timeout: 30s
+  keepalive: 60s
+
+routes:
+  - destination: 192.168.107.100/32
+    comment: "Local scan target"
+    enabled: true
+
+nat:
+  table_size: 10000
+  tcp_timeout: 30m
+  udp_timeout: 5m
+  gc_interval: 1m
+
+logging:
+  level: debug
+  format: console
+  output: stdout

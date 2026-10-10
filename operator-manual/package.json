@@ -1,0 +1,15 @@
+{
+  "name": "muti-metroo-operator-manual",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Muti Metroo Operator Manual - PDF generation from Markdown",
+  "scripts": {
+    "build": "make pdf",
+    "build:html": "make html",
+    "clean": "make clean",
+    "install-deps": "make install-deps"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.0"
+  }
+}

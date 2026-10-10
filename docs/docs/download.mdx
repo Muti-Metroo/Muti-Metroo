@@ -1,0 +1,312 @@
+---
+sidebar_position: 1
+title: Download
+description: Download Muti Metroo binaries for your platform
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import React, {useEffect} from 'react';
+
+export const DownloadButton = ({href, children, primary}) => (
+  <a
+    href={href}
+    className={`download-button ${primary ? 'download-button--primary' : ''}`}
+    target="_blank"
+    rel="noopener noreferrer">
+    {children}
+  </a>
+);
+
+export const DownloadButtonGroup = ({children}) => (
+  <div className="download-button-group">
+    {children}
+  </div>
+);
+
+export const OSDetector = () => {
+  useEffect(() => {
+    const detectOS = () => {
+      const ua = navigator.userAgent.toLowerCase();
+      const platform = navigator.platform?.toLowerCase() || '';
+      if (ua.includes('win')) return 'windows';
+      if (ua.includes('mac') || platform.includes('mac')) return 'macos';
+      if (ua.includes('linux') || platform.includes('linux')) return 'linux';
+      return null;
+    };
+
+    const os = detectOS();
+    if (!os) return;
+
+    const tabMap = {
+      'macos': 'macOS',
+      'linux': 'Linux',
+      'windows': 'Windows'
+    };
+    const tabLabel = tabMap[os];
+    if (!tabLabel) return;
+
+    setTimeout(() => {
+      const tabs = document.querySelectorAll('[role="tab"]');
+      tabs.forEach(tab => {
+        if (tab.textContent === tabLabel) {
+          tab.click();
+        }
+      });
+    }, 100);
+
+}, []);
+
+return null;
+};
+
+# Download Muti Metroo
+
+<OSDetector />
+
+Download the latest Muti Metroo binary for your platform. All binaries are self-contained and require no additional dependencies.
+
+:::info Terms of Service
+By downloading these binaries, you agree to the [Terms of Service](/terms-of-service). The source code is available under the [MIT License](https://github.com/postalsys/Muti-Metroo/blob/master/LICENSE).
+:::
+
+:::tip Build from Source
+Binaries are provided for convenience; building from source is recommended for review and customization. See the [source repository](https://github.com/postalsys/Muti-Metroo) for build instructions.
+:::
+
+<Tabs groupId="os">
+  <TabItem value="macos" label="macOS" default>
+
+### Apple Silicon (M-series)
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-darwin-arm64" primary>
+    Download Binary (Apple Silicon)
+  </DownloadButton>
+</DownloadButtonGroup>
+
+### Intel
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-darwin-amd64" primary>
+    Download Binary (Intel)
+  </DownloadButton>
+</DownloadButtonGroup>
+
+### Installation
+
+```bash
+# Download for your architecture (example: Apple Silicon)
+curl -L -o muti-metroo __MUTI_METROO_RELEASE__/muti-metroo-darwin-arm64
+
+# Make executable and install
+chmod +x muti-metroo
+sudo mv muti-metroo /usr/local/bin/
+
+# Verify installation
+muti-metroo --version
+```
+
+:::note Gatekeeper Warning
+On first run, macOS may show a security warning because the binary is not signed with a Developer ID certificate. To allow it:
+1. Right-click the binary and select "Open", or
+2. Go to System Preferences > Security & Privacy and click "Allow Anyway"
+:::
+
+  </TabItem>
+  <TabItem value="linux" label="Linux">
+
+### x86_64 (amd64)
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-linux-amd64" primary>
+    Download Binary (x86_64)
+  </DownloadButton>
+</DownloadButtonGroup>
+
+### ARM64 (aarch64)
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-linux-arm64" primary>
+    Download Binary (ARM64)
+  </DownloadButton>
+</DownloadButtonGroup>
+
+### Installation
+
+```bash
+# Download for your architecture (example: amd64)
+curl -L -o muti-metroo __MUTI_METROO_RELEASE__/muti-metroo-linux-amd64
+
+# Make executable and install
+chmod +x muti-metroo
+sudo mv muti-metroo /usr/local/bin/
+
+# Verify installation
+muti-metroo --version
+```
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+### x86_64 (amd64)
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.exe" primary>
+    Download (.exe)
+  </DownloadButton>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.dll">
+    Download DLL
+  </DownloadButton>
+</DownloadButtonGroup>
+
+### ARM64
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-arm64.exe" primary>
+    Download ARM64 (.exe)
+  </DownloadButton>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-arm64.dll">
+    Download ARM64 DLL
+  </DownloadButton>
+</DownloadButtonGroup>
+
+:::tip DLL Mode
+The DLL variant runs via `rundll32.exe` without a console window. Use `.exe` for normal operation; use `.dll` for background execution scenarios. The ARM64 DLL is a native PE image and works with the standard `rundll32.exe` in `System32` -- no emulation layer required. See [DLL Mode](/deployment/dll-mode) for details.
+:::
+
+### Installation
+
+```powershell
+# Download for your architecture (example: amd64)
+curl.exe -L -o muti-metroo.exe __MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.exe
+
+# Move to Program Files (run as Administrator)
+mkdir "C:\Program Files\muti-metroo" -ErrorAction SilentlyContinue
+move muti-metroo.exe "C:\Program Files\muti-metroo\"
+
+# Add to PATH (run as Administrator, or add manually via System Properties)
+$path = [Environment]::GetEnvironmentVariable("Path", "Machine")
+[Environment]::SetEnvironmentVariable("Path", "$path;C:\Program Files\muti-metroo", "Machine")
+
+# Verify installation (restart terminal first)
+muti-metroo.exe --version
+```
+
+  </TabItem>
+</Tabs>
+
+## Verify Your Download
+
+Verify your download with SHA256 checksums:
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/checksums.txt">Download Checksums</DownloadButton>
+</DownloadButtonGroup>
+
+<Tabs groupId="verify-os">
+  <TabItem value="unix" label="Linux / macOS" default>
+
+```bash
+# Download checksums
+curl -L -o checksums.txt __MUTI_METROO_RELEASE__/checksums.txt
+
+# Verify (example for linux-amd64)
+sha256sum -c checksums.txt --ignore-missing
+```
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+```powershell
+# Get the expected hash from checksums.txt (example: .exe)
+$expected = (Get-Content checksums.txt | Select-String "muti-metroo-windows-amd64.exe").ToString().Split()[0]
+
+# Calculate actual hash
+$actual = (Get-FileHash muti-metroo-windows-amd64.exe -Algorithm SHA256).Hash.ToLower()
+
+# Compare
+if ($expected -eq $actual) { "OK" } else { "MISMATCH" }
+
+# For DLL verification, use muti-metroo-windows-amd64.dll or muti-metroo-windows-arm64.dll instead
+```
+
+  </TabItem>
+</Tabs>
+
+## User Manual (PDF)
+
+A comprehensive PDF manual is available for offline use and printing:
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-user-manual.pdf" primary>
+    Download User Manual (PDF)
+  </DownloadButton>
+</DownloadButtonGroup>
+
+The user manual covers installation, configuration, features, and deployment in a single document.
+
+## Mutiauk
+
+A Linux-only TUN interface tool that transparently routes Layer 3 traffic through Muti Metroo's SOCKS5 proxy. Requires root. See the full [Mutiauk guide](/mutiauk) for details.
+
+<DownloadButtonGroup>
+  <DownloadButton href="__MUTIAUK_RELEASE__/mutiauk-linux-amd64" primary>
+    x86_64 (amd64)
+  </DownloadButton>
+  <DownloadButton href="__MUTIAUK_RELEASE__/mutiauk-linux-arm64">
+    ARM64
+  </DownloadButton>
+</DownloadButtonGroup>
+
+## Muti Metroo Manager
+
+A web dashboard for managing and monitoring your Muti Metroo mesh network. See the full [Muti Metroo Manager guide](/muti-metroo-manager) for details.
+
+<Tabs groupId="manager-os">
+  <TabItem value="macos" label="macOS" default>
+
+<DownloadButtonGroup>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-darwin-arm64" primary>
+    Apple Silicon
+  </DownloadButton>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-darwin-amd64">
+    Intel
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+  <TabItem value="linux" label="Linux">
+
+<DownloadButtonGroup>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-linux-amd64" primary>
+    x86_64 (amd64)
+  </DownloadButton>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-linux-arm64">
+    ARM64
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+<DownloadButtonGroup>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-windows-amd64.exe" primary>
+    x86_64 (amd64)
+  </DownloadButton>
+  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-windows-arm64.exe">
+    ARM64
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+</Tabs>
+
+## Previous Versions
+
+Previous releases are available on the [Releases page](https://github.com/postalsys/Muti-Metroo/releases).
+
+## Next Steps
+
+After installation, follow the [Quick Start Guide](/getting-started/quick-start) to set up your first Muti Metroo agent.
+

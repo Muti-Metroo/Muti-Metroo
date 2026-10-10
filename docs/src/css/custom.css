@@ -1,0 +1,180 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* Mole-inspired color scheme - warm orange/tan from the tool belt */
+:root {
+  --ifm-color-primary: #c4883a;
+  --ifm-color-primary-dark: #b07a34;
+  --ifm-color-primary-darker: #a67231;
+  --ifm-color-primary-darkest: #895e28;
+  --ifm-color-primary-light: #ca9550;
+  --ifm-color-primary-lighter: #cea05f;
+  --ifm-color-primary-lightest: #d9b580;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(196, 136, 58, 0.15);
+  --ifm-link-color: #a06b2d;
+  --ifm-navbar-background-color: #faf6f1;
+  --ifm-footer-background-color: #3d3d3d;
+}
+
+/* Hero section - light cream background so dark gray mole stands out */
+.hero--primary {
+  --ifm-hero-background-color: #f5ebe0;
+  --ifm-hero-text-color: #3d3d3d;
+}
+
+.hero--primary .button--secondary {
+  background-color: #c4883a;
+  border-color: #c4883a;
+  color: #fff;
+}
+
+.hero--primary .button--secondary:hover {
+  background-color: #b07a34;
+  border-color: #b07a34;
+}
+
+.hero--primary .button--outline {
+  color: #3d3d3d;
+  border-color: #3d3d3d;
+}
+
+.hero--primary .button--outline:hover {
+  background-color: rgba(61, 61, 61, 0.1);
+}
+
+/* For readability concerns, you should choose a lighter palette in dark mode. */
+[data-theme='dark'] {
+  --ifm-color-primary: #daa054;
+  --ifm-color-primary-dark: #d4924a;
+  --ifm-color-primary-darker: #cf8a43;
+  --ifm-color-primary-darkest: #b87535;
+  --ifm-color-primary-light: #e0ae65;
+  --ifm-color-primary-lighter: #e4b672;
+  --ifm-color-primary-lightest: #ecc992;
+  --docusaurus-highlighted-code-line-bg: rgba(218, 160, 84, 0.2);
+  --ifm-link-color: #daa054;
+  --ifm-navbar-background-color: #2d2d2d;
+  --ifm-footer-background-color: #1a1a1a;
+}
+
+/* Dark mode hero - darker warm brown so mole still visible */
+[data-theme='dark'] .hero--primary {
+  --ifm-hero-background-color: #4a3f35;
+  --ifm-hero-text-color: #f5ebe0;
+}
+
+[data-theme='dark'] .hero--primary .button--secondary {
+  background-color: #daa054;
+  border-color: #daa054;
+  color: #2d2d2d;
+}
+
+[data-theme='dark'] .hero--primary .button--secondary:hover {
+  background-color: #e0ae65;
+  border-color: #e0ae65;
+}
+
+[data-theme='dark'] .hero--primary .button--outline {
+  color: #f5ebe0;
+  border-color: #f5ebe0;
+}
+
+[data-theme='dark'] .hero--primary .button--outline:hover {
+  background-color: rgba(245, 235, 224, 0.1);
+}
+
+/* Download button styles */
+.download-button {
+  display: inline-block;
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none !important;
+  border-radius: 8px;
+  border: 2px solid var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+  background-color: transparent;
+  transition: all 0.2s ease;
+  min-width: 200px;
+  text-align: center;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.download-button p {
+  margin: 0;
+  padding: 0;
+}
+
+.download-button:hover {
+  background-color: var(--ifm-color-primary);
+  color: #fff;
+  text-decoration: none;
+}
+
+.download-button--primary {
+  background-color: var(--ifm-color-primary);
+  color: #fff;
+}
+
+.download-button--primary:hover {
+  background-color: var(--ifm-color-primary-dark);
+  border-color: var(--ifm-color-primary-dark);
+  color: #fff;
+}
+
+.download-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+/* Dark mode adjustments for download buttons */
+[data-theme='dark'] .download-button {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+}
+
+[data-theme='dark'] .download-button:hover {
+  background-color: var(--ifm-color-primary);
+  color: #1a1a1a;
+}
+
+[data-theme='dark'] .download-button--primary {
+  background-color: var(--ifm-color-primary);
+  color: #1a1a1a;
+}
+
+[data-theme='dark'] .download-button--primary:hover {
+  background-color: var(--ifm-color-primary-light);
+  border-color: var(--ifm-color-primary-light);
+}
+
+/* Tunnel diagram background */
+.tunnel-diagram {
+  padding: 0.5rem 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.4)),
+    url('/img/tunnel-bg.png') repeat-x center center;
+  background-size: auto, auto 100%;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .tunnel-diagram {
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)),
+    url('/img/tunnel-bg.png') repeat-x center center;
+  background-size: auto, auto 100%;
+}
+
+.tunnel-diagram > * {
+  padding: 1rem;
+}

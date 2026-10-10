@@ -1,0 +1,21 @@
+# Transit Agent - relays between client ingress and exit
+agent:
+  id: "bbbb000000000000bbbb000000000000"
+  display_name: "transit-node"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+peers:
+  - id: "eeee000000000000eeee000000000000"
+    transport: quic
+    address: "exit:4433"
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
+
+logging:
+  level: debug

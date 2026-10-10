@@ -1,0 +1,30 @@
+# Agent 6: Remote Site Exit (private networks + domain routes)
+agent:
+  id: "ffff666666666666ffff666666666666"
+  display_name: "agent6-remote"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+exit:
+  enabled: true
+  routes:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  domain_routes:
+    - "*.internal.local"
+    - "*.corp.example.com"
+
+shell:
+  enabled: true
+  whitelist: ["*"]
+
+file_transfer:
+  enabled: true
+  allowed_paths: ["*"]
+
+http:
+  enabled: true
+  address: ":8080"

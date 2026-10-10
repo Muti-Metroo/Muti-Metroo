@@ -1,0 +1,220 @@
+Category,Feature,Description,MinAgents,Complexity,GoIntegrationTests,E2EShellTests,Coverage,Priority,Notes
+Transport-QUIC,QUIC peer handshake (auto-cert),Two agents establish QUIC peer connection with auto-generated self-signed certs,2,L,"agent_chain::BasicConnectivity, agent_chain::StreamThroughMesh, chain::BasicConnectivity",T1-T2,Full,Low,Baseline -- exercised by every chain test
+Transport-QUIC,QUIC stream multiplexing,Many concurrent streams over a single QUIC connection,2,M,"agent_chain::LargeFileStream, chain::StreamLargeFile, chain::FullRelayStream",T6,Full,Low,Implicit in chain tests; FullRelayStream exercises a multi-MB relay across the chain
+Transport-QUIC,QUIC keepalive + idle handling,Keepalive frames keep idle connection alive past idle threshold,2,M,reconnect::*,-,Partial,Med,No explicit assertion that keepalives fire on schedule
+Transport-QUIC,QUIC custom ALPN,Connect with non-default protocol.alpn value (and with empty/disabled),2,L,-,-,None,Med,Protocol identifier feature -- never asserted in tests
+Transport-H2,H2 with TLS,HTTP/2 transport over TLS with default ALPN,2,M,"transport_relay::H2BidirectionalRelay, H2ConcurrentReadWrite, H2LargeDataTransfer",-,Full,Low,Single-listener tests cover the wire
+Transport-H2,H2 plaintext (behind reverse proxy),H2 listener with plaintext: true; cleartext h2c upstream of nginx/etc,2,M,-,-,None,High,Common production deployment pattern -- untested
+Transport-H2,H2 custom path,Listener path != /mesh,2,L,-,-,None,Low,Trivial but unverified
+Transport-H2,H2 custom protocol header,Custom http_header value (and disabled),2,L,-,-,None,Low,Protocol identifier customization
+Transport-H2,H2 TLS fingerprinting (uTLS preset),Client hello matches Chrome/Firefox/Safari etc fingerprint preset,2,M,-,-,None,Med,uTLS feature unique to this project
+Transport-WS,WS with TLS (wss://),WebSocket transport over TLS,2,M,"transport_relay::WSBidirectionalRelay, WSConcurrentReadWrite",-,Full,Low,Bidirectional + concurrent R/W only; no large-data variant exists for WS (H2 has one)
+Transport-WS,WS plaintext (ws:// behind reverse proxy),WS listener with plaintext: true; cleartext through nginx,2,M,-,-,None,High,Common production deployment pattern -- untested
+Transport-WS,WS custom path + subprotocol,Non-default path and ws_subprotocol values,2,L,-,-,None,Low,Protocol identifier customization
+Transport-WS,WS through HTTP CONNECT proxy (no auth),Peer dials wss:// through corporate http proxy,2,H,-,-,None,High,Documented feature with config example -- never tested
+Transport-WS,WS through HTTP CONNECT proxy (with auth),HTTP proxy with username/password (Basic),2,H,-,-,None,High,Documented feature with config example -- never tested
+Transport-WS,WS through nginx reverse proxy,Real reverse proxy in front of plaintext WS listener (end-to-end),2,M,-,-,None,Med,Validates docs/deploy patterns
+Transport-WS,WS TLS fingerprinting,uTLS fingerprint when establishing wss:// outbound,2,M,-,-,None,Med,Same as H2 fingerprinting
+Transport-Mixed,Mixed-transport chain (QUIC->H2->WS->QUIC),Routes traverse heterogeneous transports end to end,4,H,multi_transport::MixedTransportChain,-,Full,Low,Already covered
+Transport-Mixed,SOCKS5 through mixed-transport mesh,Real SOCKS5 traffic over heterogeneous chain,4,H,multi_transport::SOCKS5ThroughMesh,-,Full,Low,Already covered
+Transport-TLS,Strict TLS (CA verification),tls.strict + tls.ca; reject untrusted peer,2,M,-,-,None,High,Security-critical -- untested
+Transport-TLS,mTLS handshake (mutual auth),tls.mtls=true with valid client cert,2,M,-,-,None,High,Security-critical -- untested
+Transport-TLS,mTLS rejection (missing client cert),Client connects without cert and is rejected,2,M,-,-,None,High,Security-critical -- untested
+Transport-TLS,Per-listener TLS override,Listener-level cert/key overrides global tls,2,L,-,-,None,Low,Trivial config path
+Transport-TLS,Per-peer TLS override,Peer-level CA/strict overrides global tls,2,L,-,-,None,Low,Trivial config path
+SOCKS5,TCP CONNECT no-auth,Anonymous SOCKS5 client through mesh,4,L,"agent_chain::SOCKS5Connectivity, agent_chain::DialThroughMesh, socks5_auth::ThroughMesh",T5,Full,Low,Baseline; DialThroughMesh exercises Agent.DialContext (the SOCKS5 dialer interface) directly
+SOCKS5,Username/password auth (plaintext),SOCKS5 with users[].password (deprecated mode),2,L,socks5_auth::Authentication,-,Full,Low,Edge mode
+SOCKS5,Username/password auth (bcrypt),SOCKS5 with users[].password_hash; recommended,2,L,"socks5_auth::Authentication, AuthThroughMesh",-,Full,Low,Already covered
+SOCKS5,Auth invalid credentials rejection,Wrong password / wrong username -> auth fail,2,L,socks5_auth::Authentication,-,Full,Low,Already covered
+SOCKS5,Concurrent connections,Many parallel SOCKS5 streams over same mesh,4,M,-,T6,Partial,Low,Only 5 parallel in e2e -- could push higher
+SOCKS5,Connection limit enforcement,max_connections rejects overflow,2,M,-,-,None,Med,Limit field is configurable but never asserted
+SOCKS5,Half-close (FIN_WAIT),CloseWrite on client side propagates to upstream,4,M,"halfclose::StreamBehavior, BidirectionalData",-,Full,Low,Already covered
+SOCKS5,Bidirectional ping-pong,Long bidirectional flows with both sides closing,4,M,halfclose::BidirectionalData,-,Full,Low,Already covered
+SOCKS5,Large file streaming through mesh,Multi-MB file via SOCKS5 over multi-hop chain,4,M,halfclose::LargeDataThenClose,-,Full,Low,Already covered
+SOCKS5,Connection refused upstream,Exit dial fails -> SOCKS5 returns proper error,2,L,-,-,None,Med,Negative path
+SOCKS5,Slow upstream / backpressure,Slow consumer triggers stream-level backpressure,2,H,-,-,None,Med,Stress / fairness
+SOCKS5,Stream count cleanup after close,No leaked streams after SOCKS5 connections drop,2,M,-,T7,Partial,Low,Covered in e2e but not in Go tests
+UDP-Relay,SOCKS5 UDP_ASSOCIATE basic,UDP datagram round-trip via SOCKS5 UDP relay,2,H,udp_relay::BasicAssociate,-,Full,High,Echo server receive-counter assertion verifies real mesh delivery (not local bounce)
+UDP-Relay,DNS query through UDP relay,Real DNS query (dig) via socks5 UDP through mesh,2,H,udp_relay::DNSQuery,-,Full,High,Sends real DNS query bytes through SOCKS5 UDP and verifies they round-trip with framing intact
+UDP-Relay,Multiple concurrent UDP associations,Many associations on one TCP control channel,2,H,udp_relay::ConcurrentAssociations,-,Full,Med,5 parallel UDP_ASSOCIATE flows with 20ms stagger; echo server must receive all 5 datagrams
+UDP-Relay,UDP idle timeout cleanup,Association expires after idle_timeout,2,M,-,-,None,Med,Lifecycle
+UDP-Relay,Max associations limit,max_associations rejects overflow,2,M,udp_relay::MaxAssociationsLimit,-,Full,Med,Exit MaxAssociations=2 means only 2 of 3 concurrent flows can deliver
+UDP-Relay,Max datagram size enforcement,max_datagram_size truncation/rejection,2,L,udp_relay::MaxDatagramSize,-,Full,Low,Oversize datagram silently dropped at exit; small follow-up still works
+UDP-Relay,Frag rejection (frag > 0),SOCKS5 UDP fragment field nonzero -> rejected,2,L,udp_relay::FragRejection,-,Full,Low,Hand-built FRAG=1 datagram silently dropped at ingress
+UDP-Relay,Association tied to TCP control conn,Closing TCP control channel kills all associations,2,M,udp_relay::AssociationTiedToTCPClose,-,Full,Med,Closing TCP control conn tears down the UDP relay socket; subsequent datagrams produce no echo
+Exit-CIDR,CIDR allow (single range),TCP dial to allowed destination succeeds,2,L,exit_cidr::CIDRFiltering,T5,Full,Low,Already covered
+Exit-CIDR,CIDR deny (rejection),Dial to non-allowed destination is refused,2,L,exit_cidr::CIDRFiltering,-,Full,Low,Already covered
+Exit-CIDR,Multiple CIDR ranges,Several allowed CIDRs combined,2,L,exit_cidr::MultipleRanges,-,Full,Low,Already covered
+Exit-CIDR,Default route 0.0.0.0/0,Catch-all route works alongside specific routes,2,L,multi_transport::RouteLongestPrefixMatch,-,Partial,Low,LPM already validated
+Exit-CIDR,IPv6 CIDR routes,IPv6 destinations via ::/0 or specific v6 prefix,2,L,-,-,None,Med,IPv6 path likely untested
+Exit-Domain,Domain exact match,exit.domain_routes with example.com,2,M,exit_domain::ExactMatch,-,Full,High,Uses in-process DNS responder; ingress LookupDomain matches the propagated route and forwards the verbatim QNAME to the exit
+Exit-Domain,Domain wildcard pattern,*.example.com matches subdomains,2,M,exit_domain::Wildcard,-,Full,High,Two distinct subdomains share the same propagated *.test.example route end-to-end. Negative wildcard matching covered by routing/domain_test.go unit tests
+Exit-Domain,DNS resolved at exit,"Ingress sends domain string, exit resolves locally",2,M,exit_domain::DNSResolvedAtExit,-,Full,High,In-process UDP DNS responder counts queries to prove the exit (not ingress) issued the lookup
+Exit-Domain,Configurable DNS servers,exit.dns.servers + timeout used for resolution,2,L,exit_domain::DNSResolvedAtExit,-,Full,Med,Same test verifies the configured DNS server received the query and saw the expected QNAME
+Exit,Dial failure handling,Dial to unreachable address -> proper STREAM_OPEN_ERR,2,L,-,-,None,Med,Negative path
+Routing,Periodic advertisement,Routes re-flooded every advertise_interval,2,L,-,-,None,Low,Implicit; could explicitly assert timing
+Routing,Triggered advertisement (POST /routes/advertise),Manual trigger via HTTP API,2,L,-,T11,Full,Low,Covered in e2e
+Routing,Longest-prefix match,More-specific route wins over less-specific,2,M,multi_transport::RouteLongestPrefixMatch,-,Full,Low,Already covered
+Routing,Metric tiebreaker,Equal-prefix routes pick lowest metric,2,M,-,-,None,Med,Untested
+Routing,Multi-hop propagation (4 hops),Routes propagate end-to-end through chain,4,M,"agent_chain::RouteAdvertisement, e2e_stream::ChainConnectivity",T4,Full,Low,Already covered
+Routing,Loop prevention (SeenBy),Cyclic topology does not infinite-loop,3,M,-,-,None,Med,Important correctness property -- untested
+Routing,Max hops enforcement (TTL),Routes exceeding max_hops are dropped,5+,M,-,-,None,Med,Untested
+Routing,Route TTL expiry,Route disappears after route_ttl with no refresh,2,M,-,-,None,Med,Lifecycle
+Routing,Route withdrawal on peer disconnect,Routes removed when peer disconnects,2,M,reconnect::RouteWithdrawal,T12,Full,Low,Already covered
+Routing,Route re-propagation after wake,After mesh-wide wake routes return,4+,H,sleep::FullCycle,T11,Full,Low,Already covered
+Routing,Stale route cleanup after exit crash,Exit node killed -> routes expire on ingress,4,M,-,T12,Partial,Med,Covered in e2e only
+Routing,Dynamic route add via CLI,muti-metroo route add,1,L,-,-,None,Med,CLI command untested
+Routing,Dynamic route remove via CLI,muti-metroo route remove,1,L,-,-,None,Med,CLI command untested
+Routing,Dynamic route list via CLI,muti-metroo route list,1,L,-,-,None,Low,CLI command untested
+Routing,Dynamic route via HTTP API (POST /routes/manage),Add/remove/list via JSON API,1,L,-,-,None,Med,Untested
+Routing,Remote dynamic route mgmt,/agents/{id}/routes/manage proxied to remote agent,2,M,-,-,None,Med,Untested
+Mesh-Hosts,Mesh-host registry add/remove/list,POST /hosts/manage and muti-metroo host CLI; config seed and dynamic merge,1,L,-,-,None,Med,Unit-tested in agent and hosts packages; integration coverage missing
+Mesh-Hosts,Mesh-host TLD suffix add/remove/list,POST /hosts/suffixes/manage and muti-metroo host suffix CLI; config seed plus runtime mutations,1,L,agent::SuffixReplayBeforeHosts agent::SuffixRemoveOfConfigSeed,-,Partial,Med,Replay ordering and config-seed-removal covered in agent unit tests; HTTP path lacks integration coverage
+Stream,STREAM_OPEN/ACK exchange,Open handshake with ephemeral key exchange,2,M,e2e_stream::*,-,Full,Low,Implicit in every stream
+Stream,FIN_WRITE half-close,Sender done writing,2,M,halfclose::StreamBehavior,-,Full,Low,Already covered
+Stream,FIN_READ half-close,Sender done reading (rare),2,M,-,-,None,Low,Edge flag
+Stream,Stream count tracking,No leaked streams in healthz,2,M,-,T7,Partial,Med,Could be Go test
+Stream,Frame ordering after race fix,STREAM_DATA before STREAM_CLOSE preserved,2,M,peer::ConcurrentClose* (unit),-,Partial,Low,Recently fixed; unit tests cover
+Stream,Stream open timeout,STREAM_OPEN with no ACK times out at 30s,2,M,-,-,None,Med,Untested
+Stream,Max streams per peer,Reject when limit reached,2,M,-,-,None,Med,Untested
+Stream,Max total streams,Reject when global limit reached,2,M,-,-,None,Med,Untested
+E2E-Crypto,X25519 + ChaCha20 round-trip,Encrypted data round-trips correctly,2,H,e2e_stream::*,-,Full,Low,Implicit
+E2E-Crypto,Transit cannot decrypt verification,Sniff middle agent and confirm ciphertext only,4,H,-,-,None,High,Strong security claim -- never explicitly asserted
+E2E-Crypto,Per-stream session key uniqueness,Two parallel streams get different keys,2,H,-,-,None,Med,Untested
+Peer,Handshake (PEER_HELLO),Agent ID + version exchange,2,L,*::Connectivity,-,Full,Low,Implicit
+Peer,Reconnect with exponential backoff,Disconnect then reconnect succeeds,2,M,reconnect::PeerReconnection,-,Full,Low,Already covered
+Peer,Max retries enforcement,reconnect.max_retries stops attempts,2,M,reconnect::MaxRetries,-,Full,Low,Already covered
+Peer,Multi-hop reconnect through middle,A-B-C with B restarting,3,M,reconnect::MultiHop,-,Full,Low,Already covered
+Peer,Idle timeout disconnect,No keepalive for connections.timeout -> disconnect,2,M,-,-,None,Med,Untested
+Peer,Simultaneous connect resolution,Two agents dial each other at once,2,H,-,-,None,Med,Race-prone scenario -- untested
+Peer,RTT measurement,Keepalive RTT exposed via API,2,L,-,-,None,Low,Observability
+Peer,Dynamic add/remove via HTTP API,POST /peers/manage add/remove/list,2,M,peer::DynamicAddRemoveList,-,Full,Med,Ephemeral peer mgmt -- add dials and handshakes; remove tears down and cancels reconnect; list+negative cases
+Peer,Remote dynamic peer mgmt,/agents/{id}/peers/manage proxied to remote agent,2,M,-,-,None,Med,Control-channel proxy path untested
+Listener,Dynamic add/remove via HTTP API,POST /listeners/manage add/remove/list,1,M,-,-,Partial,Med,"Unit-level in internal/agent: TestAgent_ManageListener (add binds+lists+replace+remove, config write-protect, negative cases) and TestAgent_ManageListener_ReplayAcrossRestart; cross-agent dial-into-dynamic-listener not yet integration-tested"
+Listener,Remote dynamic listener mgmt,/agents/{id}/listeners/manage proxied to remote agent,2,M,-,-,None,Med,Control-channel proxy path untested
+Listener,Dynamic listener survives sleep/wake,exitSleep restarts config + dynamic listeners from registry,2,M,-,-,None,Med,Registry-driven restart path untested at integration level
+Sleep,Mesh-wide sleep cycle,Sleep + wake propagates and traffic resumes,5,H,sleep::FullCycle,T10,Full,Low,Already covered
+Sleep,Echo through mesh after sleep cycle,Real traffic survives sleep/wake,5,H,sleep::EchoThroughMesh,T11,Full,Low,Already covered
+Sleep,Polling listening windows,Sleeping agent comes online for poll_duration on schedule,2,H,-,-,None,High,Core sleep feature -- untested
+Sleep,Signed sleep command (Ed25519),Wrong signature rejected; valid accepted,2,H,-,-,None,High,Security-critical -- untested
+Sleep,Signed wake command (Ed25519),Same as sleep but wake,2,H,-,-,None,High,Security-critical -- untested
+Sleep,Command deduplication (origin+seq),Replayed sleep command ignored,2,M,-,-,None,Med,Untested
+Sleep,State persistence across restart,sleep_state.json restored after process restart,1,M,-,-,None,Med,Untested
+Sleep,Deterministic listening windows,Wake schedule derived from agent_id,2,H,-,-,None,Med,Protocol identifier feature
+Sleep,/sleep/status response shape,GET /sleep/status returns expected fields,1,L,-,T10,Partial,Low,Covered in e2e
+Shell,One-off command,whoami round-trip,2,M,shell::OneOffCommand,-,Full,Low,Already covered
+Shell,Command with arguments,echo hello world,2,M,shell::CommandWithArgs,-,Full,Low,Already covered
+Shell,Stderr separation,stdout and stderr distinguished in output,2,M,shell::CommandWithStderr,-,Full,Low,Already covered
+Shell,Exit code propagation,Non-zero exit propagates to client,2,M,shell::NonZeroExitCode,-,Full,Low,Already covered
+Shell,Streaming output,Multi-line for-loop output streams progressively,2,M,shell::StreamingOutput,-,Full,Low,Already covered
+Shell,Password auth success,Correct password accepted,2,M,shell::AuthSuccess,-,Full,Low,Already covered
+Shell,Password auth failure,Wrong password rejected,2,M,shell::AuthFailure,-,Full,Low,Already covered
+Shell,Missing password rejection,No password supplied when required,2,M,shell::AuthMissingPassword,-,Full,Low,Already covered
+Shell,Whitelist allow,Whitelisted command runs,2,M,shell::WhitelistAllowed,-,Full,Low,Already covered
+Shell,Whitelist deny,Non-whitelisted command rejected,2,M,shell::WhitelistDenied,-,Full,Low,Already covered
+Shell,Max sessions limit,3rd session rejected when max=2,2,M,shell::MaxSessions,-,Full,Low,Already covered
+Shell,TTY session open,Interactive PTY session opens,2,H,shell::TTYSessionOpen,-,Partial,Med,Only opening verified -- no real I/O
+Shell,TTY interactive I/O,vim/htop/top style real interactive session,2,H,-,-,None,High,Core --tty feature mostly untested
+Shell,Signal forwarding (Ctrl-C),SIGINT delivered to remote process,2,H,-,-,None,Med,Untested
+Shell,Long-running command termination,Process killed when stream closes,2,M,-,-,None,Med,Resource hygiene
+Shell,Disabled state rejection,shell.enabled=false returns error,2,L,-,-,None,Low,Negative path
+Shell,Streaming via WebSocket upgrade,/agents/{id}/shell over WebSocket from a remote agent,3,H,-,-,None,High,Distinct from in-process shell
+File,Basic upload + download,Round-trip a file via HTTP API,2,M,file_transfer::BasicUploadDownload,-,Full,Low,Already covered
+File,Large file with checksum,1MB+ with SHA256 verification,2,M,file_transfer::LargeFile,-,Full,Low,Already covered
+File,Password authentication,Bcrypt password protects upload/download,2,M,file_transfer::Authentication,-,Full,Low,Already covered
+File,Allowed paths globs,/tmp /data/** etc enforcement,2,M,file_transfer::PathRestrictions,-,Full,Low,Already covered
+File,Max file size enforcement,Reject above max_file_size,2,L,file_transfer::MaxFileSize,-,Full,Low,Already covered
+File,Resume from offset,Partial download with offset,2,M,file_transfer::ResumeDownload,-,Full,Low,Already covered
+File,Rate limiting,Bandwidth limit slows transfer to expected rate,2,M,file_transfer::RateLimit,-,Full,Low,Already covered
+File,Disabled state rejection,file_transfer.enabled=false returns error,2,L,file_transfer::Disabled,-,Full,Low,Already covered
+File,Directory upload (tar+gz),Upload a directory tree,2,M,file_transfer::DirectoryUpload,-,Full,High,"Client uses filetransfer.TarDirectory; server untars into the allowed path"
+File,Directory download (tar+gz),Download a directory tree,2,M,file_transfer::DirectoryDownload,-,Full,High,"Server streams plain tar (streamReader decompresses gzip internally); test extracts with tar.NewReader"
+File,Permission preservation,Mode bits preserved on round-trip,2,M,file_transfer::DirectoryPermissions,-,Full,Med,0644/0600/0755 files survive upload and download round-trip
+File,Browse / list directory,POST /agents/{id}/file/browse,2,L,-,-,None,Med,Endpoint with no test
+File,Concurrent uploads,Multiple uploads in parallel do not corrupt,2,M,-,-,None,Med,Concurrency
+ICMP,Echo request basic,muti-metroo ping <agent> <ip> single echo,2,M,icmp::Basic,-,Full,High,SOCKS5 ICMP_ECHO round-trip via 4-agent chain to 127.0.0.1; verifies sequence and payload (identifier is rewritten by unprivileged ICMP socket so not asserted)
+ICMP,Echo with count + interval,-c 4 -i 500ms semantics,2,L,icmp::CountAndInterval,-,Full,Med,4 echoes with 50ms interval; all replies returned in order
+ICMP,Per-echo timeout,echo_timeout enforcement,2,L,-,-,None,Low,CLI-level concern; protocol layer just sends echoes
+ICMP,Statistics output (RTT/loss),min/avg/max + loss percentage,2,M,-,-,None,Med,CLI-level concern; would require muti-metroo ping CLI test
+ICMP,E2E encrypted echoes,ChaCha20 wrapping of echo frames,2,H,icmp::E2EEncrypted,-,Full,Med,256-byte payload round-trips through ChaCha20-Poly1305 session key (crypto correctness via internal/crypto unit tests)
+ICMP,Max sessions limit,Reject 101st session when max=100,2,L,icmp::MaxSessionsLimit,-,Full,Low,Exit MaxSessions=2; opens 3 sessions sequentially and verifies exactly 2 succeed
+ICMP,WebSocket /agents/{id}/icmp,Remote ICMP via WebSocket upgrade,2,H,-,-,None,High,Out of scope for this PR; SOCKS5-layer tests cover the same code paths
+ICMP,Disabled state rejection,icmp.enabled=false returns error,2,L,icmp::DisabledRejection,-,Full,Low,Sets cfg.ICMP.Enabled=false; SOCKS5 server rejects with ReplyCmdNotSupported
+Forward,Endpoint registration,Static endpoint declared in config visible in mesh,2,M,forward::StaticEndToEnd,-,Full,High,Verified by 4-hop chain test (route propagation from D to A)
+Forward,Listener registration,Static listener accepts connections,2,M,"forward::StaticEndToEnd, DynamicAddRemoveList",-,Full,High,Static via fixture; dynamic via /forward/manage
+Forward,End-to-end forwarding flow,Client -> listener -> endpoint -> local service,2,M,"forward::StaticEndToEnd, HalfClose, DynamicAddRemoveList",-,Full,High,Most-requested user feature
+Forward,Multi-hop forward through mesh,Listener and endpoint on far ends of 4-hop chain,4,H,forward::StaticEndToEnd,-,Full,High,Same test as 138 -- 4-hop chain by default
+Forward,E2E encryption on forward streams,X25519 between listener and endpoint,2,H,-,-,None,Med,Implicit in stream protocol but unverified for forward
+Forward,Max connections per listener,max_connections rejects overflow,2,L,forward::MaxConnectionsLimit,-,Full,Med,Verifies limit=2 rejects 3rd connection
+Forward,Dynamic add/remove via CLI,muti-metroo forward add/remove/list,2,M,-,-,None,Med,CLI untested
+Forward,Dynamic add/remove via HTTP API,POST /forward/manage,2,M,forward::DynamicAddRemoveList,-,Full,Med,Add/list/remove + traffic + negative remove
+Forward,Remote dynamic forward mgmt,/agents/{id}/forward/manage,2,M,-,-,None,Med,API untested
+Forward,Dynamic endpoint add/remove via CLI,muti-metroo forward endpoint add/remove/list,2,M,-,-,None,Med,CLI untested
+Forward,Dynamic endpoint add/remove via HTTP API,POST /forward/endpoints/manage,2,M,forward::DynamicEndpointAddRemoveList,-,Full,Med,Add/list/remove + traffic + negative remove (exit side)
+Forward,Remote dynamic endpoint mgmt,/agents/{id}/forward/endpoints/manage,2,M,forward::DynamicEndpointAddRemoveList,-,Full,Med,Adds endpoint on exit via remote control path through ingress agent
+Forward,Missing key error,Listener with no matching endpoint returns error,2,L,forward::MissingKeyError,-,Full,Low,Listener accepts but DialForward fails immediately
+Forward,Ephemeral expose endpoints over SOCKS5,Operator runs an expose session over the SOCKS5 CmdExpose stream and tunnels DATA bidirectionally; key dies with the connection,4,H,expose::EndToEnd,-,Full,High,SOCKS5 handshake auth; backend abstraction in forward.Handler
+Forward,Same-agent forward self-loop,Listener and forward endpoint (TCP or expose) on the same agent; bypasses mesh wire protocol via dialForwardLocal,1,M,"forward::SameAgentSelfLoop, expose::SingleAgentLoopback",-,Full,High,Regression guard for the bug where DialForward looked up local-only routes then tried peerMgr.GetPeer
+HTTP-Health,GET /health 200,Liveness probe,1,L,-,T1,Full,Low,Covered in e2e
+HTTP-Health,GET /healthz JSON shape,Detailed JSON with peer/stream/route counts,1,L,-,T2,Partial,Low,e2e checks fields but Go side does not
+HTTP-Health,GET /ready,Readiness probe,1,L,-,-,None,Low,Untested
+HTTP-Distributed,GET /agents,List all known agents,2,L,-,-,None,Med,No test
+HTTP-Distributed,GET /agents/{id},Get status from specific agent,2,L,-,-,None,Med,No test
+HTTP-Distributed,GET /agents/{id}/routes,Get route table from remote agent,2,L,-,-,None,Med,No test
+HTTP-Distributed,GET /agents/{id}/peers,Get peer list from remote agent,2,L,-,-,None,Med,No test
+HTTP-Distributed,POST /api/mesh-test,Mesh connectivity test endpoint,2+,M,-,T3,Full,Low,Covered in e2e
+HTTP-Dashboard,GET /api/topology,Mesh topology graph,2+,M,-,T8,Full,Low,Covered in e2e
+HTTP-Dashboard,GET /api/dashboard,Aggregated dashboard data,2+,M,-,T4,Full,Low,Covered in e2e
+HTTP-Dashboard,GET /api/nodes,Node information list,2+,M,-,T9,Full,Low,Covered in e2e
+HTTP-Mgmt,POST /sleep,Trigger mesh sleep,1,M,-,T10,Full,Low,Covered in e2e
+HTTP-Mgmt,POST /wake,Trigger mesh wake,1,M,-,T10,Full,Low,Covered in e2e
+HTTP-Mgmt,GET /sleep/status,Read current sleep state,1,L,-,T10,Full,Low,Covered in e2e
+HTTP-Mgmt,POST /routes/advertise,Trigger immediate advertise,1,L,-,T11,Full,Low,Covered in e2e
+HTTP-Mgmt,POST /routes/manage,Local dynamic route management,1,L,-,-,None,Med,Untested
+HTTP-Mgmt,POST /forward/manage,Local dynamic forward management,1,L,-,-,None,Med,Untested
+HTTP-Mgmt,POST /display-name/manage,Set/get display name dynamically,1,L,-,-,None,Low,Untested
+HTTP-WebSocket,WS upgrade /agents/{id}/shell,Management command session via WebSocket from another agent,3,H,-,-,None,High,Required by Muti Metroo Manager UI -- untested
+HTTP-WebSocket,WS upgrade /agents/{id}/icmp,Remote ICMP session via WebSocket from another agent,3,H,-,-,None,High,Required by Muti Metroo Manager UI -- untested
+HTTP-File,POST /agents/{id}/file/upload,Multipart upload through HTTP API,2,M,file_transfer::*,-,Full,Low,Covered
+HTTP-File,POST /agents/{id}/file/download,Streaming download through HTTP API,2,M,file_transfer::*,-,Full,Low,Covered
+HTTP-File,POST /agents/{id}/file/browse,Filesystem browse on remote agent,2,M,-,-,None,Med,Endpoint untested
+HTTP-Auth,Bearer token via Authorization header,token_hash protects /api/* and /agents/*,1,L,http_auth::BearerHeaderAllowed,-,Full,High,End-to-end through agent.Agent + health.requireAuth middleware
+HTTP-Auth,Bearer token via ?token= query,Same auth via query string,1,L,http_auth::QueryTokenAllowed,-,Full,Med,Same fixture as BearerHeaderAllowed but with ?token= form
+HTTP-Auth,Health endpoints exempt from auth,/health /healthz /ready bypass token check,1,L,http_auth::HealthExempt,-,Full,High,Asserts /health /healthz /ready / /logo.png all bypass the bearer gate
+HTTP-Auth,Invalid token rejection,Wrong token returns 401,1,L,"http_auth::InvalidTokenRejected, http_auth::MissingTokenRejected",-,Full,High,Wrong token (header + query) and missing token both return 401
+HTTP-Auth,Minimal mode,http.minimal=true disables non-health endpoints,1,L,http_auth::MinimalMode,-,Full,Med,Asserts /api/dashboard 404 + /health 200
+HTTP-Auth,Endpoint group toggle (pprof),http.pprof=false returns 404,1,L,http_auth::PprofDisabled,-,Full,Low,Other endpoint groups remain available
+HTTP-Auth,Endpoint group toggle (dashboard),http.dashboard=false returns 404,1,L,http_auth::DashboardDisabled,-,Full,Low,Other endpoint groups remain available
+HTTP-Auth,Endpoint group toggle (remote_api),http.remote_api=false returns 404,1,L,http_auth::RemoteAPIDisabled,-,Full,Low,Other endpoint groups remain available
+HTTP-Auth,Disabled endpoint logging,Disabled endpoints log access at debug level,1,L,-,-,None,Low,Untested
+MgmtKey,Encrypted NodeInfo flooding,public_key set -> NodeInfo encrypted before flood,2,H,-,-,None,High,Whole feature has zero integration coverage
+MgmtKey,Encrypted route paths,AS-path encrypted before flood,2,H,-,-,None,High,Whole feature has zero integration coverage
+MgmtKey,Operator-only decryption,Only node with private_key can decrypt path,2,H,-,-,None,High,Topology compartmentalization claim
+MgmtKey,Field agent without private key,Field nodes can encrypt but not decrypt,2,H,-,-,None,High,Untested
+EmbedConfig,XOR encode/decode round trip,Embedded YAML extracted from binary,1,L,-,-,None,Med,Likely covered by unit tests; verify
+EmbedConfig,Single-file deployment runtime,Binary with embedded config starts without external file,1,M,-,-,None,Med,End-to-end CLI test
+EmbedConfig,Embedded > external precedence,Embedded config beats --config flag,1,L,-,-,None,Low,Behavior contract
+EmbedConfig,default_action: run auto-start,Binary started without args runs the agent,1,L,-,-,None,Med,Behavior contract
+CLI-Tooling,init creates data dir + identity,Fresh init produces working agent_id and key,0,L,-,-,None,Med,No test
+CLI-Tooling,setup wizard end-to-end,Interactive wizard produces valid embedded binary,0,H,-,-,None,Med,Hard to test interactively
+CLI-Tooling,hash generates valid bcrypt,muti-metroo hash output verifies as valid bcrypt,0,L,-,-,None,Low,Quick CLI test
+CLI-Tooling,cert ca/agent/client/info,Generate full chain and verify chain,0,M,-,-,None,Med,Cert generation untested in integration
+CLI-Tooling,management-key generate/public,Roundtrip generate then derive public,0,L,-,-,None,Low,Quick CLI test
+CLI-Tooling,signing-key generate/public,Roundtrip generate then derive public,0,L,-,-,None,Low,Quick CLI test
+CLI-Tooling,mesh-test CLI command,muti-metroo mesh-test against running mesh,2+,M,-,-,None,Med,Untested -- e2e only hits the API
+CLI-Tooling,route add/remove/list CLI,Dynamic CIDR routes via CLI,1,L,-,-,None,Med,Untested
+CLI-Tooling,forward add/remove/list CLI,Dynamic forwards via CLI,2,M,-,-,None,Med,Untested
+CLI-Tooling,display-name set/get CLI,Dynamic display name via CLI,1,L,-,-,None,Low,Untested
+CLI-Tooling,shell --tty CLI end-to-end,muti-metroo shell --tty against running mesh,2,H,-,-,None,Med,Currently only tested at API layer
+CLI-Tooling,ping CLI end-to-end,muti-metroo ping against running mesh,2,M,-,-,None,High,No coverage of the entire ICMP path
+CLI-Tooling,upload CLI end-to-end,muti-metroo upload against running mesh,2,M,-,-,None,Med,Currently only tested at API layer
+CLI-Tooling,download CLI end-to-end,muti-metroo download against running mesh,2,M,-,-,None,Med,Currently only tested at API layer
+CLI-Tooling,probe command,Connectivity probe between agents,1+,M,-,-,None,Low,Untested
+Service,Service install (Linux systemd),muti-metroo service install + status round trip,1,H,-,-,None,Low,Out of scope -- platform-specific
+Service,Service install (macOS launchd),Same on macOS,1,H,-,-,None,Low,Out of scope
+Service,Service install (Windows),Same on Windows,1,H,-,-,None,Low,Out of scope
+Resilience,Exit node crash recovery,Stop and restart exit node mid-traffic,4,M,-,T12,Full,Low,Already covered
+Resilience,Mid-stream peer disconnect,Stream survives transient peer drop,2,M,-,-,None,Med,Untested
+Resilience,Concurrent Sleep/Wake races,Two callers do not double-fire callbacks,1,H,sleep::Concurrent* (unit),-,Partial,Low,Recently fixed; unit covered
+Resilience,Concurrent Close + frame send,Close races with readLoop frame send,1,H,peer::ConcurrentClose* (unit),-,Partial,Low,Recently fixed; unit covered
+Resilience,Network packet loss / chaos,Lossy network injection,2,H,-,-,None,Low,Chaos package exists but no integration test

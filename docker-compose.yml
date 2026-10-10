@@ -1,0 +1,130 @@
+services:
+  # Test runner service
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - ./coverage:/app/coverage
+    command: >
+      sh -c "go test -v -race -coverprofile=/app/coverage/coverage.out ./... &&
+             go tool cover -func=/app/coverage/coverage.out"
+
+  # Build verification
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["--version"]
+
+  # 5-agent linear-chain mesh testbed with mixed transports.
+  #
+  # Topology (left dials right; transport is the listener side's protocol):
+  #
+  #   agent1 --ws--> agent2 --h2--> agent3 --quic--> agent4 --ws--> agent5
+  #   (entry)        (transit)      (transit)        (transit)      (exit)
+  #
+  # Roles:
+  #   agent1: SOCKS5 ingress on host port 1090
+  #           Forward endpoint key="host-1337" -> host.docker.internal:1337
+  #   agent5: Exit (0.0.0.0/0)
+  #           Forward listener key="host-1337" on host port 2777
+
+  # Agent 1: SOCKS5 ingress + forward endpoint, dials agent2 over WebSocket
+  agent1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muti-metroo-agent1
+    hostname: agent1
+    volumes:
+      - ./testbed/agent1/data:/app/data
+      - ./testbed/agent1/config.yaml:/app/config.yaml:ro
+      - ./testbed/certs:/app/certs:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "1090:1080"   # SOCKS5
+      - "8091:8080"   # HTTP API
+    networks:
+      - mesh
+    depends_on:
+      - agent2
+
+  # Agent 2: ws listener (for agent1), dials agent3 over h2
+  agent2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muti-metroo-agent2
+    hostname: agent2
+    volumes:
+      - ./testbed/agent2/data:/app/data
+      - ./testbed/agent2/config.yaml:/app/config.yaml:ro
+      - ./testbed/certs:/app/certs:ro
+    ports:
+      - "8092:8080"   # HTTP API
+    networks:
+      - mesh
+    depends_on:
+      - agent3
+
+  # Agent 3: h2 listener (for agent2), dials agent4 over QUIC
+  agent3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muti-metroo-agent3
+    hostname: agent3
+    volumes:
+      - ./testbed/agent3/data:/app/data
+      - ./testbed/agent3/config.yaml:/app/config.yaml:ro
+      - ./testbed/certs:/app/certs:ro
+    ports:
+      - "8093:8080"   # HTTP API
+    networks:
+      - mesh
+    depends_on:
+      - agent4
+
+  # Agent 4: QUIC listener (for agent3), dials agent5 over WebSocket
+  agent4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muti-metroo-agent4
+    hostname: agent4
+    volumes:
+      - ./testbed/agent4/data:/app/data
+      - ./testbed/agent4/config.yaml:/app/config.yaml:ro
+      - ./testbed/certs:/app/certs:ro
+    ports:
+      - "8094:8080"   # HTTP API
+    networks:
+      - mesh
+    depends_on:
+      - agent5
+
+  # Agent 5: ws listener (for agent4), exit 0.0.0.0/0, forward listener
+  agent5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muti-metroo-agent5
+    hostname: agent5
+    volumes:
+      - ./testbed/agent5/data:/app/data
+      - ./testbed/agent5/config.yaml:/app/config.yaml:ro
+      - ./testbed/certs:/app/certs:ro
+    ports:
+      - "8095:8080"   # HTTP API
+      - "2777:2777"   # Forward listener for key="host-1337"
+    networks:
+      - mesh
+
+networks:
+  mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

@@ -1,0 +1,28 @@
+# Agent 2: Transit Node with Shell + File Transfer
+agent:
+  id: "bbbb222222222222bbbb222222222222"
+  display_name: "agent2-transit"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+peers:
+  - id: "cccc333333333333cccc333333333333"
+    transport: quic
+    address: "agent3:4433"
+  - id: "dddd444444444444dddd444444444444"
+    transport: quic
+    address: "agent4:4433"
+
+shell:
+  enabled: true
+  whitelist: ["*"]
+
+file_transfer:
+  enabled: true
+  allowed_paths: ["*"]
+
+http:
+  enabled: true
+  address: ":8080"
