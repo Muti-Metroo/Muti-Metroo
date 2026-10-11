@@ -10,7 +10,7 @@ sidebar_position: 5
 
 # TLS
 
-The `tls` section holds the certificate settings shared by every listener and peer connection. All of it is optional: with no `tls` section, listeners use generated self-signed certificates and peers do not verify certificates. Agent traffic is protected by end-to-end encryption (X25519 and ChaCha20-Poly1305) independently of these settings, so TLS verification is an additional layer, not a requirement.
+The `tls` section holds the certificate settings shared by every listener and peer connection. All of it is optional: with no `tls` section, listeners use generated self-signed certificates and peers do not verify certificates. Stream payloads are end-to-end encrypted (X25519 and ChaCha20-Poly1305) independently of these settings, but that key exchange is not authenticated: without certificate verification, an attacker who can intercept a peer link can sit in the middle of it. Enable [strict verification](#strict-verification) on links that cross networks you do not control; see [End-to-End Encryption](/security/e2e-encryption#limits-of-the-protection).
 
 ## Configuration
 

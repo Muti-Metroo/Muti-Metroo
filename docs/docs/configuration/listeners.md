@@ -66,7 +66,7 @@ A listener's `tls` block accepts the same keys as a peer's `tls` block, but `ca`
 | --------- | ------------- | --------------------------------------------------------- |
 | `quic`    | UDP, TLS 1.3  | Lowest overhead. Needs UDP to be allowed on the path.     |
 | `h2`      | TCP, HTTP/2   | Looks like HTTPS. Needs `path`.                           |
-| `ws`      | TCP, WebSocket| Passes HTTP proxies and reverse proxies. Needs `path`.    |
+| `ws`      | TCP, WebSocket| Works behind reverse proxies and CDNs. Needs `path`.      |
 
 See [Transports](/concepts/transports) for a comparison.
 

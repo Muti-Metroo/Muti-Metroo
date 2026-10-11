@@ -82,7 +82,7 @@ To find the ID of the remote agent, run `muti-metroo status` on it or read its `
 
 ## TLS
 
-By default the agent does not verify the peer's certificate; the end-to-end encryption layer protects the traffic either way. The global [`tls`](/configuration/tls-certificates) settings apply to every peer, and the `tls` block on a peer overrides them for that peer only:
+By default the agent does not verify the peer's certificate. Stream payloads are still end-to-end encrypted, but without verification an attacker who can intercept the link can sit in the middle of it; see [End-to-End Encryption](/security/e2e-encryption#limits-of-the-protection). The global [`tls`](/configuration/tls-certificates) settings apply to every peer, and the `tls` block on a peer overrides them for that peer only:
 
 - The effective CA (per-peer, else global) verifies the peer when `strict` is true.
 - The effective certificate and key (per-peer, else global) are presented as the client certificate, which a listener with mTLS requires.
