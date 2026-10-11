@@ -440,8 +440,8 @@ Streams are identified by a combination of peer connection and stream ID:
 | Aspect                    | QUIC                 | HTTP/2            | WebSocket            |
 | ------------------------- | -------------------- | ----------------- | -------------------- |
 | **Underlying**            | UDP                  | TCP               | TCP                  |
-| **Multiplexing**          | Native               | Application-layer | Application-layer    |
-| **Head-of-line blocking** | None                 | TCP level         | TCP level            |
+| **Multiplexing**          | Application-layer (native streams unused; see 5.7) | Application-layer | Application-layer    |
+| **Head-of-line blocking** | Connection-wide (single stream) | TCP level | TCP level            |
 | **Connection setup**      | 1-RTT (0-RTT resume) | TCP + TLS         | TCP + TLS + Upgrade  |
 | **Proxy traversal**       | Poor                 | Moderate          | Excellent            |
 | **Firewall friendliness** | Poor                 | Good              | Excellent            |
@@ -547,8 +547,9 @@ type Stream interface {
 │  Implementation: github.com/quic-go/quic-go                                 │
 │                                                                             │
 │  Characteristics:                                                           │
-│  • Each virtual stream maps to native QUIC stream                           │
-│  • No head-of-line blocking between streams                                 │
+│  • One QUIC stream per peer connection carries all mesh frames; the       │
+│    frame header's StreamID multiplexes virtual streams on top (see 5.7).  │
+│    Native QUIC streams are used only for the initial handshake.           │
 │  • Built-in TLS 1.3 encryption                                              │
 │  • Connection migration (survives IP changes)                               │
 │  • 0-RTT session resumption                                                 │
@@ -655,30 +656,36 @@ type Stream interface {
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         MULTIPLEXING STRATEGY                               │
 │                                                                             │
-│  QUIC:                                                                      │
+│  All transports (QUIC, HTTP/2, WebSocket):                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Each virtual stream = dedicated QUIC stream                        │    │
-│  │  No additional framing needed for multiplexing                      │    │
-│  │  Frames still used for control messages and stream metadata         │    │
-│  │  Benefit: Native per-stream flow control, no HOL blocking           │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  HTTP/2 and WebSocket:                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Single transport stream carries all virtual streams                │    │
-│  │  Our frame protocol provides multiplexing via StreamID              │    │
-│  │  Writer uses round-robin for fairness between streams               │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Fairness (HTTP/2 and WebSocket):                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Problem: Video stream could starve SSH stream                      │    │
+│  │  One ordered byte stream per peer connection carries everything:    │    │
+│  │  data, route floods, keepalives. The 14-byte frame header           │    │
+│  │  multiplexes virtual streams on top via StreamID.                   │    │
 │  │                                                                     │    │
-│  │  Solution:                                                          │    │
-│  │  • Maximum frame payload: 16 KB                                     │    │
-│  │  • Writer maintains queue per stream                                │    │
-│  │  • Round-robin between streams with pending data                    │    │
-│  │  • No stream can send more than one frame before others get a turn  │    │
+│  │  QUIC's native streams are NOT used for virtual streams: the       │    │
+│  │  handshake stream becomes the permanent control stream and carries  │    │
+│  │  all traffic. On QUIC, a single lost packet therefore stalls every  │    │
+│  │  virtual stream on that link (connection-wide head-of-line          │    │
+│  │  blocking), and on every transport one flow-control-blocked write   │    │
+│  │  would stall all streams without the mitigations below. Mapping     │    │
+│  │  virtual streams onto native QUIC streams is future work.           │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+│  Mitigations on the single stream (see 12.2 for the write path):            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  • Maximum frame payload: 16 KB, so a bulk transfer yields the      │    │
+│  │    write slot at least every 16 KB                                  │    │
+│  │  • Every frame write holds the connection's write mutex and is      │    │
+│  │    bounded by a per-frame write deadline (connections.write_        │    │
+│  │    timeout, default 30s): a peer that stops reading fails the       │    │
+│  │    write and tears the connection down instead of blocking every    │    │
+│  │    stream behind it forever                                         │    │
+│  │  • Unordered frames (UDP_DATAGRAM, ICMP_ECHO) dispatch on a         │    │
+│  │    parallel fast lane (4 workers per connection) with drop-tail     │    │
+│  │    overflow, so a datagram burst never stalls stream traffic        │    │
+│  │  • Exit and forward handlers write to their destination             │    │
+│  │    connections from per-connection writer goroutines, so a slow     │    │
+│  │    destination does not block inbound frame dispatch                │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -2909,34 +2916,42 @@ Both use the same `socks5.auth.users` configuration. Compatible clients (like Mu
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 12.2 Write Fairness
+### 12.2 Write Path
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          WRITE FAIRNESS                                     │
+│                          WRITE PATH                                         │
 │                                                                             │
-│  Problem: One stream (video) could monopolize the transport, starving       │
-│  latency-sensitive streams (SSH).                                           │
-│                                                                             │
-│  Solution for HTTP/2 and WebSocket (single transport stream):               │
+│  Every frame between two peers is serialized onto one ordered byte          │
+│  stream (see 5.7). There is no per-stream scheduler or round-robin          │
+│  writer; fairness comes from the 16 KB frame cap and from keeping slow      │
+│  sinks off the dispatch path.                                               │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  // Maximum data per frame                                          │    │
-│  │  const maxFramePayload = 16384  // 16 KB                            │    │
-│  │                                                                     │    │
-│  │  // Writer loop with round-robin                                    │    │
-│  │  for {                                                              │    │
-│  │      streams := scheduler.GetReadyStreams()                         │    │
-│  │      for _, stream := range streams {                               │    │
-│  │          // Send at most one frame per stream per round             │    │
-│  │          data := stream.queue.Read(maxFramePayload)                 │    │
-│  │          frame := createDataFrame(stream.id, data)                  │    │
-│  │          transport.Write(frame)                                     │    │
-│  │      }                                                              │    │
+│  │  // peer/connection.go -- the single writer per connection          │    │
+│  │  func (c *Connection) WriteFrame(f *Frame) error {                  │    │
+│  │      c.writeMu.Lock()                                               │    │
+│  │      defer c.writeMu.Unlock()                                       │    │
+│  │      // Bound every write: writeMu is held across the socket        │    │
+│  │      // write, so a peer that stops reading would otherwise         │    │
+│  │      // block every subsequent frame -- including keepalives.       │    │
+│  │      c.controlStream.SetWriteDeadline(now + c.writeTimeout)         │    │
+│  │      defer c.controlStream.SetWriteDeadline(zero)                   │    │
+│  │      return c.writer.Write(f)  // header write + payload write      │    │
 │  │  }                                                                  │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
-│  QUIC transport: Not needed (native per-stream fairness).                   │
+│  • Inbound frames dispatch sequentially per connection (frameCh) to        │
+│    preserve per-stream ordering; UDP_DATAGRAM and ICMP_ECHO take a          │
+│    parallel fast lane (fastLaneCh, 4 workers) with drop-tail overflow.      │
+│  • Exit and forward handlers hand destination writes to a per-connection    │
+│    writer goroutine with a bounded queue; a slow destination overflows      │
+│    into a stream reset, never into blocked frame dispatch.                  │
+│  • A write that misses its deadline is fatal for the connection.            │
+│                                                                             │
+│  Future work: map each mesh stream onto a native QUIC stream (datagrams     │
+│  onto QUIC DATAGRAM) to remove connection-wide head-of-line blocking on     │
+│  QUIC links and delete the overlay data-plane framing.                      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
