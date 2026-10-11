@@ -40,7 +40,7 @@ exit:
 | `enabled`             | bool     | `false` | Run the exit handler that opens connections for `routes` and `domain_routes`. Set it whenever either list is non-empty.                    |
 | `routes`              | list     | `[]`    | CIDR routes. Each entry is a CIDR string or a mapping with the keys below.                                                                 |
 | `routes[].cidr`       | string   | required | IPv4 or IPv6 network in CIDR notation.                                                                                                    |
-| `routes[].metric`     | int      | `0`     | Base metric (0 to 65535). Each hop adds 1; lower wins among equally specific routes.                                                       |
+| `routes[].metric`     | int      | `0`     | Metric (0 to 65535). Agents that learn the route store it plus 1, whatever their distance; lower wins among equally specific routes.       |
 | `routes[].comment`    | string   | `""`    | Operator note. Advertised with the route and shown in `route list`, `route trace`, and the dashboard. Does not affect route selection.    |
 | `routes[].source_ip`  | string   | `""`    | Local address to bind outbound connections to. Must be the same address family as `cidr`. Not advertised.                                  |
 | `routes[].interface`  | string   | `""`    | Network interface for outbound connections. Not advertised. See [Egress interface](#egress-interface).                                    |
@@ -61,7 +61,7 @@ exit:
     - "::/0"
 ```
 
-Each route is advertised to the mesh. Ingress agents pick the route with the longest matching prefix, and among equally specific routes the lowest metric, which is the configured `metric` plus one per hop. See [Routing](/concepts/routing) for the full selection rules.
+Each route is advertised to the mesh. Ingress agents pick the route with the longest matching prefix, and among equally specific routes the lowest metric. Every agent that learns the route stores the configured `metric` plus one, however many hops away it is, so the metric ranks exits against each other and does not measure path length. See [Routing](/concepts/routing) for the full selection rules.
 
 The exit only opens TCP connections to destinations inside its own routes. A route list without `0.0.0.0/0` or `::/0` therefore also restricts what clients can reach through this exit. The UDP and ICMP relays are configured separately in [`udp`](/configuration/udp) and [`icmp`](/configuration/icmp).
 

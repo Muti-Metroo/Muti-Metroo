@@ -85,7 +85,7 @@ flowchart LR
 
 ### Redundant exits
 
-When several exit agents advertise the same network, the ingress uses the route with the lowest metric (the exit's configured metric plus one per hop). If a peer disconnects, the routes learned through it are withdrawn and the next-best route takes over. Agents reconnect to their peers with exponential backoff.
+When several exit agents advertise the same network, the ingress uses the route with the lowest metric (the metric configured on the exit). If a peer disconnects, the routes learned through it are withdrawn and the next-best route takes over. Agents reconnect to their peers with exponential backoff.
 
 ```mermaid
 flowchart LR

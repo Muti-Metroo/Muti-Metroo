@@ -1406,7 +1406,7 @@ type ForwardRoute struct {
     Target      string             // Endpoint target (host:port)
     NextHop     AgentID            // Next hop toward origin
     OriginAgent AgentID            // Agent advertising endpoint
-    Metric      uint16             // Hop count (same width as Route.Metric)
+    Metric      uint16             // Origin metric + 1 (same width as Route.Metric; not a hop count)
     Path        []AgentID          // Full path (for loop prevention)
     EncPath     *EncryptedData     // Encrypted path payload (management-key encrypted; see NODE_INFO_ADVERTISE)
     Sequence    uint64             // Advertisement sequence number
@@ -1418,7 +1418,7 @@ type ForwardRoute struct {
 
 1. Endpoint agent registers local route via `AddLocalForwardRoute(key, target, 0)`
 2. Route included in periodic flood advertisements
-3. Transit agents increment metric and re-advertise
+3. Each receiving agent stores the route with `metric + 1` and re-floods the advertisement with the metric unchanged, so every agent holds the origin metric plus one regardless of distance (the same holds for CIDR, domain, and agent presence routes)
 4. Listener agents store routes in forward routing table
 5. On connection, listener performs `LookupForward(key)` to find best route
 
@@ -2238,7 +2238,7 @@ internal/sleep/
 │      NextHop     AgentID       // Immediate peer to forward to              │
 │      OriginAgent AgentID       // Agent that advertised this route          │
 │      Path        []AgentID     // Full path from here to origin             │
-│      Metric      uint16        // Hop count                                 │
+│      Metric      uint16        // Origin metric + 1 (not a hop count)       │
 │      Sequence    uint64        // From origin's advertisement               │
 │      LastUpdate  time.Time     // Updated on every refresh; route expires   │
 │                                // when now - LastUpdate > RouteTTL          │
@@ -2282,7 +2282,7 @@ internal/sleep/
 │      NextHop     AgentID       // Immediate peer to forward to              │
 │      OriginAgent AgentID       // Agent that advertised this route          │
 │      Path        []AgentID     // Full path from here to origin             │
-│      Metric      uint16        // Hop count                                 │
+│      Metric      uint16        // Origin metric + 1 (not a hop count)       │
 │      Sequence    uint64        // From origin's advertisement               │
 │      LastUpdate  time.Time     // When this route was last updated          │
 │  }                                                                          │

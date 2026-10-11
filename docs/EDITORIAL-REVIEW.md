@@ -2,7 +2,7 @@
 
 Page-by-page editorial audit of the documentation against the MDN editorial model in [STYLE.md](STYLE.md). An editor who did not write the page read it in full and checked its purpose, structure, duplication with the canonical page, tone, examples, and See Also section, and verified at least three concrete claims against the source code or a built binary. Problems were fixed in the page.
 
-111 pages reviewed: 61 passed as written, 50 fixed. 443 claims verified against the implementation. The mechanical checks (commands, flags, config examples, HTTP paths, style rules) are in [VERIFICATION.md](VERIFICATION.md) and run in CI.
+111 pages reviewed: 60 passed as written, 51 fixed. 443 claims verified against the implementation. The mechanical checks (commands, flags, config examples, HTTP paths, style rules) are in [VERIFICATION.md](VERIFICATION.md) and run in CI.
 
 ## Site structure review
 
@@ -15,6 +15,13 @@ A final pass over the heading outline of all 111 pages, checking each section's 
 - **Getting started, deployment, security, troubleshooting**: numbered steps for procedures, task-oriented sections otherwise, See Also last. Consistent.
 - **Heading hierarchy**: `download.mdx` jumped from H1 to H3 and repeated "Installation" three times; added a "Muti Metroo agent" H2 and named the per-platform sections "Install on macOS/Linux/Windows".
 - **Sentence case**: `interactive-setup.md` step headings were Title Case and used "&"; converted to sentence case. A scan of every H2 and H3 found no other Title Case headings (capitals after "Step N:" and in proper names or UI labels are intended).
+
+## Verification of this review
+
+Every one of the 296 source citations below was checked to resolve to an existing file and line (290 in this repository, 6 in the Mutiauk and Muti Metroo Manager repositories). A sample of 48 cited claims, drawn from every section of the site, was then compared against the cited source by a second reviewer. 46 matched. The other two:
+
+- `configuration/tls-certificates.md`: the TLS 1.3 minimum is at `internal/agent/agent.go:1124`, two lines from the cited 1122. The claim is correct.
+- `intro.md` said the route metric is "the exit's configured metric plus one per hop". The code does not do that: every agent that learns a route stores the advertised metric plus one, and re-floods the advertisement with the metric unchanged (`internal/routing/manager.go:564` and `internal/flood/flood.go:352-395,436`), so the metric is the same at every distance. Fixed in `intro.md` and in two places in `configuration/exit.md`. The same check found `troubleshooting/faq.md` saying `routing.max_hops` limits advertisements, which it does not (no reader outside `internal/config`); fixed to match `configuration/routing.md`. `Architecture.md` described the same per-hop increment and was corrected too.
 
 ## `api/agents.md`
 
@@ -715,13 +722,17 @@ Claims verified:
 
 ## `configuration/exit.md`
 
-**Result:** pass. Annotated YAML, key table, routes/comments/source IP/interface/domain/DNS sections; See Also 5 links
+**Result:** fixed. Annotated YAML, key table, routes/comments/source IP/interface/domain/DNS sections; See Also 5 links
 
 Claims verified:
 
 - dns.timeout default 5s -> internal/config/config.go:938
 - DNS servers tried in order over UDP, IPv4 preferred, 5 minute cache -> internal/exit/dns.go:75-120
 - Fixed 30s connect timeout and idle_threshold idle timeout, max connections = limits.max_streams_total -> internal/agent/agent.go:488-494
+
+Fixes:
+
+- routes[].metric row and route selection paragraph said each hop adds 1; corrected (internal/routing/manager.go:564, internal/flood/flood.go:352-395)
 
 ## `configuration/file-transfer.md`
 
@@ -1267,6 +1278,7 @@ Claims verified:
 Fixes:
 
 - Features table: replaced 'Both TCP transports work behind reverse proxies' (false for HTTP/2) with 'WebSocket can also run behind a TLS-terminating reverse proxy and dial through an HTTP proxy'
+- Route metric described as 'plus one per hop'; corrected to the configured metric (every agent stores advertised metric + 1 regardless of distance; internal/flood/flood.go re-floods unchanged metrics)
 
 ## `muti-metroo-manager.mdx`
 
@@ -1451,6 +1463,7 @@ Fixes:
 
 - Renamed 'Configuration - Agent', 'CLI - cert', 'API - Health', 'API - Dashboard' link titles
 - See Also switched to ': ' separators
+- 'How many hops' answer said routing.max_hops limits advertisements; corrected: validated but not applied (no reader of MaxHops outside internal/config)
 
 ## `troubleshooting/performance.md`
 

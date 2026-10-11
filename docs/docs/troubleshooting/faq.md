@@ -72,7 +72,7 @@ A mesh can mix transports; each peer connection uses its own. See [Transports](/
 
 ### How many hops can a path have?
 
-`routing.max_hops` sets the limit for route advertisements (default 16, maximum 255). Each hop adds its network latency to connection setup, so keep paths as short as the topology allows.
+The current release does not limit path length: `routing.max_hops` is validated (1 to 255) but not applied to route propagation; see [Routing configuration](/configuration/routing). Each hop adds its network latency to connection setup, so keep paths as short as the topology allows.
 
 ### Is IPv6 supported?
 
