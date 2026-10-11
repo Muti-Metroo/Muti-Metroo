@@ -81,7 +81,7 @@ The agent ID exchanged in the peer handshake is self-asserted at every TLS mode,
 Two consequences:
 
 - On an unauthenticated link (the default), any reachable endpoint that completes the handshake can join the mesh under any agent ID, and can then receive and inject route advertisements.
-- Even with mutual TLS, proof stops at "holds a certificate from your CA" -- the agent ID it claims is not bound to the certificate.
+- Even with mutual TLS, proof stops at "holds a certificate from your CA": the agent ID it claims is not bound to the certificate.
 
 If a peer's identity matters (rather than just its membership), pin the expected ID with `peers[].id` in addition to certificate verification. The pin is checked on every (re)connection, so an impostor that joins with a valid certificate but the wrong ID is refused.
 
