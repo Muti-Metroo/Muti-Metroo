@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.6](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.5...muti-metroo-v4.10.6) (2026-10-11)
+
+
+### Bug Fixes
+
+* **release:** build and publish the Windows ARM64 DLL ([bac64ac](https://github.com/postalsys/Muti-Metroo/commit/bac64acc608eb47cdd75d3fc99b8dc8e635d85b5))
+
 ## [4.10.5](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.4...muti-metroo-v4.10.5) (2026-10-11)
 
 
