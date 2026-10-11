@@ -6,7 +6,7 @@ sidebar_position: 100
 
 # Terms of Service
 
-**Last Updated: January 2026**
+**Last Updated: October 2026**
 
 These Terms of Service ("Terms") govern your download and use of pre-built Muti Metroo binaries ("Binaries") provided by Team Muti Metroo ("we", "us", or "our").
 
