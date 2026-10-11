@@ -3568,8 +3568,8 @@ func (a *Agent) handleDisplayNameManage(data []byte) ([]byte, bool) {
 // the local path when a browse request targets this agent directly; the
 // HTTP gateway doesn't attach a signature, so stamp one here so the
 // stream handler's verifier sees an authorized request when we have the
-// private key. Remote-dispatched browses come in through handleFileBrowse
-// with the envelope already signed by the originating agent.
+// private key. Remote-dispatched browses come in through handleFileBrowse,
+// which rejects unsigned requests instead of stamping them.
 //
 // Implements the health.FileBrowseProvider interface.
 func (a *Agent) BrowseFiles(req *filetransfer.BrowseRequest) *filetransfer.BrowseResponse {
@@ -3590,10 +3590,21 @@ func (a *Agent) BrowseFiles(req *filetransfer.BrowseRequest) *filetransfer.Brows
 }
 
 // handleFileBrowse handles a file browse control request from the control channel.
+// Unlike the local HTTP gateway path (BrowseFiles), remote requests must
+// carry a management signature from the originating agent; an unsigned
+// request is rejected instead of being stamped with this agent's own key.
 func (a *Agent) handleFileBrowse(data []byte) ([]byte, bool) {
 	var req filetransfer.BrowseRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		resp, _ := json.Marshal(map[string]string{"error": "invalid request: " + err.Error()})
+		return resp, false
+	}
+
+	if req.Auth == nil {
+		resp, _ := json.Marshal(&filetransfer.BrowseResponse{
+			Error:     crypto.ErrAuthMissing.Error(),
+			ErrorCode: filetransfer.ErrCodeAuthRequired,
+		})
 		return resp, false
 	}
 

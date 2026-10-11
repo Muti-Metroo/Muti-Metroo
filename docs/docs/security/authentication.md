@@ -75,9 +75,7 @@ A signed envelope is valid for that five-minute window and has no one-time nonce
 An operator agent signs every privileged request that reaches its HTTP API. Anyone who can call that API can therefore run commands and transfer files on every agent in the mesh. Bind operator agents' HTTP API to `127.0.0.1` and set `http.token_hash`.
 :::
 
-:::danger File browse on agents that hold the private key
-An agent that holds `signing_private_key` also signs file browse requests (`list`, `stat`, `chmod`, `delete`) that reach it unsigned from other agents in the mesh, so any agent that can route to it can browse, change permissions of, and delete files under its `file_transfer.allowed_paths` without a signature. Keep `file_transfer.enabled: false` on operator agents, or keep their `allowed_paths` minimal.
-:::
+File browse requests (`list`, `stat`, `chmod`, `delete`) that arrive over the control channel without a signature are rejected with `auth_required`. Only requests that start on an agent's own HTTP gateway are stamped with that agent's private key.
 
 ### Query an agent's role
 
