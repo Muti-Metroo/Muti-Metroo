@@ -299,8 +299,15 @@ async function main() {
         previous = current;
       }
       if (stable < 3) throw new Error("rendering did not settle");
-      if (outPath && !(await onlyRasterNoise(outPath, previous))) {
-        await fs.writeFile(outPath, previous);
+      if (outPath) {
+        const existing = await fs.readFile(outPath).catch(() => null);
+        if (existing && existing.equals(previous)) {
+          // Identical to the file on disk.
+        } else if (existing && (await onlyRasterNoise(outPath, previous))) {
+          console.log(`  kept ${path.basename(outPath)}: new capture differs only by anti-aliasing noise`);
+        } else {
+          await fs.writeFile(outPath, previous);
+        }
       }
       return previous;
     };
