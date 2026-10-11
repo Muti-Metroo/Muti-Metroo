@@ -229,11 +229,14 @@ func (c *Connection) TransportType() transport.TransportType {
 }
 
 // Capabilities returns the remote peer's capabilities.
+// Reserved for future feature negotiation: exchanged during the handshake
+// but not consumed by any production code path today.
 func (c *Connection) Capabilities() []string {
 	return c.capabilities
 }
 
 // HasCapability checks if the peer has a specific capability.
+// Reserved for future feature negotiation; see Capabilities.
 func (c *Connection) HasCapability(cap string) bool {
 	for _, c := range c.capabilities {
 		if c == cap {

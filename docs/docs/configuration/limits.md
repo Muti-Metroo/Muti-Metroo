@@ -13,21 +13,20 @@ The `limits` section caps the number of concurrent streams an agent carries and 
 ```yaml
 limits:
   max_streams_total: 10000
-  max_streams_per_peer: 1000
-  max_pending_opens: 100
   stream_open_timeout: 30s
-  buffer_size: 262144
+  # Deprecated keys, accepted but ignored: max_streams_per_peer,
+  # max_pending_opens, buffer_size
 ```
 
 ## Keys
 
 | Key                    | Type     | Default  | Description                                                                                                                                                                       |
 | ---------------------- | -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `max_streams_total`    | int      | `10000`  | Maximum concurrent streams on this agent. Further stream opens are refused. Also caps concurrent exit connections, concurrent forward endpoint connections, and the streams per QUIC listener connection. Must be at least `max_streams_per_peer`. |
-| `max_streams_per_peer` | int      | `1000`   | Must be at least 1 and no greater than `max_streams_total`. Validated, but the current release does not enforce a per-peer limit.                                               |
-| `max_pending_opens`    | int      | `100`    | Accepted, but not used by the current release.                                                                                                                                  |
+| `max_streams_total`    | int      | `10000`  | Maximum concurrent streams on this agent. Further stream opens are refused. Also caps concurrent exit connections, concurrent forward endpoint connections, and the streams per QUIC listener connection. This is the only enforced stream limit. |
+| `max_streams_per_peer` | int      | `1000`   | Deprecated. Accepted for backward compatibility, but ignored: no per-peer limit is enforced.                                                                                      |
+| `max_pending_opens`    | int      | `100`    | Deprecated. Accepted for backward compatibility, but ignored: pending opens count toward `max_streams_total`.                                                                     |
 | `stream_open_timeout`  | duration | `30s`    | Time allowed for the remote end to accept a management command session opened by this agent. SOCKS and port forward streams use a fixed 30 seconds, and file transfers 5 minutes. |
-| `buffer_size`          | int      | `262144` | Must be at least 1024. Validated, but not used by the current release.                                                                                                          |
+| `buffer_size`          | int      | `262144` | Deprecated. Accepted for backward compatibility, but ignored: stream buffering is a fixed per-stream frame queue, not a sized byte buffer.                                        |
 
 ## Examples
 
@@ -36,7 +35,6 @@ An exit that serves many concurrent clients:
 ```yaml
 limits:
   max_streams_total: 50000
-  max_streams_per_peer: 10000
 ```
 
 ## See Also

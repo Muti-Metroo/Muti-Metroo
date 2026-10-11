@@ -1437,7 +1437,6 @@ type ForwardRoute struct {
     OriginAgent AgentID            // Agent advertising endpoint
     Metric      uint16             // Origin metric + 1 (same width as Route.Metric; not a hop count)
     Path        []AgentID          // Full path (for loop prevention)
-    EncPath     *EncryptedData     // Encrypted path payload (management-key encrypted; see NODE_INFO_ADVERTISE)
     Sequence    uint64             // Advertisement sequence number
     LastUpdate  time.Time          // Expiry computed as now - LastUpdate > ttl
 }
@@ -2271,8 +2270,6 @@ internal/sleep/
 │      Sequence    uint64        // From origin's advertisement               │
 │      LastUpdate  time.Time     // Updated on every refresh; route expires   │
 │                                // when now - LastUpdate > RouteTTL          │
-│      EncPath     *EncryptedData// Encrypted path payload for topology       │
-│                                // compartmentalisation (see NODE_INFO_ADVERTISE) │
 │  }                                                                          │
 │                                                                             │
 │  Table {                                                                    │
@@ -3124,11 +3121,10 @@ connections:
 # Resource Limits
 # ------------------------------------------------------------------------------
 limits:
-  max_streams_per_peer: 1000
   max_streams_total: 10000
-  max_pending_opens: 100
   stream_open_timeout: 30s
-  buffer_size: 262144 # 256 KB
+  # Deprecated, accepted but ignored: max_streams_per_peer, max_pending_opens,
+  # buffer_size
 
 # ------------------------------------------------------------------------------
 # HTTP API Server

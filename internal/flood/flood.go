@@ -328,26 +328,17 @@ func (f *Flooder) HandleRouteAdvertise(
 		return false
 	}
 
-	// Decode path from advertisement
+	// Decode path from advertisement.
 	// Note: Paths are sent as plaintext for routing (not encrypted)
 	// because transit agents need the path to forward STREAM_OPEN frames.
-	// Path hiding happens at the API layer, not on the wire.
+	// Path hiding happens at the API layer, not on the wire. The
+	// Encrypted flag is a legacy wire marker from removed path encryption;
+	// an encrypted blob cannot be decrypted anymore, so its path stays nil
+	// and the routes it carries are unusable (the advertisement is still
+	// flooded onward unchanged for wire compatibility).
 	var path []identity.AgentID
-	if encPath != nil {
-		if encPath.Encrypted {
-			// Legacy: try to decrypt if we have the private key
-			// (for backwards compatibility with old encrypted paths)
-			if f.sealedBox != nil && f.sealedBox.CanDecrypt() {
-				decrypted, err := f.sealedBox.Open(encPath.Data)
-				if err == nil {
-					path, _ = protocol.DecodePath(decrypted)
-				}
-			}
-			// If we can't decrypt, path remains nil (routing will fail)
-		} else {
-			// Plaintext - decode directly (normal case)
-			path, _ = protocol.DecodePath(encPath.Data)
-		}
+	if encPath != nil && !encPath.Encrypted {
+		path, _ = protocol.DecodePath(encPath.Data)
 	}
 
 	// Convert protocol routes to routing entries (CIDR, domain, forward, and agent)
@@ -381,7 +372,7 @@ func (f *Flooder) HandleRouteAdvertise(
 			// Agent presence route: 16-byte agent ID prefix
 			agentID := protocol.DecodeAgentPrefix(r.Prefix)
 			if agentID != (identity.AgentID{}) {
-				f.routeMgr.ProcessAgentRouteAdvertise(fromPeer, originAgent, sequence, agentID, path, encPath, r.Metric+1)
+				f.routeMgr.ProcessAgentRouteAdvertise(fromPeer, originAgent, sequence, agentID, path, r.Metric+1)
 			}
 		default:
 			// CIDR route (IPv4 or IPv6). comments is nil from older
@@ -402,12 +393,12 @@ func (f *Flooder) HandleRouteAdvertise(
 
 	// Process CIDR routes in routing manager
 	if len(cidrEntries) > 0 {
-		f.routeMgr.ProcessRouteAdvertise(fromPeer, originAgent, sequence, cidrEntries, path, encPath)
+		f.routeMgr.ProcessRouteAdvertise(fromPeer, originAgent, sequence, cidrEntries, path)
 	}
 
 	// Process domain routes in routing manager
 	if len(domainEntries) > 0 {
-		f.routeMgr.ProcessDomainRouteAdvertise(fromPeer, originAgent, sequence, domainEntries, path, encPath)
+		f.routeMgr.ProcessDomainRouteAdvertise(fromPeer, originAgent, sequence, domainEntries, path)
 	}
 
 	// Process forward routes in routing manager
@@ -435,7 +426,7 @@ func (f *Flooder) HandleRouteAdvertise(
 					"existing_origins", conflictShort)
 			}
 		}
-		f.routeMgr.ProcessForwardRouteAdvertise(fromPeer, originAgent, sequence, forwardEntries, path, encPath)
+		f.routeMgr.ProcessForwardRouteAdvertise(fromPeer, originAgent, sequence, forwardEntries, path)
 	}
 
 	// Flood to other peers (forward encrypted path as-is).
@@ -529,9 +520,11 @@ func (f *Flooder) HandleRouteWithdraw(
 }
 
 // floodAdvertisementEncrypted sends a route advertisement to all peers except the source.
-// For plaintext paths, it prepends the local agent ID to the path before forwarding.
-// For encrypted paths (legacy), it forwards as-is since we can't modify encrypted data.
-// comments must be parallel to routes (or nil/shorter for backwards compatibility).
+// For plaintext paths (the only kind current peers send), it prepends the
+// local agent ID to the path before forwarding. A path blob with the legacy
+// Encrypted marker set is forwarded as-is: it can no longer be decrypted, so
+// it cannot be extended. comments must be parallel to routes (or nil/shorter
+// for backwards compatibility).
 func (f *Flooder) floodAdvertisementEncrypted(
 	fromPeer identity.AgentID,
 	originAgent identity.AgentID,
@@ -542,8 +535,8 @@ func (f *Flooder) floodAdvertisementEncrypted(
 	encPath *protocol.EncryptedData,
 	seenBy []identity.AgentID,
 ) {
-	// Extend the path if it's plaintext (normal case)
-	// For encrypted paths (legacy), forward as-is
+	// Extend the path if it's plaintext (the normal case). A blob with the
+	// legacy Encrypted marker cannot be modified, so it forwards unchanged.
 	fwdEncPath := encPath
 	if encPath != nil && !encPath.Encrypted {
 		// Decode existing path, prepend our ID, re-encode

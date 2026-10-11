@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
 )
 
 // Route represents a single route entry in the routing table.
@@ -26,11 +25,8 @@ type Route struct {
 	// Metric is the route cost (lower is better)
 	Metric uint16
 
-	// Path is the AS-path style list of agent IDs (nil if encrypted and can't decrypt)
+	// Path is the AS-path style list of agent IDs
 	Path []identity.AgentID
-
-	// EncPath is the encrypted path data for forwarding (nil if no encryption)
-	EncPath *protocol.EncryptedData
 
 	// Sequence is used for route versioning
 	Sequence uint64
@@ -66,13 +62,6 @@ func (r *Route) Clone() *Route {
 	if len(r.Path) > 0 {
 		clone.Path = make([]identity.AgentID, len(r.Path))
 		copy(clone.Path, r.Path)
-	}
-	if r.EncPath != nil {
-		clone.EncPath = &protocol.EncryptedData{
-			Encrypted: r.EncPath.Encrypted,
-			Data:      make([]byte, len(r.EncPath.Data)),
-		}
-		copy(clone.EncPath.Data, r.EncPath.Data)
 	}
 	return clone
 }

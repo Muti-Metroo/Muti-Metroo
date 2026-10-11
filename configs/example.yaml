@@ -307,7 +307,12 @@ routing:
 # ------------------------------------------------------------------------------
 connections:
   # Keepalive settings
-  idle_threshold: 5m # Send keepalive after this idle time (default 5m, keeps long-lived connections like SSH alive)
+  idle_threshold:
+    5m # (default 5m) Three uses: peer keepalive interval; the deadline a
+    # SOCKS client has to complete its handshake (cleared once the tunnel is
+    # up -- idle established SOCKS connections are NOT reaped by this knob);
+    # and the read idle timeout exit/forward handlers apply to their target
+    # connections (a target silent for this long is closed).
   timeout: 90s # Declare peer dead after no response
   keepalive_jitter:
     0.2 # Timing jitter (0.0-1.0) makes beacon patterns less distinguishable
@@ -334,11 +339,12 @@ connections:
 # Prevent resource exhaustion
 # ------------------------------------------------------------------------------
 limits:
-  max_streams_per_peer: 1000
-  max_streams_total: 10000
-  max_pending_opens: 100
+  max_streams_total: 10000 # Max concurrent streams (established + pending opens); the only enforced stream limit
   stream_open_timeout: 30s
-  buffer_size: 262144 # 256 KB per stream
+  # Deprecated, accepted but ignored (kept so older configs load):
+  max_streams_per_peer: 1000 # no per-peer limit is enforced
+  max_pending_opens: 100 # pending opens count toward max_streams_total instead
+  buffer_size: 262144 # stream buffering is a fixed per-stream frame queue, not a sized byte buffer
 
 # ------------------------------------------------------------------------------
 # HTTP API Server

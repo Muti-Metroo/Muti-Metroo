@@ -275,14 +275,8 @@ func TestStream_String(t *testing.T) {
 func TestDefaultManagerConfig(t *testing.T) {
 	cfg := DefaultManagerConfig()
 
-	if cfg.MaxStreamsPerPeer != 1000 {
-		t.Errorf("MaxStreamsPerPeer = %d, want 1000", cfg.MaxStreamsPerPeer)
-	}
 	if cfg.MaxStreamsTotal != 10000 {
 		t.Errorf("MaxStreamsTotal = %d, want 10000", cfg.MaxStreamsTotal)
-	}
-	if cfg.BufferSize != 32768 {
-		t.Errorf("BufferSize = %d, want 32768", cfg.BufferSize)
 	}
 }
 
@@ -507,19 +501,12 @@ func TestManager_HandleStreamReset(t *testing.T) {
 	remoteID, _ := identity.NewAgentID()
 	cfg := DefaultManagerConfig()
 
-	resetReceived := false
 	m := NewManager(cfg, localID)
-	m.SetCallbacks(nil, func(s *Stream, err error) {
-		resetReceived = true
-	}, nil)
 
 	m.AcceptStream(1, 100, remoteID, "10.0.0.1", 80)
 
 	m.HandleStreamReset(remoteID, 1, protocol.ErrConnectionRefused)
 
-	if !resetReceived {
-		t.Error("Reset callback should be called")
-	}
 	if m.StreamCount() != 0 {
 		t.Errorf("StreamCount = %d, want 0", m.StreamCount())
 	}
@@ -676,41 +663,6 @@ func TestManager_Close(t *testing.T) {
 	result := <-pending.ResultCh
 	if result.Error == nil {
 		t.Error("Pending request should be cancelled")
-	}
-}
-
-func TestManager_Callbacks(t *testing.T) {
-	localID, _ := identity.NewAgentID()
-	remoteID, _ := identity.NewAgentID()
-	cfg := DefaultManagerConfig()
-
-	openCalled := false
-	closeCalled := false
-	dataCalled := false
-
-	m := NewManager(cfg, localID)
-	m.SetCallbacks(
-		func(s *Stream) { openCalled = true },
-		func(s *Stream, err error) { closeCalled = true },
-		func(s *Stream, data []byte) { dataCalled = true },
-	)
-
-	// Open
-	m.AcceptStream(1, 100, remoteID, "10.0.0.1", 80)
-	if !openCalled {
-		t.Error("Open callback should be called")
-	}
-
-	// Data
-	m.HandleStreamData(remoteID, 1, 0, []byte("test"))
-	if !dataCalled {
-		t.Error("Data callback should be called")
-	}
-
-	// Close
-	m.HandleStreamClose(remoteID, 1)
-	if !closeCalled {
-		t.Error("Close callback should be called")
 	}
 }
 

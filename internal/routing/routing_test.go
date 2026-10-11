@@ -493,7 +493,7 @@ func TestManager_ProcessRouteAdvertise(t *testing.T) {
 		{Network: MustParseCIDR("172.16.0.0/12"), Metric: 5},
 	}
 
-	accepted := mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
+	accepted := mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil)
 	if len(accepted) != 2 {
 		t.Errorf("ProcessRouteAdvertise accepted %d routes, want 2", len(accepted))
 	}
@@ -517,7 +517,7 @@ func TestManager_ProcessRouteWithdraw(t *testing.T) {
 	entries := []RouteEntry{
 		{Network: MustParseCIDR("10.0.0.0/8"), Metric: 10},
 	}
-	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
+	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil)
 
 	// Withdraw
 	removed := mgr.ProcessRouteWithdraw(peerID, 1, entries)
@@ -538,7 +538,7 @@ func TestManager_ProcessForwardRouteWithdraw(t *testing.T) {
 	mgr := NewManager(localID)
 
 	mgr.ProcessForwardRouteAdvertise(peerID, originA, 1,
-		[]ForwardRouteEntry{{Key: "k", Target: "127.0.0.1:9000"}}, nil, nil)
+		[]ForwardRouteEntry{{Key: "k", Target: "127.0.0.1:9000"}}, nil)
 	if !mgr.ForwardTable().HasRoute("k", originA) {
 		t.Fatal("setup: expected forward route to exist")
 	}
@@ -573,7 +573,7 @@ func TestManager_ProcessDomainRouteWithdraw(t *testing.T) {
 	mgr := NewManager(localID)
 
 	mgr.ProcessDomainRouteAdvertise(peerID, originA, 1,
-		[]DomainRouteEntry{{Pattern: "*.example.com", IsWildcard: true}}, nil, nil)
+		[]DomainRouteEntry{{Pattern: "*.example.com", IsWildcard: true}}, nil)
 	if !mgr.DomainTable().HasRoute("*.example.com", originA) {
 		t.Fatal("setup: expected domain route to exist")
 	}
@@ -607,7 +607,7 @@ func TestManager_HandlePeerDisconnect(t *testing.T) {
 		{Network: MustParseCIDR("10.0.0.0/8"), Metric: 10},
 		{Network: MustParseCIDR("172.16.0.0/12"), Metric: 5},
 	}
-	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
+	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil)
 
 	removed := mgr.HandlePeerDisconnect(peerID)
 	if len(removed) != 2 {
@@ -623,7 +623,7 @@ func TestManager_LookupNextHop(t *testing.T) {
 	entries := []RouteEntry{
 		{Network: MustParseCIDR("10.0.0.0/8"), Metric: 10},
 	}
-	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
+	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil)
 
 	nextHop, found := mgr.LookupNextHop(net.ParseIP("10.1.2.3"))
 	if !found {
@@ -681,7 +681,7 @@ func TestManager_GetRoutesToAdvertise(t *testing.T) {
 	// Add route from peer1
 	mgr.ProcessRouteAdvertise(peer1, peer1, 1, []RouteEntry{
 		{Network: MustParseCIDR("172.16.0.0/12"), Metric: 5},
-	}, nil, nil)
+	}, nil)
 
 	// Get routes to advertise to peer1 (should exclude route learned from peer1)
 	entries := mgr.GetRoutesToAdvertise(peer1)
@@ -1234,7 +1234,7 @@ func TestManager_ProcessRouteWithdraw_SequenceGuard(t *testing.T) {
 	mgr := NewManager(localID)
 
 	entries := []RouteEntry{{Network: MustParseCIDR("10.0.0.0/8"), Metric: 10}}
-	mgr.ProcessRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+	mgr.ProcessRouteAdvertise(peerID, peerID, 5, entries, nil)
 
 	if mgr.ProcessRouteWithdraw(peerID, 4, entries) {
 		t.Error("stale withdraw (seq 4 < installed 5) should not remove the route")
@@ -1257,7 +1257,7 @@ func TestManager_ProcessDomainRouteWithdraw_SequenceGuard(t *testing.T) {
 	mgr := NewManager(localID)
 
 	entries := []DomainRouteEntry{{Pattern: "example.com"}}
-	mgr.ProcessDomainRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+	mgr.ProcessDomainRouteAdvertise(peerID, peerID, 5, entries, nil)
 
 	if mgr.ProcessDomainRouteWithdraw(peerID, 4, entries) {
 		t.Error("stale withdraw should not remove the domain route")
@@ -1277,7 +1277,7 @@ func TestManager_ProcessForwardRouteWithdraw_SequenceGuard(t *testing.T) {
 	mgr := NewManager(localID)
 
 	entries := []ForwardRouteEntry{{Key: "ssh", Target: "10.0.0.1:22"}}
-	mgr.ProcessForwardRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+	mgr.ProcessForwardRouteAdvertise(peerID, peerID, 5, entries, nil)
 
 	if mgr.ProcessForwardRouteWithdraw(peerID, 4, entries) {
 		t.Error("stale withdraw should not remove the forward route")
@@ -1297,7 +1297,7 @@ func TestManager_ProcessAgentRouteWithdraw_SequenceGuard(t *testing.T) {
 	originID, _ := identity.NewAgentID()
 	mgr := NewManager(localID)
 
-	mgr.ProcessAgentRouteAdvertise(peerID, originID, 5, originID, []identity.AgentID{peerID, originID}, nil, 1)
+	mgr.ProcessAgentRouteAdvertise(peerID, originID, 5, originID, []identity.AgentID{peerID, originID}, 1)
 
 	if mgr.ProcessAgentRouteWithdraw(originID, 4, originID) {
 		t.Error("stale withdraw should not remove the agent route")

@@ -550,7 +550,6 @@ func (m *Manager) ProcessRouteAdvertise(
 	sequence uint64,
 	routes []RouteEntry,
 	path []identity.AgentID,
-	encPath *protocol.EncryptedData,
 ) []*Route {
 	var accepted []*Route
 
@@ -563,7 +562,6 @@ func (m *Manager) ProcessRouteAdvertise(
 			OriginAgent: originAgent,
 			Metric:      entry.Metric + 1, // Increment metric
 			Path:        path,
-			EncPath:     encPath,
 			Sequence:    sequence,
 			Comment:     entry.Comment,
 		}
@@ -883,7 +881,6 @@ func (m *Manager) ProcessDomainRouteAdvertise(
 	sequence uint64,
 	routes []DomainRouteEntry,
 	path []identity.AgentID,
-	encPath *protocol.EncryptedData,
 ) []*DomainRoute {
 	var accepted []*DomainRoute
 
@@ -897,7 +894,6 @@ func (m *Manager) ProcessDomainRouteAdvertise(
 			OriginAgent: originAgent,
 			Metric:      entry.Metric + 1, // Increment metric
 			Path:        path,
-			EncPath:     encPath,
 			Sequence:    sequence,
 		}
 
@@ -1038,7 +1034,6 @@ func (m *Manager) ProcessForwardRouteAdvertise(
 	sequence uint64,
 	routes []ForwardRouteEntry,
 	path []identity.AgentID,
-	encPath *protocol.EncryptedData,
 ) []*ForwardRoute {
 	var accepted []*ForwardRoute
 
@@ -1050,7 +1045,6 @@ func (m *Manager) ProcessForwardRouteAdvertise(
 			OriginAgent: originAgent,
 			Metric:      entry.Metric + 1, // Increment metric
 			Path:        path,
-			EncPath:     encPath,
 			Sequence:    sequence,
 		}
 
@@ -1119,7 +1113,6 @@ func (m *Manager) ProcessAgentRouteAdvertise(
 	sequence uint64,
 	agentID identity.AgentID,
 	path []identity.AgentID,
-	encPath *protocol.EncryptedData,
 	metric uint16,
 ) bool {
 	route := &AgentRoute{
@@ -1128,7 +1121,6 @@ func (m *Manager) ProcessAgentRouteAdvertise(
 		OriginAgent: originAgent,
 		Metric:      metric,
 		Path:        path,
-		EncPath:     encPath,
 		Sequence:    sequence,
 	}
 	return m.agentTable.AddRoute(route)

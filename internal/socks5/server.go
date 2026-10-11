@@ -20,7 +20,11 @@ type ServerConfig struct {
 	// ConnectTimeout for outbound connections
 	ConnectTimeout time.Duration
 
-	// IdleTimeout for idle connections
+	// IdleTimeout bounds connection setup only: it is applied as a deadline
+	// when a connection is accepted and cleared once the proxy handshake and
+	// target connect complete. It does NOT reap idle established
+	// connections (a long-lived idle SSH session must survive); dead peers
+	// are detected via keepalives and write timeouts instead.
 	IdleTimeout time.Duration
 
 	// Authenticators for authentication

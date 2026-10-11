@@ -639,6 +639,12 @@ type RoutingConfig struct {
 
 // ConnectionsConfig defines connection tuning parameters.
 type ConnectionsConfig struct {
+	// IdleThreshold serves three purposes: the keepalive interval on peer
+	// connections, the deadline for the SOCKS5 handshake phase (cleared once
+	// the tunnel is established -- it does not reap idle established SOCKS
+	// connections), and the read idle timeout exit and forward handlers
+	// apply to their target connections (there a target silent for this
+	// long IS closed).
 	IdleThreshold   time.Duration   `yaml:"idle_threshold,omitempty"`
 	Timeout         time.Duration   `yaml:"timeout,omitempty"`
 	KeepaliveJitter float64         `yaml:"keepalive_jitter,omitempty"` // Jitter fraction for keepalive timing (0.0-1.0)
@@ -658,11 +664,22 @@ type ReconnectConfig struct {
 
 // LimitsConfig defines resource limits.
 type LimitsConfig struct {
-	MaxStreamsPerPeer int           `yaml:"max_streams_per_peer,omitempty"`
-	MaxStreamsTotal   int           `yaml:"max_streams_total,omitempty"`
+	// MaxStreamsPerPeer is deprecated and no longer enforced: streams are
+	// limited only by MaxStreamsTotal. The key is still accepted so existing
+	// configs keep loading.
+	MaxStreamsPerPeer int `yaml:"max_streams_per_peer,omitempty"`
+	// MaxStreamsTotal caps concurrent streams (established plus pending
+	// opens). This is the only enforced stream limit.
+	MaxStreamsTotal int `yaml:"max_streams_total,omitempty"`
+	// MaxPendingOpens is deprecated and no longer enforced: pending opens
+	// count toward MaxStreamsTotal. The key is still accepted so existing
+	// configs keep loading.
 	MaxPendingOpens   int           `yaml:"max_pending_opens,omitempty"`
 	StreamOpenTimeout time.Duration `yaml:"stream_open_timeout,omitempty"`
-	BufferSize        int           `yaml:"buffer_size,omitempty"`
+	// BufferSize is deprecated and no longer used: stream buffering is a
+	// fixed per-stream frame queue, not a sized byte buffer. The key is
+	// still accepted so existing configs keep loading.
+	BufferSize int `yaml:"buffer_size,omitempty"`
 }
 
 // HTTPConfig defines HTTP API server settings.
@@ -951,7 +968,7 @@ func Default() *Config {
 			MaxHops:           16,
 		},
 		Connections: ConnectionsConfig{
-			IdleThreshold:   5 * time.Minute, // Long-running connections like SSH should stay alive
+			IdleThreshold:   5 * time.Minute, // SOCKS5 handshake deadline + exit/forward target read idle timeout
 			Timeout:         90 * time.Second,
 			KeepaliveJitter: 0.2,              // 20% jitter makes timing patterns less distinguishable
 			TCPKeepAlive:    30 * time.Second, // SO_KEEPALIVE on TCP transports keeps NAT mappings warm
@@ -1285,15 +1302,11 @@ func (c *Config) Validate() error {
 		errs = append(errs, "routing.max_hops must be between 1 and 255")
 	}
 
-	// Validate limits
-	if c.Limits.MaxStreamsPerPeer < 1 {
-		errs = append(errs, "limits.max_streams_per_peer must be positive")
-	}
-	if c.Limits.MaxStreamsTotal < c.Limits.MaxStreamsPerPeer {
-		errs = append(errs, "limits.max_streams_total must be >= max_streams_per_peer")
-	}
-	if c.Limits.BufferSize < 1024 {
-		errs = append(errs, "limits.buffer_size must be at least 1024")
+	// Validate limits. The deprecated max_streams_per_peer, max_pending_opens
+	// and buffer_size keys are accepted but ignored, so they are not
+	// validated here.
+	if c.Limits.MaxStreamsTotal < 1 {
+		errs = append(errs, "limits.max_streams_total must be positive")
 	}
 
 	// Validate management key configuration

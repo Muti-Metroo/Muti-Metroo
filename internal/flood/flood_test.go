@@ -468,7 +468,6 @@ func TestFlooder_HandleRouteWithdraw_Forward(t *testing.T) {
 		1,
 		[]routing.ForwardRouteEntry{{Key: "k", Target: "127.0.0.1:9000"}},
 		nil,
-		nil,
 	)
 	if !routeMgr.ForwardTable().HasRoute("k", originID) {
 		t.Fatalf("setup: forward route should exist before withdraw")
@@ -502,7 +501,6 @@ func TestFlooder_HandleRouteWithdraw_Domain(t *testing.T) {
 		originID,
 		1,
 		[]routing.DomainRouteEntry{{Pattern: "*.example.com", IsWildcard: true}},
-		nil,
 		nil,
 	)
 	if !routeMgr.DomainTable().HasRoute("*.example.com", originID) {
@@ -1485,7 +1483,7 @@ func TestFlooder_SendFullTable_IncludesAgentPresenceRoutes(t *testing.T) {
 	// Add an agent route learned from peer1
 	routeMgr.ProcessAgentRouteAdvertise(
 		peer1, remoteAgent, 1, remoteAgent,
-		[]identity.AgentID{peer1, remoteAgent}, nil, 1,
+		[]identity.AgentID{peer1, remoteAgent}, 1,
 	)
 
 	// Send full table to peer2
@@ -2246,12 +2244,12 @@ func TestFlooder_FloodWithdrawnRoutes(t *testing.T) {
 
 	path := []identity.AgentID{deadPeer, originID}
 	routeMgr.ProcessRouteAdvertise(deadPeer, originID, 7,
-		[]routing.RouteEntry{{Network: routing.MustParseCIDR("10.0.0.0/8"), Metric: 1}}, path, nil)
+		[]routing.RouteEntry{{Network: routing.MustParseCIDR("10.0.0.0/8"), Metric: 1}}, path)
 	routeMgr.ProcessDomainRouteAdvertise(deadPeer, originID, 7,
-		[]routing.DomainRouteEntry{{Pattern: "example.com"}}, path, nil)
+		[]routing.DomainRouteEntry{{Pattern: "example.com"}}, path)
 	routeMgr.ProcessForwardRouteAdvertise(deadPeer, originID, 7,
-		[]routing.ForwardRouteEntry{{Key: "ssh", Target: "10.0.0.1:22"}}, path, nil)
-	routeMgr.ProcessAgentRouteAdvertise(deadPeer, originID, 7, originID, path, nil, 1)
+		[]routing.ForwardRouteEntry{{Key: "ssh", Target: "10.0.0.1:22"}}, path)
+	routeMgr.ProcessAgentRouteAdvertise(deadPeer, originID, 7, originID, path, 1)
 
 	removedCIDR := routeMgr.HandlePeerDisconnect(deadPeer)
 	removedDomain := routeMgr.HandlePeerDisconnectDomain(deadPeer)
@@ -2314,9 +2312,9 @@ func TestFlooder_FloodWithdrawnRoutes_SkipsReachable(t *testing.T) {
 	// presence route arrives via both peers, and only the dead peer's entry
 	// is removed on disconnect.
 	routeMgr.ProcessAgentRouteAdvertise(deadPeer, originID, 7, originID,
-		[]identity.AgentID{deadPeer, originID}, nil, 1)
+		[]identity.AgentID{deadPeer, originID}, 1)
 	routeMgr.ProcessAgentRouteAdvertise(otherPeer, originID, 7, originID,
-		[]identity.AgentID{otherPeer, originID}, nil, 2)
+		[]identity.AgentID{otherPeer, originID}, 2)
 
 	removedAgent := routeMgr.HandlePeerDisconnectAgent(deadPeer)
 	if len(removedAgent) != 1 {

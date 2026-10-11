@@ -261,6 +261,9 @@ func (h *Handler) handleConnect(conn net.Conn, req *Request) error {
 	localAddr := target.LocalAddr().(*net.TCPAddr)
 	h.sendReply(conn, ReplySucceeded, localAddr.IP, uint16(localAddr.Port))
 
+	// Clear the handshake-phase deadline (ServerConfig.IdleTimeout) from both
+	// sides: it must not apply to the established tunnel, or long-lived idle
+	// connections (e.g. SSH) would be cut mid-session.
 	conn.SetDeadline(time.Time{})
 	target.SetDeadline(time.Time{})
 

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
 )
 
 // DomainRoute represents a single domain route entry.
@@ -36,9 +35,6 @@ type DomainRoute struct {
 
 	// Path is the AS-path style list of agent IDs (nil if encrypted and can't decrypt)
 	Path []identity.AgentID
-
-	// EncPath is the encrypted path data for forwarding (nil if no encryption)
-	EncPath *protocol.EncryptedData
 
 	// Sequence is used for route versioning
 	Sequence uint64
@@ -68,13 +64,6 @@ func (r *DomainRoute) Clone() *DomainRoute {
 	if len(r.Path) > 0 {
 		clone.Path = make([]identity.AgentID, len(r.Path))
 		copy(clone.Path, r.Path)
-	}
-	if r.EncPath != nil {
-		clone.EncPath = &protocol.EncryptedData{
-			Encrypted: r.EncPath.Encrypted,
-			Data:      make([]byte, len(r.EncPath.Data)),
-		}
-		copy(clone.EncPath.Data, r.EncPath.Data)
 	}
 	return clone
 }

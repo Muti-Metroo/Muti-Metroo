@@ -52,12 +52,11 @@ type Stream struct {
 	RemoteID  identity.AgentID
 	RequestID uint64
 
-	state       atomic.Int32
-	mu          sync.Mutex
-	readBuffer  chan []byte
-	writeBuffer chan []byte
-	closeOnce   sync.Once
-	closed      chan struct{}
+	state      atomic.Int32
+	mu         sync.Mutex
+	readBuffer chan []byte
+	closeOnce  sync.Once
+	closed     chan struct{}
 
 	// Half-close tracking
 	localFinWrite  bool
@@ -71,11 +70,6 @@ type Stream struct {
 	BytesSent atomic.Uint64
 	BytesRecv atomic.Uint64
 
-	// Callbacks
-	onData  func(*Stream, []byte)
-	onClose func(*Stream, error)
-	onReset func(*Stream, uint16)
-
 	// End-to-end encryption session key
 	sessionKey *crypto.SessionKey
 }
@@ -88,7 +82,6 @@ func NewStream(id uint64, localID, remoteID identity.AgentID, requestID uint64) 
 		RemoteID:    remoteID,
 		RequestID:   requestID,
 		readBuffer:  make(chan []byte, 64),
-		writeBuffer: make(chan []byte, 64),
 		closed:      make(chan struct{}),
 		remoteFinCh: make(chan struct{}),
 		CreatedAt:   time.Now(),
@@ -278,13 +271,6 @@ func (s *Stream) Done() <-chan struct{} {
 	return s.closed
 }
 
-// SetCallbacks sets the stream callbacks.
-func (s *Stream) SetCallbacks(onData func(*Stream, []byte), onClose func(*Stream, error), onReset func(*Stream, uint16)) {
-	s.onData = onData
-	s.onClose = onClose
-	s.onReset = onReset
-}
-
 // SetSessionKey sets the encryption session key for this stream.
 func (s *Stream) SetSessionKey(key *crypto.SessionKey) {
 	s.mu.Lock()
@@ -311,19 +297,15 @@ func (s *Stream) String() string {
 
 // ManagerConfig contains configuration for the stream manager.
 type ManagerConfig struct {
-	MaxStreamsPerPeer int
-	MaxStreamsTotal   int
-	BufferSize        int
-	IdleTimeout       time.Duration
+	// MaxStreamsTotal caps the number of concurrent streams (established plus
+	// pending opens). This is the only enforced stream limit.
+	MaxStreamsTotal int
 }
 
 // DefaultManagerConfig returns sensible defaults.
 func DefaultManagerConfig() ManagerConfig {
 	return ManagerConfig{
-		MaxStreamsPerPeer: 1000,
-		MaxStreamsTotal:   10000,
-		BufferSize:        32768,
-		IdleTimeout:       5 * time.Minute,
+		MaxStreamsTotal: 10000,
 	}
 }
 
@@ -370,11 +352,6 @@ type Manager struct {
 	streams         map[streamKey]*Stream
 	pendingRequests map[uint64]*PendingRequest
 	nextRequestID   atomic.Uint64
-
-	// Callbacks
-	onStreamOpen  func(*Stream)
-	onStreamClose func(*Stream, error)
-	onStreamData  func(*Stream, []byte)
 }
 
 // NewManager creates a new stream manager.
@@ -385,13 +362,6 @@ func NewManager(cfg ManagerConfig, localID identity.AgentID) *Manager {
 		streams:         make(map[streamKey]*Stream),
 		pendingRequests: make(map[uint64]*PendingRequest),
 	}
-}
-
-// SetCallbacks sets the manager's callbacks.
-func (m *Manager) SetCallbacks(onOpen func(*Stream), onClose func(*Stream, error), onData func(*Stream, []byte)) {
-	m.onStreamOpen = onOpen
-	m.onStreamClose = onClose
-	m.onStreamData = onData
 }
 
 // OpenStreamResult contains the result channel and request ID for opening a stream.
@@ -487,11 +457,6 @@ func (m *Manager) HandleStreamOpenAck(peer identity.AgentID, requestID uint64, b
 		RemoteEphemeral: remoteEphemeral,
 	}
 
-	// Notify callback
-	if m.onStreamOpen != nil {
-		m.onStreamOpen(stream)
-	}
-
 	return stream, nil
 }
 
@@ -569,10 +534,6 @@ func (m *Manager) AcceptStream(streamID uint64, requestID uint64, remoteID ident
 
 	m.streams[streamKey{peer: remoteID, streamID: streamID}] = stream
 
-	if m.onStreamOpen != nil {
-		m.onStreamOpen(stream)
-	}
-
 	return stream, nil
 }
 
@@ -595,9 +556,6 @@ func (m *Manager) RemoveStream(peer identity.AgentID, streamID uint64) {
 
 	if ok {
 		stream.Close()
-		if m.onStreamClose != nil {
-			m.onStreamClose(stream, nil)
-		}
 	}
 }
 
@@ -619,10 +577,6 @@ func (m *Manager) HandleStreamData(peer identity.AgentID, streamID uint64, flags
 	if len(data) > 0 {
 		if err := stream.PushData(data); err != nil {
 			return err
-		}
-
-		if m.onStreamData != nil {
-			m.onStreamData(stream, data)
 		}
 	}
 
@@ -646,12 +600,6 @@ func (m *Manager) HandleStreamReset(peer identity.AgentID, streamID uint64, erro
 
 	if ok {
 		stream.Close()
-		if stream.onReset != nil {
-			stream.onReset(stream, errorCode)
-		}
-		if m.onStreamClose != nil {
-			m.onStreamClose(stream, fmt.Errorf("stream reset: code=%d", errorCode))
-		}
 	}
 }
 
@@ -682,13 +630,9 @@ func (m *Manager) CloseStreamsForPeer(peer identity.AgentID) int {
 	}
 	m.mu.Unlock()
 
-	// Close outside the lock: Close fires no callbacks but readers wake up,
-	// and onStreamClose may call back into the manager.
+	// Close outside the lock: Close fires no callbacks but readers wake up.
 	for _, stream := range closing {
 		stream.Close()
-		if m.onStreamClose != nil {
-			m.onStreamClose(stream, fmt.Errorf("peer %s disconnected", peer.ShortString()))
-		}
 	}
 	for _, preq := range pending {
 		crypto.ZeroKey(&preq.EphemeralPrivate)

@@ -302,25 +302,14 @@ routing:
 			wantError: "max_hops must be between 1 and 255",
 		},
 		{
-			name: "buffer_size too small",
+			name: "max_streams_total not positive",
 			yaml: `
 agent:
   data_dir: "./data"
 limits:
-  buffer_size: 512
+  max_streams_total: 0
 `,
-			wantError: "buffer_size must be at least 1024",
-		},
-		{
-			name: "max_streams_total less than per_peer",
-			yaml: `
-agent:
-  data_dir: "./data"
-limits:
-  max_streams_per_peer: 1000
-  max_streams_total: 500
-`,
-			wantError: "max_streams_total must be >= max_streams_per_peer",
+			wantError: "max_streams_total must be positive",
 		},
 	}
 

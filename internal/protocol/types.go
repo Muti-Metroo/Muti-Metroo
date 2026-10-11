@@ -72,7 +72,9 @@ const (
 // Frame flags
 const (
 	FlagFinWrite uint8 = 0x01 // Sender done writing
-	FlagFinRead  uint8 = 0x02 // Sender done reading
+	// Flag bit 0x02 (historically "FIN_READ", sender done reading) is reserved
+	// on the wire but never set or acted on; TCP has no "done receiving"
+	// signal to propagate. Receivers ignore it.
 )
 
 // Address type constants

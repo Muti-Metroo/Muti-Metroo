@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
 )
 
 func TestAgentRoute_String(t *testing.T) {
@@ -32,10 +31,6 @@ func TestAgentRoute_Clone(t *testing.T) {
 		Metric:      10,
 		Path:        []identity.AgentID{agentID},
 		Sequence:    42,
-		EncPath: &protocol.EncryptedData{
-			Encrypted: false,
-			Data:      []byte("test"),
-		},
 	}
 
 	clone := original.Clone()
@@ -60,12 +55,6 @@ func TestAgentRoute_Clone(t *testing.T) {
 	clone.Path[0] = identity.AgentID{}
 	if original.Path[0] == (identity.AgentID{}) {
 		t.Error("Clone path should not affect original path")
-	}
-
-	// Verify EncPath is deep copied
-	clone.EncPath.Data[0] = 0xFF
-	if original.EncPath.Data[0] == 0xFF {
-		t.Error("Clone EncPath should not affect original EncPath")
 	}
 }
 
@@ -580,7 +569,7 @@ func TestManager_ProcessAgentRouteAdvertise(t *testing.T) {
 	peerB, _ := identity.NewAgentID()
 
 	path := []identity.AgentID{peerB, agentA}
-	added := mgr.ProcessAgentRouteAdvertise(peerB, agentA, 1, agentA, path, nil, 1)
+	added := mgr.ProcessAgentRouteAdvertise(peerB, agentA, 1, agentA, path, 1)
 	if !added {
 		t.Error("ProcessAgentRouteAdvertise should return true for new route")
 	}
@@ -614,7 +603,7 @@ func TestManager_CleanupStaleAgentRoutes(t *testing.T) {
 	agentA, _ := identity.NewAgentID()
 	peerB, _ := identity.NewAgentID()
 
-	mgr.ProcessAgentRouteAdvertise(peerB, agentA, 1, agentA, []identity.AgentID{peerB, agentA}, nil, 1)
+	mgr.ProcessAgentRouteAdvertise(peerB, agentA, 1, agentA, []identity.AgentID{peerB, agentA}, 1)
 
 	// Backdate the route
 	agentTable := mgr.AgentTable()

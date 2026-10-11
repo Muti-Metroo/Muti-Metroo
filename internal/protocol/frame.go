@@ -17,9 +17,6 @@ var (
 
 	// ErrInvalidFrame is returned when a frame is malformed
 	ErrInvalidFrame = errors.New("invalid frame")
-
-	// ErrUnknownFrameType is returned for unrecognized frame types
-	ErrUnknownFrameType = errors.New("unknown frame type")
 )
 
 // ============================================================================
@@ -76,9 +73,9 @@ const MaxCountLen = 255
 // MaxRoutesPerMessage caps how many routes ride in one ROUTE_ADVERTISE or
 // ROUTE_WITHDRAW. Both wire formats carry the route count in a single byte, so
 // a message holding 256 or more routes encodes a wrapped count that the peer
-// cannot decode. A decode error drops the whole connection, and the next
-// attempt re-sends the same message, so the link never recovers. Origins with
-// more routes than this must split across several messages.
+// cannot decode. A payload decode error is log-and-drop, so the sender would
+// keep re-sending the same undecodable message forever. Origins with more
+// routes than this must split across several messages.
 const MaxRoutesPerMessage = 255
 
 // MaxStringLen is the longest string the 1-byte length prefix can describe.
@@ -396,9 +393,16 @@ func (f *Frame) String() string {
 
 // PeerHello is the payload for PEER_HELLO and PEER_HELLO_ACK frames.
 type PeerHello struct {
-	Version      uint16
-	AgentID      identity.AgentID
-	Timestamp    uint64
+	Version uint16
+	AgentID identity.AgentID
+	// Timestamp is reserved/unused: the receiver echoes it back in
+	// PEER_HELLO_ACK but neither side reads it (RTT is measured with
+	// time.Since around the handshake and via keepalives). Kept on the wire
+	// for compatibility.
+	Timestamp uint64
+	// Capabilities is reserved/unused: it is exchanged and stored but no
+	// production code path consumes it (HasCapability has no callers).
+	// Kept on the wire for compatibility and future feature negotiation.
 	Capabilities []string
 	DisplayName  string // Added for topology visualization
 }
@@ -797,9 +801,13 @@ type RouteAdvertise struct {
 	OriginDisplayName string // Display name of the origin agent for topology visualization
 	Sequence          uint64
 	Routes            []Route
-	Path              []identity.AgentID // Route path (may be decrypted from EncPath)
-	EncPath           *EncryptedData     // Encrypted path data (nil if not using encryption)
-	SeenBy            []identity.AgentID
+	Path              []identity.AgentID // Route path (plaintext; EncPath carries it on the wire)
+	// EncPath wraps the path for the wire. The name is historical: path
+	// encryption was removed (transit agents need the plaintext path), so
+	// current agents always send Encrypted=false. The Encrypted=true branch
+	// remains decodable for wire compatibility only.
+	EncPath *EncryptedData
+	SeenBy  []identity.AgentID
 	// Comments is a parallel slice to Routes carrying the operator
 	// comment for each prefix (empty string if unset). It is encoded as
 	// an optional trailing field; older agents stop parsing after SeenBy
@@ -809,7 +817,7 @@ type RouteAdvertise struct {
 }
 
 // Encode serializes RouteAdvertise to bytes.
-// Format with encryption support:
+// Format:
 //
 //	origin(16) + displayNameLen(1) + displayName + seq(8) + routeCount(1) + routes +
 //	EncryptedData(flag+len+path) + seenByLen(1) + seenBy +

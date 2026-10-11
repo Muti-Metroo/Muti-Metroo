@@ -380,12 +380,11 @@ func (a *Agent) initComponents() error {
 	// Initialize routing manager
 	a.routeMgr = routing.NewManager(a.id)
 
-	// Initialize stream manager
+	// Initialize stream manager. MaxStreamsTotal is the only enforced stream
+	// limit; the deprecated limits.max_streams_per_peer and limits.buffer_size
+	// config keys are accepted for compatibility but do nothing.
 	streamCfg := stream.ManagerConfig{
-		MaxStreamsPerPeer: a.cfg.Limits.MaxStreamsPerPeer,
-		MaxStreamsTotal:   a.cfg.Limits.MaxStreamsTotal,
-		BufferSize:        a.cfg.Limits.BufferSize,
-		IdleTimeout:       a.cfg.Connections.IdleThreshold,
+		MaxStreamsTotal: a.cfg.Limits.MaxStreamsTotal,
 	}
 	a.streamMgr = stream.NewManager(streamCfg, a.id)
 
@@ -3822,6 +3821,14 @@ func (a *Agent) processFrame(peerID identity.AgentID, frame *protocol.Frame) {
 		a.handleWakeCommand(peerID, frame)
 	case protocol.FrameQueuedState:
 		a.handleQueuedState(peerID, frame)
+	default:
+		// Unknown frame types are dropped deliberately: forward
+		// compatibility with newer peers. Logged at debug so an unexpected
+		// flood of unknown types is visible when debugging.
+		a.logger.Debug("dropping unknown frame type",
+			logging.KeyPeerID, peerID.ShortString(),
+			"frame_type", frame.Type,
+			"stream_id", frame.StreamID)
 	}
 }
 
@@ -5580,10 +5587,12 @@ type meshConn struct {
 	readBuf    []byte
 	readOffset int
 
-	// Deadlines for read/write operations
-	mu            sync.Mutex
-	readDeadline  time.Time
-	writeDeadline time.Time
+	// Deadlines for read operations. There is no write deadline: Write sends
+	// through the peer connection, where every frame write is already bounded
+	// by the transport-level per-frame write deadline
+	// (connections.write_timeout -> peer.Connection.WriteFrame).
+	mu           sync.Mutex
+	readDeadline time.Time
 }
 
 // Read reads data from the mesh connection.
@@ -5746,12 +5755,12 @@ func (c *meshConn) RemoteAddr() net.Addr {
 	return c.remoteAddr
 }
 
-// SetDeadline sets read and write deadlines.
+// SetDeadline sets the read deadline. Writes are not deadline-bound at this
+// layer (see the meshConn struct comment); this satisfies net.Conn.
 func (c *meshConn) SetDeadline(t time.Time) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.readDeadline = t
-	c.writeDeadline = t
 	return nil
 }
 
@@ -5763,11 +5772,10 @@ func (c *meshConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-// SetWriteDeadline sets the write deadline.
+// SetWriteDeadline is a no-op: mesh writes are bounded by the peer
+// connection's per-frame write deadline, not a per-stream deadline.
+// It exists only to satisfy net.Conn.
 func (c *meshConn) SetWriteDeadline(t time.Time) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.writeDeadline = t
 	return nil
 }
 
