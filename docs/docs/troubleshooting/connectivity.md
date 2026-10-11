@@ -108,8 +108,7 @@ If an expected route is missing:
 
 1. **Check the exit.** On the exit agent, `exit.enabled` must be `true` and the CIDR must be in `exit.routes` or added with `muti-metroo route add`. The exit's startup output lists its exit routes.
 2. **Check every hop.** Routes travel only over connected peers. Run `muti-metroo peer status` on each agent along the path.
-3. **Check `routing.max_hops`.** Advertisements are not forwarded beyond this many hops (default 16).
-4. **Trigger an advertisement.** Exits advertise every `routing.advertise_interval` (default 2 minutes). To advertise immediately, on the exit:
+3. **Trigger an advertisement.** Exits advertise every `routing.advertise_interval` (default 2 minutes). To advertise immediately, on the exit:
 
    ```bash
    curl -X POST http://localhost:8080/routes/advertise

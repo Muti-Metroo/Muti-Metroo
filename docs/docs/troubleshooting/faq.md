@@ -66,7 +66,9 @@ See [Environment Variables](/configuration/environment-variables).
 |-----------|-----------|
 | UDP allowed between agents | QUIC |
 | Only TCP allowed, or UDP is throttled | HTTP/2 |
-| Outbound only through an HTTP proxy, or behind a reverse proxy | WebSocket |
+| Behind a reverse proxy or CDN | WebSocket |
+
+Outbound connections through an HTTP proxy are not supported in the current release.
 
 A mesh can mix transports; each peer connection uses its own. See [Transports](/concepts/transports).
 
