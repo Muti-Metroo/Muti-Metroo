@@ -974,6 +974,11 @@ All communication uses a consistent framing protocol:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+TTL is enforced as a loop guard on all three open messages (STREAM_OPEN,
+UDP_OPEN, ICMP_OPEN). The origin sets it from the path length, every transit
+hop decrements it when rebuilding the open, and a transit that receives an
+open with TTL 0 rejects it with `TTL_EXCEEDED` instead of forwarding.
+
 #### STREAM_OPEN_ACK (0x02)
 
 ```

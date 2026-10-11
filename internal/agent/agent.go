@@ -3880,6 +3880,23 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 		return
 	}
 
+	// Enforce the hop limit: an open that arrives at a transit hop with TTL 0
+	// has looped or outlived its path, so reject it instead of forwarding.
+	if open.TTL == 0 {
+		errPayload := &protocol.StreamOpenErr{
+			RequestID: open.RequestID,
+			ErrorCode: protocol.ErrTTLExceeded,
+			Message:   "TTL exceeded",
+		}
+		errFrame := &protocol.Frame{
+			Type:     protocol.FrameStreamOpenErr,
+			StreamID: frame.StreamID,
+			Payload:  errPayload.Encode(),
+		}
+		a.peerMgr.SendToPeer(peerID, errFrame)
+		return
+	}
+
 	// Forward to next hop
 	nextHop := open.RemainingPath[0]
 
@@ -3922,6 +3939,7 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 		AddressType:     open.AddressType,
 		Address:         open.Address,
 		Port:            open.Port,
+		TTL:             open.TTL - 1,
 		RemainingPath:   newPath,
 		EphemeralPubKey: open.EphemeralPubKey,
 	}
@@ -5166,6 +5184,7 @@ func (a *Agent) DialContext(ctx context.Context, network, address string) (net.C
 		AddressType:     addrType,
 		Address:         addrBytes,
 		Port:            uint16(port),
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -5272,6 +5291,7 @@ func (a *Agent) dialViaDomainRouteWithContext(ctx context.Context, network, host
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         addrBytes,
 		Port:            uint16(port),
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -5393,6 +5413,7 @@ func (a *Agent) DialForward(ctx context.Context, key string) (net.Conn, error) {
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         addrBytes,
 		Port:            0, // Not used for forwards
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -6830,6 +6851,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         domainBytes,
 		Port:            0,
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -7098,6 +7120,7 @@ func (a *Agent) DownloadFile(ctx context.Context, targetID identity.AgentID, rem
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         downloadDomainBytes,
 		Port:            0,
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -7262,6 +7285,7 @@ func (a *Agent) DownloadFileStream(ctx context.Context, targetID identity.AgentI
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         downloadDomainBytes,
 		Port:            0,
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}
@@ -7789,6 +7813,7 @@ func (a *Agent) OpenShellStream(ctx context.Context, targetID identity.AgentID, 
 		AddressType:     protocol.AddrTypeDomain,
 		Address:         domainBytes,
 		Port:            0,
+		TTL:             uint8(len(remainingPath)),
 		RemainingPath:   remainingPath,
 		EphemeralPubKey: ephPub,
 	}

@@ -486,6 +486,13 @@ func (a *Agent) handleUDPOpen(peerID identity.AgentID, frame *protocol.Frame) {
 		return
 	}
 
+	// Enforce the hop limit: an open that arrives at a transit hop with TTL 0
+	// has looped or outlived its path, so reject it instead of forwarding.
+	if open.TTL == 0 {
+		a.sendUDPOpenErr(peerID, frame.StreamID, open.RequestID, protocol.ErrTTLExceeded, "TTL exceeded")
+		return
+	}
+
 	// Relay to next hop
 	nextHop := open.RemainingPath[0]
 
@@ -516,7 +523,7 @@ func (a *Agent) handleUDPOpen(peerID identity.AgentID, frame *protocol.Frame) {
 		AddressType:     open.AddressType,
 		Address:         open.Address,
 		Port:            open.Port,
-		TTL:             open.TTL,
+		TTL:             open.TTL - 1,
 		RemainingPath:   newPath,
 		EphemeralPubKey: open.EphemeralPubKey,
 	}

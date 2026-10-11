@@ -122,6 +122,13 @@ func (a *Agent) handleICMPOpen(peerID identity.AgentID, frame *protocol.Frame) {
 		return
 	}
 
+	// Enforce the hop limit: an open that arrives at a transit hop with TTL 0
+	// has looped or outlived its path, so reject it instead of forwarding.
+	if open.TTL == 0 {
+		a.sendICMPOpenErr(peerID, frame.StreamID, open.RequestID, protocol.ErrTTLExceeded, "TTL exceeded")
+		return
+	}
+
 	// Relay to next hop
 	nextHop := open.RemainingPath[0]
 
@@ -150,7 +157,7 @@ func (a *Agent) handleICMPOpen(peerID identity.AgentID, frame *protocol.Frame) {
 	fwdOpen := &protocol.ICMPOpen{
 		RequestID:       open.RequestID,
 		DestIP:          open.DestIP,
-		TTL:             open.TTL,
+		TTL:             open.TTL - 1,
 		RemainingPath:   newPath,
 		EphemeralPubKey: open.EphemeralPubKey,
 	}
