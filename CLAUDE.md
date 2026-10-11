@@ -142,7 +142,7 @@ docker compose run test                       # Run tests in container
 **Config inspection** (no running agent required):
 
 ```bash
-muti-metroo config validate ./config.yaml          # exit 0 ok / 2 invalid
+muti-metroo config validate ./config.yaml          # exit 0 ok / 5 invalid (help text says 2)
 muti-metroo config show ./config.yaml              # secrets redacted
 muti-metroo config show ./config.yaml --diff-from-default
 ```

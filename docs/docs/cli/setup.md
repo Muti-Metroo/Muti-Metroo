@@ -40,7 +40,7 @@ The wizard asks for the following, in order. Press Enter to accept the default s
 The wizard then asks how to deliver the configuration:
 
 - **Save to config file**: writes the YAML file and creates `agent_id`, `agent_key`, and `agent_key.pub` in the data directory.
-- **Embed in binary**: writes a copy of the running binary with the configuration and identity embedded, so no config file or data directory is needed, and also saves the YAML file as a backup. The new binary starts the agent when run with no arguments.
+- **Embed in binary**: writes a copy of the running binary with the configuration and identity embedded, so no config file is needed, and also saves the YAML file as a backup. The embedded configuration leaves `agent.data_dir` at its default, so the agent still keeps runtime state in `./data` relative to its working directory. The new binary starts the agent when run with no arguments.
 
 With `-c <binary>`, the wizard skips the config path and data directory questions and always embeds into that binary. An identity already embedded in the binary is kept.
 

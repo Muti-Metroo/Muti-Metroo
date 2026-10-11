@@ -153,6 +153,8 @@ muti-metroo route remove 10.0.0.0/8 --yes
 
 Some commands use additional exit codes; their pages say so. For example, `shell` exits with the remote command's exit code.
 
+In the current release, code 4 is rarely returned: when the agent rejects the token, most commands report `unexpected status: 401` or a response decoding error and exit with code 1. Scripts that need to detect a bad token should check for `401` in the error output.
+
 ## Deprecated commands and flags
 
 These forms still work but print a warning to stderr and will be removed in a future release.
