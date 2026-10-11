@@ -30,7 +30,7 @@ connections:
 | Key                       | Type     | Default | Description                                                                                                                                         |
 | ------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `idle_threshold`          | duration | `5m`    | Interval between keepalive messages on each peer connection. Also the read idle timeout for connections that exits and forward endpoints open to their targets, and the time a SOCKS client has to complete its handshake. |
-| `timeout`                 | duration | `90s`   | Timeout for dialing a peer. A peer with no traffic for `idle_threshold` plus `timeout` is disconnected.                                              |
+| `timeout`                 | duration | `90s`   | Timeout for dialing a peer. A peer that sends nothing for `idle_threshold` plus `timeout`, or leaves a keepalive unanswered for `timeout`, is disconnected. |
 | `keepalive_jitter`        | float    | `0.2`   | Random variation applied to each keepalive interval, as a fraction (0.2 = plus or minus 20%). `0` disables jitter.                                  |
 | `tcp_keepalive`           | duration | `30s`   | Operating system TCP keepalive period on `h2` and `ws` connections, which keeps NAT mappings alive and detects dead TCP links. `0` disables it. QUIC is not affected. Must not be negative. |
 | `write_timeout`           | duration | `30s`   | Deadline applied to each frame write on a peer connection. A peer that stops reading fails the write and the connection is torn down, instead of blocking all later frames behind the stalled one. `0` disables it. Must not be negative. |
@@ -42,7 +42,10 @@ connections:
 
 ## Keepalive and dead-peer detection
 
-Each peer connection sends a keepalive every `idle_threshold`, varied by `keepalive_jitter` (never less than one second). At each keepalive, the agent first checks when it last received anything on the connection, and closes it if that was more than `idle_threshold` plus `timeout` ago (6.5 minutes with the defaults). A silent peer is therefore dropped at the first keepalive after that point.
+Each peer connection sends a keepalive every `idle_threshold`, varied by `keepalive_jitter` (never less than one second). A peer is declared dead when either:
+
+- nothing has been **received** on the connection for `idle_threshold` plus `timeout` (6.5 minutes with the defaults) — outbound traffic, including the keepalive itself, never refreshes this clock, or
+- a keepalive goes unanswered: the peer must return a `KEEPALIVE_ACK` within `timeout` of each probe.
 
 Lower values detect dead peers sooner and produce more background traffic:
 

@@ -70,8 +70,10 @@ type Connection struct {
 	streamAlloc *transport.StreamIDAllocator
 
 	// Activity tracking
-	lastActivity atomic.Int64
+	lastActivity atomic.Int64 // Any frame sent or received (status display)
+	lastInbound  atomic.Int64 // Inbound frames only; drives staleness checks
 	rtt          atomic.Int64 // Round-trip time in nanoseconds
+	pendingPing  atomic.Int64 // Timestamp of an unanswered keepalive; 0 = none
 
 	// Lifecycle
 	ctx       context.Context
@@ -140,6 +142,7 @@ func NewConnection(conn transport.PeerConn, cfg ConnectionConfig) *Connection {
 
 	c.state.Store(int32(StateHandshaking))
 	c.updateActivity()
+	c.updateInboundActivity()
 
 	// frameCh drains sequentially to preserve per-stream ordering
 	// (STREAM_CLOSE must not pass STREAM_DATA on the same stream).
@@ -263,16 +266,26 @@ func (c *Connection) SendData(streamID uint64, data []byte) error {
 	})
 }
 
-// SendKeepalive sends a KEEPALIVE frame.
+// SendKeepalive sends a KEEPALIVE frame and records it as an outstanding ping.
+// The keepalive loop closes the connection if the ping is still unanswered
+// KeepaliveTimeout later (see Manager.keepaliveLoop). The pending timestamp is
+// stored before the write so a fast ACK cannot be swallowed by the store.
 func (c *Connection) SendKeepalive() error {
+	ts := uint64(time.Now().UnixNano())
+	c.pendingPing.Store(int64(ts))
 	ka := &protocol.Keepalive{
-		Timestamp: uint64(time.Now().UnixNano()),
+		Timestamp: ts,
 	}
-	return c.WriteFrame(&protocol.Frame{
+	err := c.WriteFrame(&protocol.Frame{
 		Type:     protocol.FrameKeepalive,
 		StreamID: protocol.ControlStreamID,
 		Payload:  ka.Encode(),
 	})
+	if err != nil {
+		c.pendingPing.CompareAndSwap(int64(ts), 0)
+		return err
+	}
+	return nil
 }
 
 // SendKeepaliveAck sends a KEEPALIVE_ACK frame.
@@ -287,10 +300,31 @@ func (c *Connection) SendKeepaliveAck(timestamp uint64) error {
 	})
 }
 
-// LastActivity returns the time of last activity.
+// LastActivity returns the time of last activity (any frame sent or received).
 func (c *Connection) LastActivity() time.Time {
 	ns := c.lastActivity.Load()
 	return time.Unix(0, ns)
+}
+
+// LastInboundActivity returns the time the last inbound frame was received.
+// Unlike LastActivity it is not refreshed by outbound writes, so a keepalive
+// sent into a blackhole cannot make the link look alive.
+func (c *Connection) LastInboundActivity() time.Time {
+	ns := c.lastInbound.Load()
+	return time.Unix(0, ns)
+}
+
+// PendingPing returns the timestamp of the outstanding keepalive ping, or 0
+// if the last ping has been acknowledged (or none was sent yet).
+func (c *Connection) PendingPing() int64 {
+	return c.pendingPing.Load()
+}
+
+// clearPendingPing clears the outstanding ping if it matches the acknowledged
+// timestamp. A stale ACK carrying an older timestamp must not clear a newer
+// ping.
+func (c *Connection) clearPendingPing(timestamp uint64) {
+	c.pendingPing.CompareAndSwap(int64(timestamp), 0)
 }
 
 // RTT returns the measured round-trip time.
@@ -301,6 +335,12 @@ func (c *Connection) RTT() time.Duration {
 // updateActivity updates the last activity timestamp.
 func (c *Connection) updateActivity() {
 	c.lastActivity.Store(time.Now().UnixNano())
+}
+
+// updateInboundActivity updates the inbound activity timestamp. Called from
+// the read loop only.
+func (c *Connection) updateInboundActivity() {
+	c.lastInbound.Store(time.Now().UnixNano())
 }
 
 // UpdateRTT updates the measured RTT from a keepalive response.

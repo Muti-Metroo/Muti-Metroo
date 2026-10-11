@@ -36,7 +36,7 @@ type ManagerConfig struct {
 	HandshakeTimeout  time.Duration
 	KeepaliveInterval time.Duration
 	KeepaliveTimeout  time.Duration
-	KeepaliveJitter   float64 // Jitter fraction (0.0-1.0) to randomize keepalive timing
+	KeepaliveJitter   float64       // Jitter fraction (0.0-1.0) to randomize keepalive timing
 	WriteTimeout      time.Duration // Per-frame write deadline on peer connections; 0 disables
 	ReconnectConfig   ReconnectConfig
 	Logger            *slog.Logger
@@ -316,15 +316,17 @@ func (m *Manager) registerConnection(conn *Connection) {
 	}
 }
 
-// isStale reports whether conn has had no activity for longer than the
-// keepalive deadline. Past this point keepaliveLoop would close conn the next
-// time it ticks; registerConnection just gets there sooner.
+// isStale reports whether conn has received no inbound traffic for longer
+// than the keepalive deadline. Past this point keepaliveLoop would close conn
+// the next time it ticks; registerConnection just gets there sooner. The
+// check reads the inbound-only clock: outbound writes (including our own
+// keepalives) must not make a blackholed peer look alive.
 func (m *Manager) isStale(conn *Connection) bool {
 	threshold := m.cfg.KeepaliveInterval + m.cfg.KeepaliveTimeout
 	if threshold <= 0 {
 		return false
 	}
-	return time.Since(conn.LastActivity()) > threshold
+	return time.Since(conn.LastInboundActivity()) > threshold
 }
 
 // handleDisconnect is called when a connection is closed.
@@ -417,6 +419,7 @@ func (m *Manager) readLoop(conn *Connection) {
 		}
 
 		conn.updateActivity()
+		conn.updateInboundActivity()
 
 		// Handle control frames internally
 		switch frame.Type {
@@ -429,6 +432,7 @@ func (m *Manager) readLoop(conn *Connection) {
 			ka, err := protocol.DecodeKeepalive(frame.Payload)
 			if err == nil {
 				conn.UpdateRTT(ka.Timestamp)
+				conn.clearPendingPing(ka.Timestamp)
 			}
 		default:
 			// Stream-oriented frames go to the sequential processor to
@@ -473,7 +477,17 @@ func (m *Manager) jitteredKeepaliveInterval() time.Duration {
 	return result
 }
 
-// keepaliveLoop sends periodic keepalives with jittered timing.
+// keepaliveLoop sends periodic keepalives with jittered timing and enforces
+// the two dead-peer detectors:
+//
+//  1. Inbound silence: if nothing has been received for longer than
+//     KeepaliveInterval+KeepaliveTimeout (checked before each send), the
+//     connection is closed. This reads the inbound-only activity clock, so
+//     our own keepalives cannot refresh it.
+//  2. Unanswered ping: each keepalive must be answered by a KEEPALIVE_ACK
+//     within KeepaliveTimeout, otherwise the connection is closed. This
+//     catches a blackholed peer even when stray inbound traffic (or an
+//     asymmetric link failure) keeps the inbound clock fresh.
 func (m *Manager) keepaliveLoop(conn *Connection) {
 	defer m.wg.Done()
 	defer recovery.RecoverWithLog(m.logger, "peer.keepaliveLoop")
@@ -483,12 +497,31 @@ func (m *Manager) keepaliveLoop(conn *Connection) {
 	timer := time.NewTimer(m.jitteredKeepaliveInterval())
 	defer timer.Stop()
 
+	// ackTimer fires KeepaliveTimeout after each keepalive send. ackC is nil
+	// (blocking forever) while no ping is outstanding.
+	ackTimer := time.NewTimer(0)
+	if !ackTimer.Stop() {
+		select {
+		case <-ackTimer.C:
+		default:
+		}
+	}
+	defer ackTimer.Stop()
+	var ackC <-chan time.Time
+
 	for {
 		select {
 		case <-conn.Done():
 			return
 		case <-m.ctx.Done():
 			return
+		case <-ackC:
+			ackC = nil
+			if conn.PendingPing() != 0 {
+				conn.Close()
+				m.handleDisconnect(conn, fmt.Errorf("keepalive ack timeout"))
+				return
+			}
 		case <-timer.C:
 			// Check if connection is still active
 			if conn.State() != StateConnected {
@@ -507,6 +540,12 @@ func (m *Manager) keepaliveLoop(conn *Connection) {
 				conn.Close()
 				m.handleDisconnect(conn, err)
 				return
+			}
+
+			// Arm the ACK deadline for the ping just sent
+			if m.cfg.KeepaliveTimeout > 0 {
+				ackTimer.Reset(m.cfg.KeepaliveTimeout)
+				ackC = ackTimer.C
 			}
 
 			// Reset timer with new jittered interval

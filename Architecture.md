@@ -2641,6 +2641,13 @@ when a peer disconnects.
 │  Sent on StreamID 0 (control stream).                                       │
 │  KEEPALIVE_ACK echoes the same timestamp for RTT calculation.               │
 │                                                                             │
+│  Dead-peer detection (either condition closes the connection):              │
+│  • Inbound silence: no frame received for idle_threshold + timeout. The     │
+│    clock is inbound-only -- outbound writes (including the keepalive        │
+│    itself) never refresh it, so a blackholed peer cannot look alive.        │
+│  • Unanswered ping: every keepalive must be answered by a KEEPALIVE_ACK     │
+│    within timeout, matching on the echoed timestamp.                        │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

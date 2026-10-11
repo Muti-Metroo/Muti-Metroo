@@ -2,7 +2,9 @@ package peer
 
 import (
 	"context"
+	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -597,6 +599,7 @@ func TestManager_RegisterConnection_EvictsStaleDuplicate(t *testing.T) {
 	oldConn := NewConnection(&mockPeerConn{}, ConnectionConfig{LocalID: localID})
 	oldConn.RemoteID = remoteID
 	oldConn.lastActivity.Store(time.Now().Add(-1 * time.Hour).UnixNano())
+	oldConn.lastInbound.Store(time.Now().Add(-1 * time.Hour).UnixNano())
 	m.peers[remoteID] = oldConn
 
 	newConn := NewConnection(&mockPeerConn{}, ConnectionConfig{LocalID: localID})
@@ -2361,5 +2364,297 @@ func TestConnection_WriteFrame_NoControlStream(t *testing.T) {
 	conn.writer = protocol.NewFrameWriter(&mockStream{})
 	if err := conn.WriteFrame(&protocol.Frame{Type: protocol.FrameStreamData, StreamID: 1, Payload: []byte("x")}); err != nil {
 		t.Fatalf("WriteFrame() error = %v", err)
+	}
+}
+
+// ============================================================================
+// Inbound Activity / Keepalive ACK Tests
+// ============================================================================
+
+func TestConnection_InboundActivityTrackedSeparately(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	cfg := DefaultConnectionConfig(localID)
+	conn := NewConnection(&mockPeerConn{}, cfg)
+	defer conn.Close()
+
+	conn.writer = protocol.NewFrameWriter(&mockStream{})
+
+	// Freeze the inbound clock, then write: outbound frames must not refresh it.
+	frozen := time.Now().Add(-time.Minute)
+	conn.lastInbound.Store(frozen.UnixNano())
+
+	if err := conn.WriteFrame(&protocol.Frame{Type: protocol.FrameStreamData, StreamID: 1, Payload: []byte("x")}); err != nil {
+		t.Fatalf("WriteFrame() error = %v", err)
+	}
+	if got := conn.LastInboundActivity(); !got.Equal(frozen) {
+		t.Errorf("LastInboundActivity moved after outbound write: %v, want %v", got, frozen)
+	}
+
+	// The combined clock does move on writes (status display).
+	if time.Since(conn.LastActivity()) > time.Second {
+		t.Error("LastActivity should be refreshed by outbound writes")
+	}
+
+	// Inbound frames move the inbound clock.
+	conn.updateInboundActivity()
+	if got := conn.LastInboundActivity(); time.Since(got) > time.Second {
+		t.Errorf("LastInboundActivity = %v, want recent", got)
+	}
+}
+
+func TestConnection_PendingPingLifecycle(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	cfg := DefaultConnectionConfig(localID)
+	conn := NewConnection(&mockPeerConn{}, cfg)
+	defer conn.Close()
+
+	conn.writer = protocol.NewFrameWriter(&mockStream{})
+
+	if conn.PendingPing() != 0 {
+		t.Fatal("PendingPing should be 0 before any keepalive")
+	}
+
+	if err := conn.SendKeepalive(); err != nil {
+		t.Fatalf("SendKeepalive() error = %v", err)
+	}
+	pending := conn.PendingPing()
+	if pending == 0 {
+		t.Fatal("PendingPing should record the keepalive timestamp")
+	}
+
+	// A stale ACK (wrong timestamp) must not clear the outstanding ping.
+	conn.clearPendingPing(uint64(pending) - 1)
+	if conn.PendingPing() != pending {
+		t.Error("clearPendingPing with a stale timestamp cleared the pending ping")
+	}
+
+	// The matching ACK clears it.
+	conn.clearPendingPing(uint64(pending))
+	if conn.PendingPing() != 0 {
+		t.Error("clearPendingPing with the matching timestamp did not clear the ping")
+	}
+}
+
+// pipePeerConn is a mock PeerConn whose control stream is backed by io.Pipe
+// pairs, letting a test drive inbound frames and observe outbound ones.
+// Close unblocks a pending Read so the manager's readLoop can exit.
+type pipePeerConn struct {
+	isDialer bool
+
+	inR  *io.PipeReader // connection reads inbound frames from here
+	inW  *io.PipeWriter // test writes inbound frames here
+	outR *io.PipeReader // test reads outbound frames here
+	outW *io.PipeWriter // connection writes outbound frames here
+
+	closeOnce sync.Once
+}
+
+func newPipePeerConn(isDialer bool) *pipePeerConn {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	return &pipePeerConn{isDialer: isDialer, inR: inR, inW: inW, outR: outR, outW: outW}
+}
+
+func (p *pipePeerConn) OpenStream(ctx context.Context) (transport.Stream, error) {
+	return &mockStream{}, nil
+}
+
+func (p *pipePeerConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
+	return &mockStream{}, nil
+}
+
+func (p *pipePeerConn) Close() error {
+	p.closeOnce.Do(func() {
+		p.inR.Close()
+		p.inW.Close()
+		p.outR.Close()
+		p.outW.Close()
+	})
+	return nil
+}
+
+func (p *pipePeerConn) LocalAddr() net.Addr                    { return &mockAddr{addr: "local"} }
+func (p *pipePeerConn) RemoteAddr() net.Addr                   { return &mockAddr{addr: "remote"} }
+func (p *pipePeerConn) IsDialer() bool                         { return p.isDialer }
+func (p *pipePeerConn) TransportType() transport.TransportType { return transport.TransportQUIC }
+
+// newRegisteredPipeConn builds a connected, ready Connection over a
+// pipePeerConn and registers it with the manager, starting readLoop and
+// keepaliveLoop.
+func newRegisteredPipeConn(t *testing.T, m *Manager, remoteID identity.AgentID) (*Connection, *pipePeerConn) {
+	t.Helper()
+
+	pc := newPipePeerConn(false)
+	conn := NewConnection(pc, ConnectionConfig{LocalID: m.cfg.LocalID})
+	conn.RemoteID = remoteID
+	conn.reader = protocol.NewFrameReader(pc.inR)
+	conn.writer = protocol.NewFrameWriter(pc.outW)
+	conn.SetState(StateConnected)
+	conn.markReady()
+
+	m.registerConnection(conn)
+
+	if got := m.GetPeer(remoteID); got != conn {
+		t.Fatalf("connection not registered")
+	}
+	t.Cleanup(func() { conn.Close() })
+	return conn, pc
+}
+
+// drainKeepalives reads outbound frames written by conn and, for each
+// KEEPALIVE, optionally writes the matching KEEPALIVE_ACK back inbound.
+// Returns a channel closed when the drainer exits.
+func drainKeepalives(pc *pipePeerConn, answerAcks bool) chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reader := protocol.NewFrameReader(pc.outR)
+		for {
+			frame, err := reader.Read()
+			if err != nil {
+				return
+			}
+			if frame.Type != protocol.FrameKeepalive || !answerAcks {
+				continue
+			}
+			ka, err := protocol.DecodeKeepalive(frame.Payload)
+			if err != nil {
+				continue
+			}
+			ack := &protocol.Frame{
+				Type:     protocol.FrameKeepaliveAck,
+				StreamID: protocol.ControlStreamID,
+				Payload:  (&protocol.Keepalive{Timestamp: ka.Timestamp}).Encode(),
+			}
+			if err := protocol.NewFrameWriter(pc.inW).Write(ack); err != nil {
+				return
+			}
+		}
+	}()
+	return done
+}
+
+// TestManager_KeepaliveAckTimeout verifies that a keepalive left unanswered
+// for KeepaliveTimeout closes the connection and fires OnPeerDisconnect, even
+// though the transport socket itself looks fine.
+func TestManager_KeepaliveAckTimeout(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	tr := transport.NewQUICTransport()
+	defer tr.Close()
+
+	cfg := DefaultManagerConfig(localID, tr)
+	cfg.KeepaliveInterval = 100 * time.Millisecond
+	cfg.KeepaliveTimeout = 50 * time.Millisecond // ACK deadline (150ms) beats the staleness check (threshold 150ms, tick at 200ms)
+	cfg.KeepaliveJitter = 0
+	cfg.WriteTimeout = 0
+
+	disconnected := make(chan error, 1)
+	cfg.OnPeerDisconnect = func(_ *Connection, err error) { disconnected <- err }
+
+	m := NewManager(cfg)
+	defer m.Close()
+
+	remoteID, _ := identity.NewAgentID()
+	conn, pc := newRegisteredPipeConn(t, m, remoteID)
+	drainKeepalives(pc, false) // blackhole: never answer
+
+	select {
+	case err := <-disconnected:
+		if err == nil || !strings.Contains(err.Error(), "keepalive ack timeout") {
+			t.Errorf("disconnect error = %v, want keepalive ack timeout", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("connection not closed after unanswered keepalive")
+	}
+
+	select {
+	case <-conn.Done():
+	default:
+		t.Error("connection should be closed after keepalive ack timeout")
+	}
+	if m.GetPeer(remoteID) != nil {
+		t.Error("peer should be removed from the manager after ack timeout")
+	}
+}
+
+// TestManager_KeepaliveAckReceived verifies the connection stays up when every
+// keepalive is answered within KeepaliveTimeout.
+func TestManager_KeepaliveAckReceived(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	tr := transport.NewQUICTransport()
+	defer tr.Close()
+
+	cfg := DefaultManagerConfig(localID, tr)
+	cfg.KeepaliveInterval = 40 * time.Millisecond
+	cfg.KeepaliveTimeout = 150 * time.Millisecond
+	cfg.KeepaliveJitter = 0
+	cfg.WriteTimeout = 0
+
+	var disconnectCount atomic.Int32
+	cfg.OnPeerDisconnect = func(_ *Connection, _ error) { disconnectCount.Add(1) }
+
+	m := NewManager(cfg)
+	defer m.Close()
+
+	remoteID, _ := identity.NewAgentID()
+	conn, pc := newRegisteredPipeConn(t, m, remoteID)
+	drainKeepalives(pc, true) // answer every ping
+
+	// Run for several keepalive rounds.
+	time.Sleep(500 * time.Millisecond)
+
+	if disconnectCount.Load() != 0 {
+		t.Error("connection dropped despite timely keepalive acks")
+	}
+	select {
+	case <-conn.Done():
+		t.Error("connection closed despite timely keepalive acks")
+	default:
+	}
+	// Survival past several KeepaliveTimeouts proves acks clear the pending
+	// ping; RTT>0 proves the ack frame was processed.
+	if conn.RTT() <= 0 {
+		t.Error("RTT should be measured from the ack")
+	}
+}
+
+// TestManager_KeepaliveInboundStale verifies the inbound-silence detector in
+// isolation (ACK deadline disabled): a connection that receives nothing for
+// longer than KeepaliveInterval is closed, and our own outbound keepalives do
+// not refresh the clock.
+func TestManager_KeepaliveInboundStale(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	tr := transport.NewQUICTransport()
+	defer tr.Close()
+
+	cfg := DefaultManagerConfig(localID, tr)
+	cfg.KeepaliveInterval = 100 * time.Millisecond
+	cfg.KeepaliveTimeout = 0 // disables the ACK deadline; staleness threshold = interval
+	cfg.KeepaliveJitter = 0
+	cfg.WriteTimeout = 0
+
+	disconnected := make(chan error, 1)
+	cfg.OnPeerDisconnect = func(_ *Connection, err error) { disconnected <- err }
+
+	m := NewManager(cfg)
+	defer m.Close()
+
+	remoteID, _ := identity.NewAgentID()
+	conn, pc := newRegisteredPipeConn(t, m, remoteID)
+	drainKeepalives(pc, false) // drain outbound keepalives, never send inbound
+
+	select {
+	case err := <-disconnected:
+		if err == nil || !strings.Contains(err.Error(), "keepalive timeout") {
+			t.Errorf("disconnect error = %v, want keepalive timeout", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("silent connection never closed")
+	}
+
+	select {
+	case <-conn.Done():
+	default:
+		t.Error("connection should be closed")
 	}
 }
