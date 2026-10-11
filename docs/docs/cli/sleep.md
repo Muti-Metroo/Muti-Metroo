@@ -88,6 +88,8 @@ Use 'muti-metroo sleep-status' on each agent to verify reattachment.
 
 If the agent is not sleeping, the command fails with `Error: operation rejected: wake failed: not sleeping` and exits 5.
 
+The agent answers a wake request only after it has finished re-sending the wake command: twice `sleep.poll_interval` plus `sleep.poll_duration`, 10 minutes 30 seconds with the defaults. The CLI waits 30 seconds, so with the defaults `wake` reports a timeout and exits 3 even though the agent has woken. Confirm with `muti-metroo sleep-status`.
+
 ### Examples
 
 ```bash

@@ -70,7 +70,7 @@ With `--user`, and `--user-method` set to `cron` or to `auto` without a reachabl
 
 ### macOS (launchd)
 
-Run as root. Creates `/Library/LaunchDaemons/com.<name>.plist` and loads it with `launchctl load -w`. The daemon starts at boot and is restarted when it exits with an error. Output goes to `<name>.log` and `<name>.err.log` in the configuration file's directory.
+Run as root. Creates `/Library/LaunchDaemons/com.<name>.plist` and loads it with `launchctl load -w`. The daemon starts at boot and is restarted when it exits with an error. Output goes to `<name>.log` and `<name>.err.log` in the configuration file's directory, or in `/var/log` for a binary with an embedded configuration.
 
 ### Windows service
 
