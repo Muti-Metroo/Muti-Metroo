@@ -4,7 +4,10 @@
   "packages": {
     ".": {
       "component": "muti-metroo",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        "VERSION"
+      ]
     }
   },
   "bump-minor-pre-major": true,
