@@ -286,20 +286,21 @@ func addressLength(addrType uint8, domainLenByte byte) (int, error) {
 	}
 }
 
-// prefixLength returns the byte length for a route prefix based on address family.
-// For domain routes, domainLenByte should be the first byte of the prefix data.
-func prefixLength(family uint8, domainLenByte byte) int {
+// prefixLength returns the byte length of a route prefix for the fixed-size
+// address families. Domain and forward routes are variable-length and sized
+// by their callers from the actual prefix bytes. Unknown families return an
+// error: guessing a size would make the decoder consume the wrong number of
+// bytes and silently mis-parse the rest of the frame.
+func prefixLength(family uint8) (int, error) {
 	switch family {
 	case AddrFamilyIPv4:
-		return 4
+		return 4, nil
 	case AddrFamilyIPv6:
-		return 16
-	case AddrFamilyDomain:
-		return 1 + int(domainLenByte)
+		return 16, nil
 	case AddrFamilyAgent:
-		return 16 // AgentID is 16 bytes
+		return 16, nil // AgentID is 16 bytes
 	default:
-		return 16 // fallback
+		return 0, fmt.Errorf("unknown address family %d", family)
 	}
 }
 
@@ -818,11 +819,15 @@ func (r *RouteAdvertise) Encode() []byte {
 	// Calculate size
 	size := 16 + 1 + len(r.OriginDisplayName) + 8 + 1
 	for _, route := range r.Routes {
-		size += 2 + prefixLength(route.AddressFamily, 0) + 2
-		// Domain and forward routes use variable-length prefixes
-		if route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
-			size = size - prefixLength(route.AddressFamily, 0) + len(route.Prefix)
+		// Domain and forward routes use variable-length prefixes, sized from
+		// the actual bytes. Unknown families are sized the same way so the
+		// buffer is always exact; the receiving decoder rejects them
+		// explicitly.
+		pLen, err := prefixLength(route.AddressFamily)
+		if err != nil || route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
+			pLen = len(route.Prefix)
 		}
+		size += 2 + pLen + 2
 	}
 	size += len(encPathBytes)
 	size += 1 + len(r.SeenBy)*16
@@ -916,8 +921,14 @@ func DecodeRouteAdvertise(buf []byte) (*RouteAdvertise, error) {
 			// Agent presence routes: 16-byte AgentID prefix
 			pLen = 16
 		default:
-			// IPv4/IPv6 routes have fixed prefix lengths
-			pLen = prefixLength(route.AddressFamily, 0)
+			// IPv4/IPv6 routes have fixed prefix lengths; an unrecognized
+			// family fails loudly here instead of guessing a size and
+			// mis-parsing the rest of the frame.
+			if pl, err := prefixLength(route.AddressFamily); err != nil {
+				rd.setError(err.Error())
+			} else {
+				pLen = pl
+			}
 		}
 
 		route.Prefix = rd.readBytes(pLen)
@@ -982,11 +993,13 @@ func (r *RouteWithdraw) Encode() []byte {
 	// Calculate size: origin + seq + routeCount + routes + seenBy
 	size := 16 + 8 + 1
 	for _, route := range r.Routes {
-		size += 2 + prefixLength(route.AddressFamily, 0) + 2
-		// Domain and forward routes use variable-length prefixes
-		if route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
-			size = size - prefixLength(route.AddressFamily, 0) + len(route.Prefix)
+		// Same sizing rules as RouteAdvertise.Encode: variable-length and
+		// unknown families are sized from the actual prefix bytes.
+		pLen, err := prefixLength(route.AddressFamily)
+		if err != nil || route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
+			pLen = len(route.Prefix)
 		}
+		size += 2 + pLen + 2
 	}
 	size += 1 + len(r.SeenBy)*16
 
@@ -1049,7 +1062,12 @@ func DecodeRouteWithdraw(buf []byte) (*RouteWithdraw, error) {
 		case AddrFamilyAgent:
 			pLen = 16
 		default:
-			pLen = prefixLength(route.AddressFamily, 0)
+			// Fail loudly on unrecognized families (see DecodeRouteAdvertise).
+			if pl, err := prefixLength(route.AddressFamily); err != nil {
+				rd.setError(err.Error())
+			} else {
+				pLen = pl
+			}
 		}
 
 		route.Prefix = rd.readBytes(pLen)

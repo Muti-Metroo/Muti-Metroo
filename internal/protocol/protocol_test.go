@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -533,6 +534,71 @@ func TestRouteWithdraw_EncodeDecode(t *testing.T) {
 	}
 	if len(decoded.Routes) != 1 {
 		t.Fatalf("Routes length = %d, want 1", len(decoded.Routes))
+	}
+}
+
+// TestRouteAdvertise_UnknownAddressFamily verifies that a route carrying an
+// unrecognized address family is rejected loudly, at the route's own offset,
+// instead of being parsed as a guessed 16-byte prefix that would mis-parse
+// the rest of the frame.
+func TestRouteAdvertise_UnknownAddressFamily(t *testing.T) {
+	origin, _ := identity.NewAgentID()
+
+	original := &RouteAdvertise{
+		OriginAgent: origin,
+		Sequence:    1,
+		Routes: []Route{
+			{
+				AddressFamily: 0x7F, // unrecognized family
+				PrefixLength:  8,
+				Prefix:        []byte{10, 0, 0, 0},
+				Metric:        1,
+			},
+		},
+		Path:   []identity.AgentID{origin},
+		SeenBy: []identity.AgentID{origin},
+	}
+
+	_, err := DecodeRouteAdvertise(original.Encode())
+	if err == nil {
+		t.Fatal("DecodeRouteAdvertise() should fail on unknown address family")
+	}
+	if !errors.Is(err, ErrInvalidFrame) {
+		t.Errorf("error = %v, want ErrInvalidFrame", err)
+	}
+	if !strings.Contains(err.Error(), "unknown address family") {
+		t.Errorf("error = %v, want mention of unknown address family", err)
+	}
+}
+
+// TestRouteWithdraw_UnknownAddressFamily verifies the same loud failure for
+// ROUTE_WITHDRAW.
+func TestRouteWithdraw_UnknownAddressFamily(t *testing.T) {
+	origin, _ := identity.NewAgentID()
+
+	original := &RouteWithdraw{
+		OriginAgent: origin,
+		Sequence:    1,
+		Routes: []Route{
+			{
+				AddressFamily: 0x7F, // unrecognized family
+				PrefixLength:  24,
+				Prefix:        []byte{10, 5, 3, 0},
+				Metric:        0,
+			},
+		},
+		SeenBy: []identity.AgentID{origin},
+	}
+
+	_, err := DecodeRouteWithdraw(original.Encode())
+	if err == nil {
+		t.Fatal("DecodeRouteWithdraw() should fail on unknown address family")
+	}
+	if !errors.Is(err, ErrInvalidFrame) {
+		t.Errorf("error = %v, want ErrInvalidFrame", err)
+	}
+	if !strings.Contains(err.Error(), "unknown address family") {
+		t.Errorf("error = %v, want mention of unknown address family", err)
 	}
 }
 
