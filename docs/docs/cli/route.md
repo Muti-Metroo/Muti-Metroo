@@ -41,7 +41,9 @@ Prints the route table of the agent at `-a`. This command only queries the agent
 
 ### Output
 
-The table has the columns `NETWORK`, `NEXT HOP`, `ORIGIN`, `METRIC`, `HOPS`, and `COMMENT`, followed by a `Total: N route(s)` line. `ORIGIN` identifies the exit agent that advertises the network, `HOPS` is the number of hops to it, and `COMMENT` is the operator comment attached to the route. With no routes, the table is replaced by `No routes in table.`
+The table has the columns `NETWORK`, `NEXT HOP`, `ORIGIN`, `METRIC`, `HOPS`, and `COMMENT`, followed by a `Total: N route(s)` line. `ORIGIN` is the short agent ID of the exit that advertises the network, `HOPS` is the number of hops to it, and `COMMENT` is the operator comment attached to the route. With no routes, the table is replaced by `No routes in table.`
+
+In the current release, `NEXT HOP` is always empty and `METRIC` always shows `0`, because the command reads fields the agent does not return. [`route trace`](#route-trace) shows the next hop and metric of each route.
 
 ### Examples
 
