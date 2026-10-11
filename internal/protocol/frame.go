@@ -327,15 +327,21 @@ func (f *Frame) Encode() ([]byte, error) {
 	buf := make([]byte, HeaderSize+len(f.Payload))
 
 	// Header
+	f.encodeHeader(buf[:HeaderSize])
+
+	// Payload
+	copy(buf[HeaderSize:], f.Payload)
+
+	return buf, nil
+}
+
+// encodeHeader writes the 14-byte frame header into buf.
+// Callers must ensure the payload length was validated against MaxPayloadSize.
+func (f *Frame) encodeHeader(buf []byte) {
 	buf[0] = f.Type
 	buf[1] = f.Flags
 	binary.BigEndian.PutUint32(buf[2:6], uint32(len(f.Payload)))
 	binary.BigEndian.PutUint64(buf[6:14], f.StreamID)
-
-	// Payload
-	copy(buf[14:], f.Payload)
-
-	return buf, nil
 }
 
 // DecodeHeader decodes a frame header from bytes.
@@ -2527,6 +2533,17 @@ func NewFrameReader(r io.Reader) *FrameReader {
 }
 
 // Read reads the next frame.
+//
+// The payload buffer is freshly allocated per frame and deliberately NOT
+// drawn from a sync.Pool: ownership of the slice passes to asynchronous
+// consumers with no release point. Frames are dispatched through channels
+// (peer Connection.frameCh/fastLaneCh) to handlers, and stream data payloads
+// are retained by stream read buffers until the application drains them
+// (e.g. agent.handleStreamData -> stream.Manager.HandleStreamData). Recycling
+// the buffer at any point visible to FrameReader would corrupt data still in
+// flight. A pool would need an explicit ownership/release protocol across
+// peer, agent, and stream layers -- not worth the risk for one allocation
+// per frame.
 func (fr *FrameReader) Read() (*Frame, error) {
 	// Read header
 	if _, err := io.ReadFull(fr.r, fr.header[:]); err != nil {
@@ -2565,13 +2582,46 @@ func NewFrameWriter(w io.Writer) *FrameWriter {
 }
 
 // Write writes a frame.
+//
+// The header and payload are written as two separate writes instead of
+// copying both into one coalesced buffer (Encode): the payload slice can be
+// handed straight to the socket, skipping a 14+len allocation and a full
+// payload copy per frame per hop. All transports (QUIC stream, H2 pipe,
+// WebSocket-as-bytestream) are ordered byte streams, so splitting a frame
+// across two writes is transparent to the reader. Callers serialize writes
+// (peer.Connection.WriteFrame holds writeMu), so the two writes cannot
+// interleave with another frame.
 func (fw *FrameWriter) Write(f *Frame) error {
-	data, err := f.Encode()
-	if err != nil {
+	if len(f.Payload) > MaxPayloadSize {
+		return ErrFrameTooLarge
+	}
+
+	var header [HeaderSize]byte
+	f.encodeHeader(header[:])
+	if err := writeFull(fw.w, header[:]); err != nil {
 		return err
 	}
-	_, err = fw.w.Write(data)
-	return err
+	if len(f.Payload) == 0 {
+		return nil
+	}
+	return writeFull(fw.w, f.Payload)
+}
+
+// writeFull writes all of p, looping over short writes. io.Writer permits a
+// short write without an error; the transports used here write fully or fail,
+// but the loop keeps this correct for any writer.
+func writeFull(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
+	}
+	return nil
 }
 
 // WriteFrame is a convenience method to write a frame with the given parameters.

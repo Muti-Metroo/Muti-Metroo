@@ -677,6 +677,55 @@ func TestFrameWriter_WriteFrame(t *testing.T) {
 	}
 }
 
+// shortWriter deliberately writes at most max bytes per call to exercise
+// writeFull's short-write loop.
+type shortWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.max {
+		p = p[:w.max]
+	}
+	return w.buf.Write(p)
+}
+
+func TestFrameWriter_WriteMatchesEncode(t *testing.T) {
+	frames := []*Frame{
+		{Type: FrameStreamOpen, StreamID: 1, Payload: []byte("open")},
+		{Type: FrameStreamData, StreamID: 42, Payload: make([]byte, 1024)},
+		{Type: FrameKeepalive, StreamID: ControlStreamID, Payload: nil},
+	}
+
+	for i, f := range frames {
+		want, err := f.Encode()
+		if err != nil {
+			t.Fatalf("frame %d Encode() error = %v", i, err)
+		}
+
+		// The two-write path must produce bytes identical to Encode, even
+		// through a writer that returns short writes.
+		w := &shortWriter{max: 5}
+		if err := NewFrameWriter(w).Write(f); err != nil {
+			t.Fatalf("frame %d Write() error = %v", i, err)
+		}
+		if got := w.buf.Bytes(); !bytes.Equal(got, want) {
+			t.Errorf("frame %d written bytes differ from Encode()", i)
+		}
+	}
+
+	// Oversized payloads must be rejected before any bytes hit the writer.
+	w := &shortWriter{max: 5}
+	big := &Frame{Type: FrameStreamData, StreamID: 1, Payload: make([]byte, MaxPayloadSize+1)}
+	if err := NewFrameWriter(w).Write(big); err != ErrFrameTooLarge {
+		t.Errorf("oversized Write() error = %v, want ErrFrameTooLarge", err)
+	}
+	if w.buf.Len() != 0 {
+		t.Errorf("oversized Write() wrote %d bytes, want 0", w.buf.Len())
+	}
+}
+
 func TestDecodeStreamOpen_InvalidAddressType(t *testing.T) {
 	data := make([]byte, 20)
 	data[8] = 0xFF // Invalid address type
@@ -752,6 +801,21 @@ func BenchmarkFrame_Decode(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = Decode(data)
+	}
+}
+
+func BenchmarkFrameWriter_Write(b *testing.B) {
+	f := &Frame{
+		Type:     FrameStreamData,
+		Flags:    0,
+		StreamID: 12345,
+		Payload:  make([]byte, 1024),
+	}
+	fw := NewFrameWriter(io.Discard)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = fw.Write(f)
 	}
 }
 

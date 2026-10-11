@@ -3,6 +3,7 @@
 package crypto
 
 import (
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -37,6 +38,13 @@ const (
 // stream data. It is safe for concurrent use.
 type SessionKey struct {
 	key [KeySize]byte
+
+	// aead is the ChaCha20-Poly1305 instance for key, constructed once at
+	// derivation time: the key never changes over a session's life, so
+	// re-running the key schedule per message (chacha20poly1305.New on every
+	// Encrypt/Decrypt) is pure waste on the hot path. cipher.AEAD
+	// implementations are safe for concurrent use.
+	aead cipher.AEAD
 
 	// Separate nonce counters for send and receive directions
 	// to avoid nonce reuse in bidirectional streams.
@@ -127,6 +135,14 @@ func DeriveSessionKey(sharedSecret [KeySize]byte, streamID uint64,
 		panic(fmt.Sprintf("HKDF failed: %v", err))
 	}
 
+	// KeySize matches chacha20poly1305's required key length, so this cannot
+	// fail.
+	aead, err := chacha20poly1305.New(sk.key[:])
+	if err != nil {
+		panic(fmt.Sprintf("create cipher: %v", err))
+	}
+	sk.aead = aead
+
 	return sk
 }
 
@@ -142,17 +158,12 @@ func (s *SessionKey) Encrypt(plaintext []byte) ([]byte, error) {
 	s.sendNonce++
 	s.mu.Unlock()
 
-	aead, err := chacha20poly1305.New(s.key[:])
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
-	}
-
 	// Output: nonce || ciphertext || tag
 	// Capacity: NonceSize + len(plaintext) + TagSize
 	ciphertext := make([]byte, NonceSize, NonceSize+len(plaintext)+TagSize)
 	copy(ciphertext, nonce[:])
 
-	ciphertext = aead.Seal(ciphertext, nonce[:], plaintext, nil)
+	ciphertext = s.aead.Seal(ciphertext, nonce[:], plaintext, nil)
 
 	return ciphertext, nil
 }
@@ -230,12 +241,7 @@ func (s *SessionKey) decrypt(ciphertext []byte, strict bool) ([]byte, error) {
 	s.recvNonce = nonceValue + 1
 	s.mu.Unlock()
 
-	aead, err := chacha20poly1305.New(s.key[:])
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
-	}
-
-	plaintext, err := aead.Open(nil, nonce[:], ciphertext[NonceSize:], nil)
+	plaintext, err := s.aead.Open(nil, nonce[:], ciphertext[NonceSize:], nil)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
@@ -287,6 +293,11 @@ func (s *SessionKey) Key() [KeySize]byte {
 
 // Zero securely zeros the session key material.
 // Call this when the stream using this key is closed.
+//
+// Note: the cached AEAD instance retains its own copy of the key schedule
+// internally; Zero clears the SessionKey's key bytes but cannot reach into
+// the cipher's state. The SessionKey (and its AEAD) should simply be dropped
+// after Zero so both are reclaimed together.
 func (s *SessionKey) Zero() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
