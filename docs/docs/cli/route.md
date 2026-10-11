@@ -364,7 +364,7 @@ muti-metroo route list -t abc123de --all --json
 muti-metroo route trace <ip|hostname> [flags]
 ```
 
-Shows which route the agent would choose for a destination, using the same selection rules as a real connection: longest prefix wins, then lowest metric, then lowest origin agent ID. Every matching CIDR route is listed. The winner is marked with `->`; each other candidate carries the reason it lost (`shorter prefix`, `higher metric`, or `lost origin tiebreaker`). Route comments are appended after `#`.
+Shows which route the agent would choose for a destination, using the same rules as a real connection: longest prefix wins, then lowest metric. When two exits advertise the same network with the same metric, `route trace` names the exit with the lower agent ID, but a real connection may use either one (see [Route selection](/concepts/routing#route-selection)). Every matching CIDR route is listed. The winner is marked with `->`; each other candidate carries the reason it lost (`shorter prefix`, `higher metric`, or `lost origin tiebreaker`). Route comments are appended after `#`.
 
 A hostname is resolved on the selected agent, in this order: domain routes are checked and reported, then the [mesh-host registry](host.md), then the system resolver. CIDR candidates are listed for every resolved address. The JSON output reports how the destination was resolved in the `resolution` field: `ip` for a literal address, `mesh` for a mesh-host entry, or `system` for the system resolver.
 

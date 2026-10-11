@@ -36,7 +36,7 @@ The agent writes its log to stderr.
 | systemd service | `journalctl -u muti-metroo` |
 | systemd user service | `journalctl --user -u muti-metroo` |
 | Linux cron user service | `~/.muti-metroo/muti-metroo.log` |
-| macOS launchd | `muti-metroo.err.log` in the config file's directory |
+| macOS launchd | `muti-metroo.err.log` in the config file's directory, or `/var/log/muti-metroo.err.log` for a binary with an embedded configuration |
 | Docker | `docker logs <container>` |
 | PM2 | `pm2 logs muti-metroo` |
 | Windows Service, DLL | Not captured |

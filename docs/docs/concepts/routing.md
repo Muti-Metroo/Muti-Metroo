@@ -103,7 +103,7 @@ The most specific matching prefix wins:
 | `192.0.2.100` | Agent B | `/24` is more specific than `/0` |
 | `198.51.100.7` | Agent C | Only `/0` matches |
 
-When several routes have the same prefix length, the route with the lowest metric wins. If the metrics are also equal, the route from the agent with the lowest agent ID wins, so the choice is the same on every restart.
+When several routes have the same prefix length, the route with the lowest metric wins. If two exits advertise the same network with the same metric, which one is used is not defined and can change when routes are refreshed; give the exits different metrics to control the choice.
 
 ### Domain matching
 

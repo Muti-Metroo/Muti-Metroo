@@ -104,7 +104,7 @@ flowchart LR
 
 ## Route advertisement flow
 
-Exit agents advertise their routes to their peers, and each agent passes the advertisement on to its other peers. Each agent stores the route with a metric one higher than the agent it learned it from:
+Exit agents advertise their routes to their peers, and each agent passes the advertisement on to its other peers. Each agent records the path back to the exit and stores the route with the exit's metric plus one. The metric is the same on every agent, however far it is from the exit:
 
 ```mermaid
 sequenceDiagram

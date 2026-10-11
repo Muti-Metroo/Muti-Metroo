@@ -2,7 +2,7 @@
 
 Page-by-page editorial audit of the documentation against the MDN editorial model in [STYLE.md](STYLE.md). An editor who did not write the page read it in full and checked its purpose, structure, duplication with the canonical page, tone, examples, and See Also section, and verified at least three concrete claims against the source code or a built binary. Problems were fixed in the page.
 
-111 pages reviewed: 60 passed as written, 51 fixed. 443 claims verified against the implementation. The mechanical checks (commands, flags, config examples, HTTP paths, style rules) are in [VERIFICATION.md](VERIFICATION.md) and run in CI.
+111 pages reviewed: 59 passed as written, 52 fixed. 443 claims verified against the implementation. The mechanical checks (commands, flags, config examples, HTTP paths, style rules) are in [VERIFICATION.md](VERIFICATION.md) and run in CI.
 
 ## Site structure review
 
@@ -18,10 +18,13 @@ A final pass over the heading outline of all 111 pages, checking each section's 
 
 ## Verification of this review
 
-Every one of the 296 source citations below was checked to resolve to an existing file and line (290 in this repository, 6 in the Mutiauk and Muti Metroo Manager repositories). A sample of 48 cited claims, drawn from every section of the site, was then compared against the cited source by a second reviewer. 46 matched. The other two:
+Every one of the 296 source citations below was checked to resolve to an existing file and line (290 in this repository, 6 in the Mutiauk and Muti Metroo Manager repositories). A sample of 48 cited claims, drawn from every section of the site, was then compared against the cited source by a second reviewer, and afterwards all 276 claims with a code citation were compared against the cited lines. All but five matched. The five:
 
 - `configuration/tls-certificates.md`: the TLS 1.3 minimum is at `internal/agent/agent.go:1124`, two lines from the cited 1122. The claim is correct.
 - `intro.md` said the route metric is "the exit's configured metric plus one per hop". The code does not do that: every agent that learns a route stores the advertised metric plus one, and re-floods the advertisement with the metric unchanged (`internal/routing/manager.go:564` and `internal/flood/flood.go:352-395,436`), so the metric is the same at every distance. Fixed in `intro.md` and in two places in `configuration/exit.md`. The same check found `troubleshooting/faq.md` saying `routing.max_hops` limits advertisements, which it does not (no reader outside `internal/config`); fixed to match `configuration/routing.md`. `Architecture.md` described the same per-hop increment and was corrected too.
+- `concepts/architecture.md` repeated the per-hop metric description ("one higher than the agent it learned it from"). Fixed: every agent stores the exit's metric plus one.
+- `concepts/routing.md` said equal-metric routes are settled by the lowest origin agent ID. That tiebreak only compares entries under different table keys; two exits advertising the same network share one key, sorted by metric alone with an unstable sort (`internal/routing/table.go:150-155,248-266`), so the choice is not defined. Fixed, matching `deployment/high-availability.md`. `cli/route.md` and `api/route-trace.md` now say that `route trace` names the lower agent ID in that case while a real connection may use either route (`internal/routing/trace.go:75`); this mismatch is a suspected bug.
+- `troubleshooting/faq.md` gave only the config file's directory for launchd logs; a binary with an embedded configuration logs to `/var/log` (`internal/service/service_darwin.go:178-185`). Fixed.
 
 ## `api/agents.md`
 
@@ -224,6 +227,7 @@ Claims verified:
 Fixes:
 
 - Replaced a real public IP (93.184.215.14) in the domain-route example with documentation address 203.0.113.80
+- reason field now notes that the origin tiebreaker in the trace may differ from real selection for equal-metric routes to the same network
 
 ## `api/shell.md`
 
@@ -504,6 +508,7 @@ Claims verified:
 Fixes:
 
 - Reworded prerequisite: every subcommand except status needs http.remote_api, status needs http.dashboard, both on by default
+- route trace no longer claimed to match real selection for equal-metric routes to the same network (internal/routing/trace.go:75 vs internal/routing/table.go:248-266)
 
 ## `cli/run.md`
 
@@ -638,10 +643,11 @@ Claims verified:
 Fixes:
 
 - Security model row said sleep/wake always require signed requests; changed it so sleep and wake require a signature only on agents with the signing public key configured, matching flood.go
+- Route advertisement flow said each agent stores the metric one higher than its neighbor's; corrected to the exit's metric plus one at every agent (internal/routing/manager.go:564, internal/flood/flood.go:352-395)
 
 ## `concepts/routing.md`
 
-**Result:** pass. Route types, propagation, selection order, CIDR/domain matching, expiry, redundancy; no internals; See Also 5 links
+**Result:** fixed. Route types, propagation, selection order, CIDR/domain matching, expiry, redundancy; no internals; See Also 5 links
 
 Claims verified:
 
@@ -649,6 +655,10 @@ Claims verified:
 - Exact domain before single-level wildcard -> internal/routing/domain.go:252-274
 - Mesh host registry checked before DNS at ingress -> internal/agent/agent.go:2256,4909
 - advertise_interval 2m, route_ttl 5m -> internal/config/config.go:942-943
+
+Fixes:
+
+- Equal-metric tiebreak by lowest origin agent ID does not apply to the same network from two exits (internal/routing/table.go:150-155,248-266); corrected to say the choice is not defined
 
 ## `concepts/streams.md`
 
@@ -1464,6 +1474,7 @@ Fixes:
 - Renamed 'Configuration - Agent', 'CLI - cert', 'API - Health', 'API - Dashboard' link titles
 - See Also switched to ': ' separators
 - 'How many hops' answer said routing.max_hops limits advertisements; corrected: validated but not applied (no reader of MaxHops outside internal/config)
+- launchd log location now includes /var/log for embedded-config binaries (internal/service/service_darwin.go:178-185)
 
 ## `troubleshooting/performance.md`
 
