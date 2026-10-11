@@ -155,6 +155,7 @@ type mockStreamWriter struct {
 	errs   []streamErr
 	data   []streamData
 	closes []uint64
+	resets []uint64
 }
 
 type streamAck struct {
@@ -204,6 +205,13 @@ func (m *mockStreamWriter) WriteStreamClose(peerID identity.AgentID, streamID ui
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closes = append(m.closes, streamID)
+	return nil
+}
+
+func (m *mockStreamWriter) WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resets = append(m.resets, streamID)
 	return nil
 }
 
@@ -1068,5 +1076,152 @@ func TestHandler_CloseConnectionsForPeer(t *testing.T) {
 	// Idempotent: a second disconnect for the same peer is a no-op.
 	if n := h.CloseConnectionsForPeer(peerA); n != 0 {
 		t.Errorf("second CloseConnectionsForPeer(A) = %d, want 0", n)
+	}
+}
+
+// testSessionKeys derives the matching initiator/responder session key pair
+// for a stream so HandleStreamData ciphertext decrypts at the responder.
+func testSessionKeys(t *testing.T, requestID uint64) (initiator, responder *crypto.SessionKey) {
+	t.Helper()
+	initPriv, initPub, err := crypto.GenerateEphemeralKeypair()
+	if err != nil {
+		t.Fatalf("GenerateEphemeralKeypair: %v", err)
+	}
+	respPriv, respPub, err := crypto.GenerateEphemeralKeypair()
+	if err != nil {
+		t.Fatalf("GenerateEphemeralKeypair: %v", err)
+	}
+	sharedInit, err := crypto.ComputeECDH(initPriv, respPub)
+	if err != nil {
+		t.Fatalf("ComputeECDH: %v", err)
+	}
+	sharedResp, err := crypto.ComputeECDH(respPriv, initPub)
+	if err != nil {
+		t.Fatalf("ComputeECDH: %v", err)
+	}
+	initiator = crypto.DeriveSessionKey(sharedInit, requestID, initPub, respPub, true)
+	responder = crypto.DeriveSessionKey(sharedResp, requestID, initPub, respPub, false)
+	return initiator, responder
+}
+
+// registerTestConn installs a connection with a responder session key and
+// starts its writer goroutine, mimicking handleStreamOpenAsync. Returns the
+// initiator-side key for encrypting test frames.
+func registerTestConn(t *testing.T, h *Handler, peer identity.AgentID, streamID, requestID uint64, conn net.Conn) *crypto.SessionKey {
+	t.Helper()
+	initiator, responder := testSessionKeys(t, requestID)
+	ac := &ActiveConnection{
+		StreamID:   streamID,
+		RemoteID:   peer,
+		Conn:       conn,
+		sessionKey: responder,
+		writeCh:    make(chan writeRequest, writeQueueSize),
+		done:       make(chan struct{}),
+	}
+	h.mu.Lock()
+	h.connections[streamKey{peer: peer, streamID: streamID}] = ac
+	h.connCount.Add(1)
+	h.mu.Unlock()
+	go h.writeLoop(ac)
+	t.Cleanup(func() { ac.Close() })
+	return initiator
+}
+
+// A destination that stops reading must not stall HandleStreamData for other
+// streams, and when its write queue fills only that stream is reset.
+// net.Pipe writes block until the peer reads, so an unread pipe end is a
+// stalled destination.
+func TestHandler_HandleStreamData_SlowDestinationResetsOnlyThatStream(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	writer := &mockStreamWriter{}
+	cfg := DefaultHandlerConfig()
+	h := NewHandler(cfg, localID, writer)
+	h.Start()
+	defer h.Stop()
+
+	// Stalled destination: nobody reads the other end.
+	stalledConn, stalledPeer := net.Pipe()
+	t.Cleanup(func() { stalledPeer.Close() })
+	stalledKey := registerTestConn(t, h, peerID, 1, 100, stalledConn)
+
+	// Healthy destination with a reader draining it.
+	healthyConn, healthyPeer := net.Pipe()
+	t.Cleanup(func() { healthyPeer.Close() })
+	healthyKey := registerTestConn(t, h, peerID, 2, 200, healthyConn)
+	var readMu sync.Mutex
+	var readBuf []byte
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := healthyPeer.Read(buf)
+			if n > 0 {
+				readMu.Lock()
+				readBuf = append(readBuf, buf[:n]...)
+				readMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// The first frame wedges the writer goroutine in Write; the next
+	// writeQueueSize frames fill the queue; one more overflows it.
+	var overflowErr error
+	for i := 0; i < writeQueueSize+2; i++ {
+		ct, err := stalledKey.Encrypt([]byte("payload"))
+		if err != nil {
+			t.Fatalf("Encrypt: %v", err)
+		}
+		overflowErr = h.HandleStreamData(peerID, 1, ct, 0)
+		if overflowErr != nil {
+			break
+		}
+	}
+	if overflowErr == nil {
+		t.Fatal("HandleStreamData on a stalled destination should fail once the queue is full")
+	}
+
+	// Only the stalled stream is reset and torn down.
+	writer.mu.Lock()
+	resets := append([]uint64(nil), writer.resets...)
+	writer.mu.Unlock()
+	if len(resets) != 1 || resets[0] != 1 {
+		t.Errorf("resets = %v, want exactly stream 1", resets)
+	}
+	if ac := h.GetConnection(peerID, 1); ac != nil {
+		t.Error("stalled stream should be removed from tracking")
+	}
+
+	// The healthy stream on the same peer connection never blocked and its
+	// data arrives in order.
+	var want []byte
+	for i := 0; i < 10; i++ {
+		msg := []byte(fmt.Sprintf("msg-%d", i))
+		want = append(want, msg...)
+		ct, err := healthyKey.Encrypt(msg)
+		if err != nil {
+			t.Fatalf("Encrypt: %v", err)
+		}
+		if err := h.HandleStreamData(peerID, 2, ct, 0); err != nil {
+			t.Fatalf("HandleStreamData on healthy stream: %v", err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		readMu.Lock()
+		got := append([]byte(nil), readBuf...)
+		readMu.Unlock()
+		if len(got) >= len(want) {
+			if string(got) != string(want) {
+				t.Errorf("healthy stream wrote %q, want %q (ordering)", got, want)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("healthy stream data never arrived: got %q, want %q", got, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

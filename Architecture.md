@@ -4129,6 +4129,9 @@ muti-metroo/
 │  • 1 ordered-frame dispatch goroutine (drains frameCh)                      │
 │  • 4 fast-lane dispatch goroutines (drain fastLaneCh for UDP_DATAGRAM /     │
 │    ICMP_ECHO frames; count = fastLaneWorkerCount)                           │
+│  • 1 destination-writer goroutine per exit/forward connection               │
+│    (bounded queue of 64 writes; overflow resets only that stream,           │
+│    never stalls the frame drainer)                                          │
 │                                                                             │
 │  Writes are serialised via a mutex (writeMu) around synchronous WriteFrame  │
 │  calls; there is no dedicated writer goroutine. Each WriteFrame arms a      │
@@ -4165,6 +4168,9 @@ muti-metroo/
 │                                                                             │
 │  Stream errors:                                                             │
 │  • Log error with stream ID                                                 │
+│  • Slow local consumer (read buffer full): drop the frame and               │
+│    STREAM_RESET only that stream -- never block the connection              │
+│    drainer                                                                  │
 │  • Send STREAM_RESET to both ends                                           │
 │  • Remove from forward table                                                │
 │  • Close local connections if any                                           │

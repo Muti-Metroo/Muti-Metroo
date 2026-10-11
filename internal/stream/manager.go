@@ -3,6 +3,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -174,7 +175,16 @@ func (s *Stream) HandleRemoteFinWrite() {
 	}
 }
 
-// PushData adds data to the read buffer.
+// ErrReadBufferFull is returned by PushData when the stream's read buffer is
+// full. The data frame is dropped: keeping it would corrupt the byte stream,
+// so the caller is expected to reset the stream. The buffer is drained by a
+// single consumer goroutine, and PushData runs on the peer connection's
+// sequential frame drainer -- a blocking send here would let one stalled
+// consumer jam every stream and control frame on that connection.
+var ErrReadBufferFull = errors.New("stream read buffer full")
+
+// PushData adds data to the read buffer. It never blocks: a full buffer drops
+// the frame and returns ErrReadBufferFull.
 func (s *Stream) PushData(data []byte) error {
 	select {
 	case <-s.closed:
@@ -186,8 +196,8 @@ func (s *Stream) PushData(data []byte) error {
 	case s.readBuffer <- data:
 		s.BytesRecv.Add(uint64(len(data)))
 		return nil
-	case <-s.closed:
-		return io.EOF
+	default:
+		return ErrReadBufferFull
 	}
 }
 

@@ -4123,7 +4123,25 @@ func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame)
 		return
 	}
 
-	a.streamMgr.HandleStreamData(peerID, frame.StreamID, frame.Flags, frame.Payload)
+	if err := a.streamMgr.HandleStreamData(peerID, frame.StreamID, frame.Flags, frame.Payload); err != nil {
+		if !errors.Is(err, stream.ErrReadBufferFull) {
+			return
+		}
+		// The local consumer of this stream is not reading and its buffer
+		// is full. PushData drops the frame rather than blocking this
+		// connection's frame drainer, so the byte stream has a hole in it
+		// now: reset the stream to fail it cleanly instead of letting the
+		// consumer hang on corrupt data. Other streams are unaffected.
+		a.logger.Debug("stream read buffer full, resetting stream",
+			logging.KeyPeerID, peerID.ShortString(),
+			logging.KeyStreamID, frame.StreamID)
+		a.streamMgr.RemoveStream(peerID, frame.StreamID)
+		a.peerMgr.SendToPeer(peerID, &protocol.Frame{
+			Type:     protocol.FrameStreamReset,
+			StreamID: frame.StreamID,
+			Payload:  (&protocol.StreamReset{ErrorCode: protocol.ErrResourceLimit}).Encode(),
+		})
+	}
 }
 
 // handleStreamClose processes a stream close.
@@ -6238,6 +6256,16 @@ func (a *Agent) WriteStreamClose(peerID identity.AgentID, streamID uint64) error
 	return a.peerMgr.SendToPeer(peerID, frame)
 }
 
+// WriteStreamReset implements exit.StreamWriter and forward.StreamWriter.
+func (a *Agent) WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error {
+	frame := &protocol.Frame{
+		Type:     protocol.FrameStreamReset,
+		StreamID: streamID,
+		Payload:  (&protocol.StreamReset{ErrorCode: errorCode}).Encode(),
+	}
+	return a.peerMgr.SendToPeer(peerID, frame)
+}
+
 // deriveResponderSessionKey performs E2E key exchange for a responder (receiving a stream open).
 // Returns the session key and our ephemeral public key, or an error.
 func deriveResponderSessionKey(requestID uint64, remoteEphemeralPub [crypto.KeySize]byte) (*crypto.SessionKey, [crypto.KeySize]byte, error) {
@@ -7897,12 +7925,10 @@ func (a *Agent) forwardShellClientData(streamID uint64, nextHop identity.AgentID
 // STREAM_CLOSE frame that may or may not arrive from the remote: if we only
 // delete the adapter, any in-flight STREAM_DATA frames for this stream ID
 // fall through in handleStreamData to streamMgr.HandleStreamData and pile up
-// in the stream's readBuffer (capacity 64). Once the buffer is full, the
-// ordered drainFrames goroutine blocks on PushData, which jams all further
-// inbound frames -- including control responses from the same peer -- and
-// the peer appears silent until the agent restarts. Closing the stream here
-// makes subsequent HandleStreamData return "unknown stream" (logged and
-// dropped) and unblocks any PushData already waiting.
+// in the stream's readBuffer (capacity 64). Once the buffer is full, PushData
+// drops further frames and the agent resets the stream. Closing the stream
+// here makes subsequent HandleStreamData return "unknown stream" (logged and
+// dropped) and lets readers observe the teardown immediately.
 func (a *Agent) cleanupShellClientStream(peerID identity.AgentID, streamID uint64) {
 	a.shellClientMu.Lock()
 	delete(a.shellClientStreams, streamKey{peer: peerID, streamID: streamID})

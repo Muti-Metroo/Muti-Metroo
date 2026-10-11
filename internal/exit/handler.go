@@ -94,6 +94,22 @@ type StreamWriter interface {
 
 	// WriteStreamClose sends a close frame.
 	WriteStreamClose(peerID identity.AgentID, streamID uint64) error
+
+	// WriteStreamReset sends a reset frame aborting the stream.
+	WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error
+}
+
+// writeQueueSize bounds each connection's pending destination writes. The
+// queue exists so a slow destination never stalls the peer connection's frame
+// drainer; when it fills, only the affected stream is reset.
+const writeQueueSize = 64
+
+// writeRequest is one unit of work for a connection's writer goroutine. The
+// FIN marker travels through the queue so CloseWrite cannot overtake queued
+// data.
+type writeRequest struct {
+	data []byte // plaintext payload; empty for a pure FIN
+	fin  bool   // half-close the destination after data is written
 }
 
 // ActiveConnection represents an active exit connection.
@@ -107,6 +123,11 @@ type ActiveConnection struct {
 	closed     atomic.Bool
 	closeOnce  sync.Once
 	sessionKey *crypto.SessionKey // E2E encryption session key
+
+	// writeCh feeds the per-connection writer goroutine; done is closed by
+	// Close to stop it.
+	writeCh chan writeRequest
+	done    chan struct{}
 }
 
 // Close closes the connection.
@@ -114,6 +135,9 @@ func (ac *ActiveConnection) Close() error {
 	var err error
 	ac.closeOnce.Do(func() {
 		ac.closed.Store(true)
+		if ac.done != nil {
+			close(ac.done)
+		}
 		if ac.Conn != nil {
 			err = ac.Conn.Close()
 		}
@@ -369,6 +393,8 @@ func (h *Handler) handleStreamOpenAsync(ctx context.Context, streamID uint64, re
 		Conn:       conn,
 		StartedAt:  time.Now(),
 		sessionKey: sessionKey,
+		writeCh:    make(chan writeRequest, writeQueueSize),
+		done:       make(chan struct{}),
 	}
 
 	h.mu.Lock()
@@ -382,6 +408,14 @@ func (h *Handler) handleStreamOpenAsync(ctx context.Context, streamID uint64, re
 		h.removeConnection(streamKey{peer: remoteID, streamID: streamID})
 		return
 	}
+
+	// Destination writes go through a per-connection writer goroutine so a
+	// slow destination cannot stall the peer connection's frame drainer.
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		h.writeLoop(ac)
+	}()
 
 	// Start reading from destination
 	h.wg.Add(1)
@@ -405,34 +439,90 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 		return fmt.Errorf("stream %d closed", streamID)
 	}
 
-	// Decrypt data before writing to destination
+	// Decrypt data before queueing it for the destination
+	var plaintext []byte
 	if len(data) > 0 {
 		if ac.sessionKey == nil {
 			h.closeConnection(peerID, streamID, fmt.Errorf("no session key"))
 			return fmt.Errorf("no session key for stream %d", streamID)
 		}
 
-		plaintext, err := ac.sessionKey.DecryptStrict(data)
+		decrypted, err := ac.sessionKey.DecryptStrict(data)
 		if err != nil {
 			h.closeConnection(peerID, streamID, err)
 			return fmt.Errorf("decrypt: %w", err)
 		}
-
-		if _, err := ac.Conn.Write(plaintext); err != nil {
-			h.closeConnection(peerID, streamID, err)
-			return err
-		}
+		plaintext = decrypted
 	}
 
-	// Handle FIN flag
-	if flags&protocol.FlagFinWrite != 0 {
-		// Client is done sending, close write side of destination
-		if tcpConn, ok := ac.Conn.(*net.TCPConn); ok {
-			tcpConn.CloseWrite()
-		}
+	fin := flags&protocol.FlagFinWrite != 0
+	if len(plaintext) == 0 && !fin {
+		return nil
+	}
+
+	// Hand the write to the connection's writer goroutine. A full queue
+	// means the destination is stalled; reset only this stream instead of
+	// blocking the frame drainer (and every other stream on the
+	// connection) behind it.
+	select {
+	case ac.writeCh <- writeRequest{data: plaintext, fin: fin}:
+	case <-ac.done:
+		return fmt.Errorf("stream %d closed", streamID)
+	default:
+		h.resetConnection(peerID, streamID, fmt.Errorf("destination write queue full"))
+		return fmt.Errorf("stream %d destination write queue full", streamID)
 	}
 
 	return nil
+}
+
+// writeLoop is the per-connection destination writer. It is the only writer
+// to ac.Conn, so per-stream byte order is preserved. Write errors close the
+// connection through the normal path.
+func (h *Handler) writeLoop(ac *ActiveConnection) {
+	defer recovery.RecoverWithLog(h.logger, "exit.writeLoop")
+
+	for {
+		select {
+		case <-h.stopCh:
+			return
+		case <-ac.done:
+			return
+		case req := <-ac.writeCh:
+			if len(req.data) > 0 {
+				if _, err := ac.Conn.Write(req.data); err != nil {
+					h.closeConnection(ac.RemoteID, ac.StreamID, err)
+					return
+				}
+			}
+			if req.fin {
+				// Client is done sending, close write side of destination
+				if tcpConn, ok := ac.Conn.(*net.TCPConn); ok {
+					tcpConn.CloseWrite()
+				}
+			}
+		}
+	}
+}
+
+// resetConnection aborts a connection whose destination cannot keep up: the
+// peer gets a STREAM_RESET so its sender fails fast, rather than a
+// STREAM_CLOSE that implies a clean end of stream.
+func (h *Handler) resetConnection(peerID identity.AgentID, streamID uint64, err error) {
+	ac := h.removeConnection(streamKey{peer: peerID, streamID: streamID})
+	if ac == nil {
+		return
+	}
+
+	h.logger.Debug("resetting stalled exit stream",
+		logging.KeyStreamID, streamID,
+		logging.KeyError, err)
+
+	ac.Close()
+
+	if h.writer != nil {
+		h.writer.WriteStreamReset(peerID, streamID, protocol.ErrWriteFailed)
+	}
 }
 
 // HandleStreamClose processes a stream close request.

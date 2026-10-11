@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -384,12 +385,12 @@ func TestManager_RemoveStream(t *testing.T) {
 	}
 }
 
-// TestManager_RemoveStreamUnblocksPushData verifies that removing a stream
-// whose readBuffer is full unblocks any in-flight PushData callers. This is
-// load-bearing for the shell-client leak recovery path: if a stream entry
-// persists past its consumer, leaving a PushData goroutine wedged would jam
-// the ordered drainFrames worker and cause the whole peer to appear silent.
-func TestManager_RemoveStreamUnblocksPushData(t *testing.T) {
+// TestManager_PushDataFullBuffer verifies that PushData never blocks the
+// caller: a stream whose readBuffer is full drops the frame and reports
+// ErrReadBufferFull, so the peer connection's ordered drainFrames worker
+// cannot be jammed by one stalled consumer. After RemoveStream, PushData
+// reports EOF.
+func TestManager_PushDataFullBuffer(t *testing.T) {
 	localID, _ := identity.NewAgentID()
 	remoteID, _ := identity.NewAgentID()
 	cfg := DefaultManagerConfig()
@@ -401,34 +402,36 @@ func TestManager_RemoveStreamUnblocksPushData(t *testing.T) {
 		t.Fatal("stream not found after AcceptStream")
 	}
 
-	// Fill the readBuffer to capacity so the next PushData must block.
+	// Fill the readBuffer to capacity.
 	for i := 0; i < cap(s.readBuffer); i++ {
 		if err := s.PushData([]byte{byte(i)}); err != nil {
 			t.Fatalf("fill PushData[%d]: %v", i, err)
 		}
 	}
 
+	// The next push must return immediately with ErrReadBufferFull, not block.
 	done := make(chan error, 1)
 	go func() {
-		done <- s.PushData([]byte("should-unblock"))
+		done <- s.PushData([]byte("overflow"))
 	}()
-
-	// Give the goroutine a chance to wedge on the channel send.
 	select {
 	case err := <-done:
-		t.Fatalf("PushData returned early (err=%v); expected it to block on full buffer", err)
-	case <-time.After(50 * time.Millisecond):
+		if !errors.Is(err, ErrReadBufferFull) {
+			t.Errorf("PushData on full buffer = %v, want ErrReadBufferFull", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PushData blocked on a full buffer")
+	}
+
+	// Buffered data is still intact and readable.
+	if data, err := s.ReadWithTimeout(time.Second); err != nil || len(data) != 1 {
+		t.Errorf("Read after overflow = %v, %v; want buffered byte", data, err)
 	}
 
 	m.RemoveStream(remoteID, 1)
 
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Errorf("PushData after RemoveStream returned nil; want non-nil (EOF)")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("PushData did not unblock after RemoveStream")
+	if err := s.PushData([]byte("after-close")); err == nil {
+		t.Error("PushData after RemoveStream returned nil; want non-nil (EOF)")
 	}
 }
 
@@ -872,13 +875,22 @@ func TestStream_ConcurrentPushAndRead(t *testing.T) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, numMessages*2)
 
-	// Producer
+	// Producer. PushData drops with ErrReadBufferFull when the consumer falls
+	// behind (it never blocks), so retry those drops; any other error fails.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < numMessages; i++ {
 			data := []byte(fmt.Sprintf("message-%d", i))
-			if err := s.PushData(data); err != nil {
+			for {
+				err := s.PushData(data)
+				if err == nil {
+					break
+				}
+				if errors.Is(err, ErrReadBufferFull) {
+					time.Sleep(time.Millisecond)
+					continue
+				}
 				errCh <- err
 				return
 			}

@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -31,6 +32,7 @@ type mockStreamWriter struct {
 	acks         []ackWrite
 	errors       []errWrite
 	closes       []closeWrite
+	resets       []closeWrite
 	writeFail    bool
 	writeDataErr error
 }
@@ -113,6 +115,16 @@ func (m *mockStreamWriter) WriteStreamClose(peerID identity.AgentID, streamID ui
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closes = append(m.closes, closeWrite{
+		PeerID:   peerID,
+		StreamID: streamID,
+	})
+	return nil
+}
+
+func (m *mockStreamWriter) WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resets = append(m.resets, closeWrite{
 		PeerID:   peerID,
 		StreamID: streamID,
 	})
@@ -880,16 +892,164 @@ func TestHandler_HandleStreamData_HalfCloseWriter(t *testing.T) {
 		RemoteID: mustNewAgentID(),
 		Key:      "test",
 		Conn:     hc,
+		writeCh:  make(chan writeRequest, writeQueueSize),
+		done:     make(chan struct{}),
 	}
 	h.mu.Lock()
 	h.connections[streamKey{peer: ac.RemoteID, streamID: 1}] = ac
 	h.connCount.Add(1)
 	h.mu.Unlock()
 
+	// The FIN travels through the per-connection writer goroutine.
+	go h.writeLoop(ac)
+
 	if err := h.HandleStreamData(ac.RemoteID, 1, nil, protocol.FlagFinWrite); err != nil {
 		t.Fatalf("HandleStreamData: %v", err)
 	}
-	if !hc.writeClosed.Load() {
-		t.Error("expected CloseWrite to be invoked via halfCloseWriter")
+	deadline := time.Now().Add(time.Second)
+	for !hc.writeClosed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("expected CloseWrite to be invoked via halfCloseWriter")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// testSessionKeys derives the matching initiator/responder session key pair
+// for a stream so HandleStreamData ciphertext decrypts at the responder.
+func testSessionKeys(t *testing.T, requestID uint64) (initiator, responder *crypto.SessionKey) {
+	t.Helper()
+	initPriv, initPub, err := crypto.GenerateEphemeralKeypair()
+	if err != nil {
+		t.Fatalf("GenerateEphemeralKeypair: %v", err)
+	}
+	respPriv, respPub, err := crypto.GenerateEphemeralKeypair()
+	if err != nil {
+		t.Fatalf("GenerateEphemeralKeypair: %v", err)
+	}
+	sharedInit, err := crypto.ComputeECDH(initPriv, respPub)
+	if err != nil {
+		t.Fatalf("ComputeECDH: %v", err)
+	}
+	sharedResp, err := crypto.ComputeECDH(respPriv, initPub)
+	if err != nil {
+		t.Fatalf("ComputeECDH: %v", err)
+	}
+	initiator = crypto.DeriveSessionKey(sharedInit, requestID, initPub, respPub, true)
+	responder = crypto.DeriveSessionKey(sharedResp, requestID, initPub, respPub, false)
+	return initiator, responder
+}
+
+// blockingWriteConn wedges in Write until the gate is closed, simulating a
+// backend that has stopped reading.
+type blockingWriteConn struct {
+	*mockConn
+	gate chan struct{}
+}
+
+func (b *blockingWriteConn) Write(p []byte) (int, error) {
+	<-b.gate
+	return len(p), nil
+}
+
+// registerTestConn installs a connection with a responder session key and
+// starts its writer goroutine, mimicking handleStreamOpenAsync. Returns the
+// initiator-side key for encrypting test frames.
+func registerTestConn(t *testing.T, h *Handler, peer identity.AgentID, streamID, requestID uint64, conn io.ReadWriteCloser) *crypto.SessionKey {
+	t.Helper()
+	initiator, responder := testSessionKeys(t, requestID)
+	ac := &ActiveConnection{
+		StreamID:   streamID,
+		RemoteID:   peer,
+		Key:        "test",
+		Conn:       conn,
+		sessionKey: responder,
+		writeCh:    make(chan writeRequest, writeQueueSize),
+		done:       make(chan struct{}),
+	}
+	h.mu.Lock()
+	h.connections[streamKey{peer: peer, streamID: streamID}] = ac
+	h.connCount.Add(1)
+	h.mu.Unlock()
+	go h.writeLoop(ac)
+	return initiator
+}
+
+func mustEncrypt(t *testing.T, key *crypto.SessionKey, plaintext []byte) []byte {
+	t.Helper()
+	ct, err := key.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	return ct
+}
+
+// A backend that stops reading must not stall HandleStreamData for other
+// streams, and when its write queue fills only that stream is reset.
+func TestHandler_HandleStreamData_SlowBackendResetsOnlyThatStream(t *testing.T) {
+	writer := &mockStreamWriter{}
+	h := NewHandler(HandlerConfig{}, mustNewAgentID(), writer)
+	h.Start()
+	defer h.Stop()
+
+	peerID := mustNewAgentID()
+
+	stalledConn := &blockingWriteConn{mockConn: newMockConn(), gate: make(chan struct{})}
+	t.Cleanup(func() { close(stalledConn.gate) })
+	stalledKey := registerTestConn(t, h, peerID, 1, 100, stalledConn)
+
+	healthyConn := newMockConn()
+	healthyKey := registerTestConn(t, h, peerID, 2, 200, healthyConn)
+
+	// The first frame wedges the writer goroutine in Write; the next
+	// writeQueueSize frames fill the queue; one more overflows it.
+	var overflowErr error
+	for i := 0; i < writeQueueSize+2; i++ {
+		overflowErr = h.HandleStreamData(peerID, 1, mustEncrypt(t, stalledKey, []byte("payload")), 0)
+		if overflowErr != nil {
+			break
+		}
+	}
+	if overflowErr == nil {
+		t.Fatal("HandleStreamData on a stalled backend should fail once the queue is full")
+	}
+
+	// Only the stalled stream is reset and torn down.
+	writer.mu.Lock()
+	resets := append([]closeWrite(nil), writer.resets...)
+	writer.mu.Unlock()
+	if len(resets) != 1 || resets[0].StreamID != 1 {
+		t.Errorf("resets = %v, want exactly stream 1", resets)
+	}
+	h.mu.RLock()
+	_, stalledTracked := h.connections[streamKey{peer: peerID, streamID: 1}]
+	h.mu.RUnlock()
+	if stalledTracked {
+		t.Error("stalled stream should be removed from tracking")
+	}
+
+	// The healthy stream on the same peer connection never blocked and its
+	// data arrives in order.
+	var want []byte
+	for i := 0; i < 10; i++ {
+		msg := []byte(fmt.Sprintf("msg-%d", i))
+		want = append(want, msg...)
+		if err := h.HandleStreamData(peerID, 2, mustEncrypt(t, healthyKey, msg), 0); err != nil {
+			t.Fatalf("HandleStreamData on healthy stream: %v", err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := healthyConn.GetWriteData()
+		if len(got) >= len(want) {
+			if string(got) != string(want) {
+				t.Errorf("healthy stream wrote %q, want %q (ordering)", got, want)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("healthy stream data never arrived: got %q, want %q", got, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

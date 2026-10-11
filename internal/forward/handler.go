@@ -98,6 +98,11 @@ type ActiveConnection struct {
 	closed     atomic.Bool
 	closeOnce  sync.Once
 	sessionKey *crypto.SessionKey // E2E encryption session key
+
+	// writeCh feeds the per-connection writer goroutine; done is closed by
+	// Close to stop it.
+	writeCh chan writeRequest
+	done    chan struct{}
 }
 
 // Close closes the connection.
@@ -105,6 +110,9 @@ func (ac *ActiveConnection) Close() error {
 	var err error
 	ac.closeOnce.Do(func() {
 		ac.closed.Store(true)
+		if ac.done != nil {
+			close(ac.done)
+		}
 		if ac.Conn != nil {
 			err = ac.Conn.Close()
 		}
@@ -378,6 +386,8 @@ func (h *Handler) handleStreamOpenAsync(ctx context.Context, streamID uint64, re
 		Conn:       conn,
 		StartedAt:  time.Now(),
 		sessionKey: sessionKey,
+		writeCh:    make(chan writeRequest, writeQueueSize),
+		done:       make(chan struct{}),
 	}
 
 	h.mu.Lock()
@@ -397,6 +407,10 @@ func (h *Handler) handleStreamOpenAsync(ctx context.Context, streamID uint64, re
 		return
 	}
 
+	// Backend writes go through a per-connection writer goroutine so a slow
+	// backend cannot stall the peer connection's frame drainer.
+	go h.writeLoop(ac)
+
 	// Start reading from the local endpoint.
 	go h.readLoop(ac)
 }
@@ -415,33 +429,92 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 		return fmt.Errorf("stream %d closed", streamID)
 	}
 
-	// Decrypt data before writing to target.
+	// Decrypt data before queueing it for the target.
+	var plaintext []byte
 	if len(data) > 0 {
 		if ac.sessionKey == nil {
 			h.closeConnection(peerID, streamID, fmt.Errorf("no session key"))
 			return fmt.Errorf("no session key for stream %d", streamID)
 		}
 
-		plaintext, err := ac.sessionKey.DecryptStrict(data)
+		decrypted, err := ac.sessionKey.DecryptStrict(data)
 		if err != nil {
 			h.closeConnection(peerID, streamID, err)
 			return fmt.Errorf("decrypt: %w", err)
 		}
-
-		if _, err := ac.Conn.Write(plaintext); err != nil {
-			h.closeConnection(peerID, streamID, err)
-			return err
-		}
+		plaintext = decrypted
 	}
 
-	// Handle FIN flag: half-close the local endpoint when supported.
-	if flags&protocol.FlagFinWrite != 0 {
-		if hcw, ok := ac.Conn.(halfCloseWriter); ok {
-			hcw.CloseWrite()
-		}
+	fin := flags&protocol.FlagFinWrite != 0
+	if len(plaintext) == 0 && !fin {
+		return nil
+	}
+
+	// Hand the write to the connection's writer goroutine. A full queue
+	// means the backend is stalled; reset only this stream instead of
+	// blocking the frame drainer (and every other stream on the
+	// connection) behind it.
+	select {
+	case ac.writeCh <- writeRequest{data: plaintext, fin: fin}:
+	case <-ac.done:
+		return fmt.Errorf("stream %d closed", streamID)
+	default:
+		h.resetConnection(peerID, streamID, fmt.Errorf("backend write queue full"))
+		return fmt.Errorf("stream %d backend write queue full", streamID)
 	}
 
 	return nil
+}
+
+// writeLoop is the per-connection backend writer. It is the only writer to
+// ac.Conn, so per-stream byte order is preserved. Write errors close the
+// connection through the normal path.
+func (h *Handler) writeLoop(ac *ActiveConnection) {
+	defer recovery.RecoverWithLog(h.logger, "forward.writeLoop")
+
+	for {
+		select {
+		case <-h.stopCh:
+			return
+		case <-ac.done:
+			return
+		case req := <-ac.writeCh:
+			if len(req.data) > 0 {
+				if _, err := ac.Conn.Write(req.data); err != nil {
+					h.closeConnection(ac.RemoteID, ac.StreamID, err)
+					return
+				}
+			}
+			if req.fin {
+				// Half-close the local endpoint when supported.
+				if hcw, ok := ac.Conn.(halfCloseWriter); ok {
+					hcw.CloseWrite()
+				}
+			}
+		}
+	}
+}
+
+// resetConnection aborts a connection whose backend cannot keep up: the peer
+// gets a STREAM_RESET so its sender fails fast, rather than a STREAM_CLOSE
+// that implies a clean end of stream.
+func (h *Handler) resetConnection(peerID identity.AgentID, streamID uint64, err error) {
+	ac := h.removeConnection(streamKey{peer: peerID, streamID: streamID})
+	if ac == nil {
+		return
+	}
+
+	h.logger.Debug("resetting stalled forward stream",
+		"key", ac.Key,
+		"target", ac.Target,
+		logging.KeyStreamID, streamID,
+		logging.KeyError, err)
+
+	ac.Close()
+
+	if h.writer != nil {
+		h.writer.WriteStreamReset(peerID, streamID, protocol.ErrWriteFailed)
+	}
 }
 
 // HandleStreamClose processes a stream close request.
