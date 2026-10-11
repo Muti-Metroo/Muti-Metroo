@@ -40,8 +40,6 @@ type ShellSession struct {
 	// Cleanup function
 	Close func()
 
-	mu     sync.Mutex
-	closed bool
 }
 
 // handleShellWebSocket handles WebSocket connections for shell sessions.

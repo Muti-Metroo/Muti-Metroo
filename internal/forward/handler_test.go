@@ -119,11 +119,6 @@ func (m *mockStreamWriter) WriteStreamClose(peerID identity.AgentID, streamID ui
 	return nil
 }
 
-func (m *mockStreamWriter) getDataWrites() []dataWrite {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]dataWrite(nil), m.dataWrites...)
-}
 
 func (m *mockStreamWriter) getAcks() []ackWrite {
 	m.mu.Lock()

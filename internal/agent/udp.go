@@ -13,7 +13,6 @@ import (
 	"github.com/postalsys/muti-metroo/internal/crypto"
 	"github.com/postalsys/muti-metroo/internal/identity"
 	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/peer"
 	"github.com/postalsys/muti-metroo/internal/protocol"
 	"github.com/postalsys/muti-metroo/internal/routing"
 	"github.com/postalsys/muti-metroo/internal/socks5"
@@ -436,25 +435,6 @@ func (a *Agent) IsUDPEnabled() bool {
 	return a.cfg.SOCKS5.Enabled
 }
 
-// findRouteToAgent finds a connection that can reach the given agent ID.
-func (a *Agent) findRouteToAgent(agentID identity.AgentID) *peer.Connection {
-	// First check if we're directly connected
-	conn := a.peerMgr.GetPeer(agentID)
-	if conn != nil {
-		return conn
-	}
-
-	// Otherwise, we need to look up the route via flooding
-	// For now, check all peers and see which one has a route
-	for _, p := range a.peerMgr.GetAllPeers() {
-		// Check if this peer can reach the target
-		// This is a simplified version - in production you'd use
-		// the route table to find the best path
-		return p
-	}
-
-	return nil
-}
 
 // handleUDPOpen processes a UDP_OPEN frame.
 func (a *Agent) handleUDPOpen(peerID identity.AgentID, frame *protocol.Frame) {

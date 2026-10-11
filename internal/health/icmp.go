@@ -37,8 +37,6 @@ type ICMPSession struct {
 	// Cleanup function
 	Close func()
 
-	mu     sync.Mutex
-	closed bool
 }
 
 // ICMPEchoRequest represents an echo request to send.

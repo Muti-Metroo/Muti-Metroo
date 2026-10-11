@@ -5127,12 +5127,6 @@ func (a *Agent) DialContext(ctx context.Context, network, address string) (net.C
 	}, nil
 }
 
-// dialViaDomainRoute routes a connection through a domain route.
-// The domain name is passed to the exit node for DNS resolution.
-func (a *Agent) dialViaDomainRoute(network, host string, port int, route *routing.DomainRoute) (net.Conn, error) {
-	return a.dialViaDomainRouteWithContext(context.Background(), network, host, port, route)
-}
-
 // dialViaDomainRouteWithContext routes a connection through a domain route with context support.
 func (a *Agent) dialViaDomainRouteWithContext(ctx context.Context, network, host string, port int, route *routing.DomainRoute) (net.Conn, error) {
 	// Get next hop connection
