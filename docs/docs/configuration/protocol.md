@@ -27,7 +27,7 @@ protocol:
 
 Setting a key to an empty string has the same effect as leaving it at its default; the identifiers are always sent.
 
-## Example
+## Examples
 
 All agents in the mesh share the custom values:
 

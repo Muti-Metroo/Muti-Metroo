@@ -29,7 +29,7 @@ limits:
 | `stream_open_timeout`  | duration | `30s`    | Time allowed for the remote end to accept a management command session opened by this agent. SOCKS and port forward streams use a fixed 30 seconds, and file transfers 5 minutes. |
 | `buffer_size`          | int      | `262144` | Must be at least 1024. Validated, but not used by the current release.                                                                                                          |
 
-## Example
+## Examples
 
 An exit that serves many concurrent clients:
 

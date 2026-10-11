@@ -30,7 +30,7 @@ For a single agent that is both SOCKS5 entry point and exit, select roles `1,3` 
 
 The wizard runs the steps below in order. Steps that do not apply to the selected roles are skipped.
 
-### Step 1: Basic Setup
+### Step 1: Basic setup
 
 | Prompt             | Default         | Notes                                                                                         |
 | ------------------ | --------------- | --------------------------------------------------------------------------------------------- |
@@ -40,7 +40,7 @@ The wizard runs the steps below in order. Steps that do not apply to the selecte
 
 If a valid Muti Metroo configuration already exists at the config path, the wizard prints `[INFO] Found existing configuration, using values as defaults.` and every later prompt starts from the existing values. See [Re-running the wizard](#re-running-the-wizard). If a file exists there but does not parse as a configuration, the wizard asks `Overwrite it?` (default No) and cancels if you decline.
 
-### Step 2: Agent Role
+### Step 2: Agent role
 
 Select one or more roles:
 
@@ -52,7 +52,7 @@ Select one or more roles:
 
 The default is Transit. An agent with only the Transit role skips Steps 6, 7, 9, and 10. See [Agent Roles](/concepts/agent-roles).
 
-### Step 3: Inbound Listener (optional)
+### Step 3: Inbound listener (optional)
 
 `Accept inbound peer connections?` defaults to No. Answer No for SOCKS5-only clients, laptops behind NAT, or any agent that only dials out. The generated config then has no `listeners` section, and outbound peers are still configured in Step 5.
 
@@ -68,7 +68,7 @@ When you answer Yes:
 
 The advertised address must be reachable by other agents: loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::`) are rejected. See [Listeners](/configuration/listeners).
 
-### Step 4: TLS Configuration
+### Step 4: TLS configuration
 
 All peer traffic is end-to-end encrypted regardless of this choice. Transport TLS adds certificate-based peer verification on top.
 
@@ -84,7 +84,7 @@ Strict TLS offers two sub-options:
 
 When the existing config already carries TLS material, a third option, `Keep existing TLS configuration`, is offered and selected by default. See [TLS Certificates](/configuration/tls-certificates).
 
-### Step 5: Peer Connections
+### Step 5: Peer connections
 
 `Add peer connections?` defaults to No. For each peer:
 
@@ -105,7 +105,7 @@ The wizard then probes the peer for up to 10 seconds. On success it prints the r
 
 See [Peers](/configuration/peers).
 
-### Step 6: SOCKS5 Proxy
+### Step 6: SOCKS5 proxy
 
 Shown when the Ingress role is selected.
 
@@ -116,7 +116,7 @@ Shown when the Ingress role is selected.
 
 See [SOCKS5](/configuration/socks5).
 
-### Step 7: Exit Node Configuration
+### Step 7: Exit node configuration
 
 Shown when the Exit role is selected.
 
@@ -125,7 +125,7 @@ Shown when the Exit role is selected.
 
 The generated `exit` section also sets `dns.servers` to `8.8.8.8:53` and `1.1.1.1:53` with a `5s` timeout. Edit or remove `dns.servers` afterwards to use the system resolver instead. See [Exit](/configuration/exit).
 
-### Step 8: Monitoring & Logging
+### Step 8: Monitoring and logging
 
 | Prompt                              | Default | Notes                                                                                  |
 | ----------------------------------- | ------- | -------------------------------------------------------------------------------------- |
@@ -135,7 +135,7 @@ The generated `exit` section also sets `dns.servers` to `8.8.8.8:53` and `1.1.1.
 
 If you decline authentication, the wizard warns that the dashboard and topology endpoints on `:8080` are readable by anyone who can reach the host, and asks `Continue without HTTP API authentication?` (default No). Answering No stops the wizard without writing anything, so answer Yes here if you plan to protect the API another way. See [HTTP](/configuration/http).
 
-### Step 9: Management Commands
+### Step 9: Management commands
 
 Skipped for transit-only agents. `Enable management commands?` defaults to No. When enabled, choose a whitelist mode:
 
@@ -145,7 +145,7 @@ Skipped for transit-only agents. `Enable management commands?` defaults to No. W
 
 Remote command execution is authorized by the signing key from Step 11, not by a per-feature password. See [Shell](/configuration/shell).
 
-### Step 10: File Transfer
+### Step 10: File transfer
 
 Skipped for transit-only agents. `Enable file transfer?` defaults to No. When enabled:
 
@@ -154,7 +154,7 @@ Skipped for transit-only agents. `Enable file transfer?` defaults to No. When en
 
 File transfer is authorized by the signing key from Step 11. See [File Transfer](/configuration/file-transfer).
 
-### Step 11: Management & Signing Keys
+### Step 11: Management and signing keys
 
 This step configures two independent keypairs:
 
@@ -169,7 +169,7 @@ This step configures two independent keypairs:
 
 Private keys belong only in operator configs. When the existing config already has keys, the wizard first asks `Keep existing keys?` (default Yes). See [Management](/configuration/management).
 
-### Configuration Delivery
+### Configuration delivery
 
 | Option                                       | Result                                                                                                                       |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |

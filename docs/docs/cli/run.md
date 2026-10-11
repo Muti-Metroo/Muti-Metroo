@@ -21,14 +21,6 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 muti-metroo run [flags]
 ```
 
-## Flags
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `-c`, `--config` | `./config.yaml` | Path to the configuration file. Ignored when the binary has an embedded configuration. |
-| `--startup-delay` | `0` | Wait this long before any network activity, for example `90s` or `2m`. Overrides `agent.startup_delay` in the configuration. |
-| `-D`, `--detach` | `false` | Windows only. Start the agent as a new process outside the SSH session's job object and return immediately, so the agent keeps running after the SSH session ends. On Linux and macOS the command fails; use `nohup` or `setsid` instead. |
-
 ## Description
 
 On startup the agent:
@@ -54,6 +46,14 @@ When the binary carries an embedded configuration (created with [`embed-config`]
 ### Windows services
 
 When the binary is started by the Windows Service Control Manager, `run` runs as a Windows service instead of a console program. Install the service with [`service install`](service.md#service-install) rather than registering it by hand.
+
+## Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-c`, `--config` | `./config.yaml` | Path to the configuration file. Ignored when the binary has an embedded configuration. |
+| `--startup-delay` | `0` | Wait this long before any network activity, for example `90s` or `2m`. Overrides `agent.startup_delay` in the configuration. |
+| `-D`, `--detach` | `false` | Windows only. Start the agent as a new process outside the SSH session's job object and return immediately, so the agent keeps running after the SSH session ends. On Linux and macOS the command fails; use `nohup` or `setsid` instead. |
 
 ## Examples
 

@@ -21,12 +21,6 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 muti-metroo init [flags]
 ```
 
-## Flags
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `-d`, `--data-dir` | `./data` | Data directory to create. Use the same path as `agent.data_dir` in the configuration. |
-
 ## Description
 
 `init` creates the data directory (mode `0700`) if needed, writes a random agent ID to the `agent_id` file in it (mode `0600`), and prints the ID.
@@ -34,6 +28,12 @@ muti-metroo init [flags]
 If `agent_id` already exists, `init` changes nothing and prints the existing ID. Either way it exits with status 0.
 
 `init` does not create the end-to-end encryption keypair (`agent_key`, `agent_key.pub`); the agent generates it on first start.
+
+## Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-d`, `--data-dir` | `./data` | Data directory to create. Use the same path as `agent.data_dir` in the configuration. |
 
 ## Examples
 

@@ -21,12 +21,6 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 muti-metroo setup [flags]
 ```
 
-## Flags
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `-c`, `--config` | none | Path to a binary that has, or should receive, an embedded configuration. The wizard loads the binary's current embedded configuration as defaults and embeds the result back into that binary. DLL files are rejected. |
-
 ## Description
 
 The wizard asks for the following, in order. Press Enter to accept the default shown in brackets.
@@ -51,6 +45,12 @@ The wizard then asks how to deliver the configuration:
 With `-c <binary>`, the wizard skips the config path and data directory questions and always embeds into that binary. An identity already embedded in the binary is kept.
 
 Finally, on Linux, macOS, and Windows, the wizard offers to install or update the agent as a service. See [service](service.md) for what installation does on each platform.
+
+## Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-c`, `--config` | none | Path to a binary that has, or should receive, an embedded configuration. The wizard loads the binary's current embedded configuration as defaults and embeds the result back into that binary. DLL files are rejected. |
 
 ## Examples
 

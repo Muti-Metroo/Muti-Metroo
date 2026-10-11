@@ -4,6 +4,18 @@ Page-by-page editorial audit of the documentation against the MDN editorial mode
 
 111 pages reviewed: 61 passed as written, 50 fixed. 443 claims verified against the implementation. The mechanical checks (commands, flags, config examples, HTTP paths, style rules) are in [VERIFICATION.md](VERIFICATION.md) and run in CI.
 
+## Site structure review
+
+A final pass over the heading outline of all 111 pages, checking each section's page pattern and heading conventions:
+
+- **Configuration reference** (`configuration/`): every section page follows Configuration (annotated YAML), Keys (table), topic sections, Examples, See Also. `limits` and `protocol` used "Example"; renamed to "Examples" to match.
+- **CLI reference** (`cli/`): command groups use one section per subcommand; single commands use Synopsis, Description, Arguments, Flags, Output, Examples, Exit status. `init`, `run`, `setup`, and `embed-config` had Description after Flags; reordered so the description precedes the reference tables, as on the other single-command pages.
+- **HTTP API reference** (`api/`): one H2 per endpoint (method and path), then Errors and See Also. Consistent on all pages.
+- **Usage guides** (`features/`): requirements, task sections, Troubleshooting with the literal error messages as headings, See Also. Consistent.
+- **Getting started, deployment, security, troubleshooting**: numbered steps for procedures, task-oriented sections otherwise, See Also last. Consistent.
+- **Heading hierarchy**: `download.mdx` jumped from H1 to H3 and repeated "Installation" three times; added a "Muti Metroo agent" H2 and named the per-platform sections "Install on macOS/Linux/Windows".
+- **Sentence case**: `interactive-setup.md` step headings were Title Case and used "&"; converted to sentence case. A scan of every H2 and H3 found no other Title Case headings (capitals after "Step N:" and in proper names or UI labels are intended).
+
 ## `api/agents.md`
 
 **Result:** fixed. Purpose clear; structure fine; examples match live agent output; See Also 4 links with reasons

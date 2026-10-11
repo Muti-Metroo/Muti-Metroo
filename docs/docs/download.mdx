@@ -74,6 +74,8 @@ By downloading these binaries, you agree to the [Terms of Service](/terms-of-ser
 To review or modify the code, build the binary yourself. See [Build from source](/getting-started/installation#build-from-source).
 :::
 
+## Muti Metroo agent
+
 <Tabs groupId="os">
   <TabItem value="macos" label="macOS" default>
 
@@ -93,7 +95,7 @@ To review or modify the code, build the binary yourself. See [Build from source]
   </DownloadButton>
 </DownloadButtonGroup>
 
-### Installation
+### Install on macOS
 
 This example installs the Apple Silicon binary. For Intel Macs, use `muti-metroo-darwin-amd64`.
 
@@ -131,7 +133,7 @@ xattr -d com.apple.quarantine /usr/local/bin/muti-metroo
   </DownloadButton>
 </DownloadButtonGroup>
 
-### Installation
+### Install on Linux
 
 This example installs the x86_64 binary. For ARM64, use `muti-metroo-linux-arm64`.
 
@@ -171,7 +173,7 @@ muti-metroo --version
 The DLL runs the agent through `rundll32.exe` without a console window. Use the `.exe` for normal operation and the `.dll` for background execution. The ARM64 DLL is a native ARM64 image and runs with the standard `rundll32.exe` in `System32`. See [DLL Mode](/deployment/dll-mode).
 :::
 
-### Installation
+### Install on Windows
 
 This example installs the x86_64 executable. For ARM64, use `muti-metroo-windows-arm64.exe`. Run PowerShell as Administrator.
 

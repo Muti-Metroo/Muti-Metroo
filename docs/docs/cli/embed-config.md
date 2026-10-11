@@ -17,6 +17,16 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 muti-metroo embed-config <config.yaml> [flags]
 ```
 
+## Description
+
+The configuration is parsed and validated with the same checks the agent applies at startup before anything is written; an invalid file leaves the binary untouched. If the source binary already has an embedded configuration, it is replaced. The output binary keeps the source binary's file permissions.
+
+The YAML is embedded as written, after validation. Environment variable references such as `${VAR}` are stored unexpanded and are expanded each time the binary starts. The configuration does not include an agent identity unless the YAML sets `agent.id` and `agent.private_key`; without them, the agent creates its identity in `agent.data_dir` on first start. `data_dir` defaults to `./data`, which is relative to the working directory the binary starts in, so set an absolute path for a binary that runs from different locations.
+
+DLL files are rejected. To run the DLL build, pass a config file path to `rundll32.exe` instead (see [DLL mode](../deployment/dll-mode.md)).
+
+Embedding does not sign or encrypt the binary. The configuration is obfuscated, not protected: anyone with the binary can read it. Use [`config show`](config.md#config-show) to inspect what a binary contains.
+
 ## Arguments
 
 | Argument | Description |
@@ -29,16 +39,6 @@ muti-metroo embed-config <config.yaml> [flags]
 | --- | --- | --- |
 | `-b`, `--binary` | the running executable | Source binary to embed the configuration into. |
 | `-o`, `--output` | same as the source binary | Path of the binary to write. Without it, the source binary is replaced in place. |
-
-## Description
-
-The configuration is parsed and validated with the same checks the agent applies at startup before anything is written; an invalid file leaves the binary untouched. If the source binary already has an embedded configuration, it is replaced. The output binary keeps the source binary's file permissions.
-
-The YAML is embedded as written, after validation. Environment variable references such as `${VAR}` are stored unexpanded and are expanded each time the binary starts. The configuration does not include an agent identity unless the YAML sets `agent.id` and `agent.private_key`; without them, the agent creates its identity in `agent.data_dir` on first start. `data_dir` defaults to `./data`, which is relative to the working directory the binary starts in, so set an absolute path for a binary that runs from different locations.
-
-DLL files are rejected. To run the DLL build, pass a config file path to `rundll32.exe` instead (see [DLL mode](../deployment/dll-mode.md)).
-
-Embedding does not sign or encrypt the binary. The configuration is obfuscated, not protected: anyone with the binary can read it. Use [`config show`](config.md#config-show) to inspect what a binary contains.
 
 ## Examples
 
