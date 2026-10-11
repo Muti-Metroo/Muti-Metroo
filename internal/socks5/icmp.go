@@ -58,7 +58,6 @@ type ICMPAssociation struct {
 	// Reply channel - used to wait for echo replies
 	replyMu   sync.Mutex
 	replyCond *sync.Cond
-	replyData *ICMPReply
 }
 
 // ICMPReply holds a pending echo reply.

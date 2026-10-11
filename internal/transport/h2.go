@@ -278,7 +278,6 @@ type H2Listener struct {
 	connCh       chan *H2PeerConn
 	closeCh      chan struct{}
 	closed       atomic.Bool
-	mu           sync.Mutex
 }
 
 // start initializes the HTTP/2 server.

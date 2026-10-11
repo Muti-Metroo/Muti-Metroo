@@ -57,22 +57,10 @@ func (m *mockDataWriter) WriteICMPClose(peerID identity.AgentID, streamID uint64
 	return nil
 }
 
-func (m *mockDataWriter) getOpenAcks() []*protocol.ICMPOpenAck {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.openAcks
-}
-
 func (m *mockDataWriter) getOpenErrs() []*protocol.ICMPOpenErr {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.openErrs
-}
-
-func (m *mockDataWriter) getEchos() []*protocol.ICMPEcho {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.echos
 }
 
 func (m *mockDataWriter) getCloses() []uint8 {

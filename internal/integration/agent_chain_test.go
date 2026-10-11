@@ -4,7 +4,6 @@ package integration
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -762,13 +761,4 @@ func TestAgentChain_SOCKS5Connectivity(t *testing.T) {
 
 	t.Logf("SOCKS5 confirmed running. Agent A has %d peers and %d routes",
 		stats.PeerCount, stats.RouteCount)
-}
-
-// generateSelfSignedCert generates a self-signed TLS certificate.
-func generateSelfSignedCert() (tls.Certificate, error) {
-	certPEM, keyPEM, err := transport.GenerateSelfSignedCert("test", 24*time.Hour)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	return tls.X509KeyPair(certPEM, keyPEM)
 }

@@ -173,7 +173,6 @@ type WebSocketListener struct {
 	connCh        chan *WebSocketPeerConn
 	closeCh       chan struct{}
 	closed        atomic.Bool
-	mu            sync.Mutex
 }
 
 // start initializes the HTTP server.

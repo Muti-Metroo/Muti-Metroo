@@ -37,8 +37,6 @@ type MeshAgent struct {
 	streamsLock sync.RWMutex
 
 	// Exit server (only for D)
-	exitListener net.Listener
-
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
