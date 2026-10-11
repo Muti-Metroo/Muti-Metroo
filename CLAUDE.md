@@ -79,7 +79,7 @@ Three PDFs are attached to every release: user manual (feature reference), opera
 GITHUB_TOKEN=xxx ./release.sh [patch|minor|major]
 ```
 
-Build targets: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64, windows/arm64. Linux binaries are UPX-compressed when available. **Windows EXE binaries must NOT be UPX-compressed** -- the UPX unpacking stub is commonly flagged by antivirus engines as a false positive. The Windows DLL is still UPX-compressed since DLLs load differently.
+Build targets: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64, windows/arm64. Linux binaries are UPX-compressed when available. **Windows EXE binaries must NOT be UPX-compressed** -- the UPX unpacking stub is commonly flagged by antivirus engines as a false positive. The Windows amd64 DLL is still UPX-compressed since DLLs load differently. The arm64 DLL (cross-compiled with llvm-mingw in the `build-dll-arm64` release job) ships uncompressed because UPX cannot pack ARM64 PE files.
 
 ## Build & Development Commands
 

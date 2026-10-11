@@ -156,6 +156,49 @@ jobs:
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" "muti-metroo-windows-amd64.dll" --clobber
 
+  # Windows ARM64 DLL is cross-compiled with llvm-mingw (gcc-mingw-w64 has no
+  # aarch64 target). Not UPX-compressed: UPX cannot pack ARM64 PE files.
+  build-dll-arm64:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    env:
+      LLVM_MINGW: llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install llvm-mingw
+        run: |
+          curl -sSfL "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/${LLVM_MINGW}.tar.xz" | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$LLVM_MINGW/bin" >> "$GITHUB_PATH"
+
+      - name: Build DLL
+        env:
+          CGO_ENABLED: "1"
+          CC: aarch64-w64-mingw32-clang
+          GOOS: windows
+          GOARCH: arm64
+        run: |
+          VERSION=${{ needs.release-please.outputs.tag_name }}
+          VERSION=${VERSION#v}
+          VERSION=${VERSION#muti-metroo-v}
+          go build -buildmode=c-shared -trimpath -buildvcs=false \
+            -ldflags="-s -w -X main.Version=$VERSION" \
+            -o muti-metroo-windows-arm64.dll \
+            ./cmd/muti-dll
+          rm -f muti-metroo-windows-arm64.h
+
+      - name: Upload DLL to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" "muti-metroo-windows-arm64.dll" --clobber
+
   user-manual:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created }}
@@ -197,7 +240,7 @@ jobs:
             --clobber
 
   checksums:
-    needs: [release-please, build, build-dll, user-manual]
+    needs: [release-please, build, build-dll, build-dll-arm64, user-manual]
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     steps:
