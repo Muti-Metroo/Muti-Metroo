@@ -2272,12 +2272,15 @@ internal/sleep/
 │                                // when now - LastUpdate > RouteTTL          │
 │  }                                                                          │
 │                                                                             │
-│  Table {                                                                    │
-│      routes  map[string][]*Route // Keyed by CIDR string; each per-key list │
-│                                  // is sorted by metric ascending           │
-│      localID AgentID                                                        │
-│      mu      sync.RWMutex                                                   │
-│  }                                                                          │
+│  All four route tables (CIDR, agent presence, domain, forward) share the   │
+│  generic keyedTable[K, *Entry] skeleton (generic_table.go): a              │
+│  map[K][]*Entry with per-key lists sorted best-first (metric, then         │
+│  origin ID; the agent presence table also breaks ties on next hop), the   │
+│  add/update/remove/cleanup loops, clone-on-read, and the stale-withdraw   │
+│  sequence guard. Per-table differences are injected via entryOps field    │
+│  accessors plus two knobs: the agent presence table keys entries on       │
+│  (origin, next hop) pairs and removes all matching entries on a          │
+│  sequenced withdraw.                                                      │
 │                                                                             │
 │  Lookup iterates every CIDR key that contains the destination IP and keeps  │
 │  the route with the longest prefix length; within a CIDR key, the metric-   │
@@ -2313,16 +2316,15 @@ internal/sleep/
 │      LastUpdate  time.Time     // When this route was last updated          │
 │  }                                                                          │
 │                                                                             │
-│  DomainTable {                                                              │
-│      exactRoutes  map[string][]*DomainRoute  // "api.example.com" -> routes │
-│      wildcardBase map[string][]*DomainRoute  // "example.com" -> wildcard   │
-│      localID      AgentID                    // Local agent ID              │
-│  }                                                                          │
+│  DomainTable wraps the shared keyedTable[string, *DomainRoute]. Exact and  │
+│  wildcard routes share one map under distinct key prefixes: "e:" + lower-  │
+│  cased pattern for exact routes, "w:" + lowercased base domain for         │
+│  wildcards, so "example.com" and "*.example.com" never collide.            │
 │                                                                             │
 │  Matching algorithm:                                                        │
-│  1. Exact match: lookup domain in exactRoutes                               │
-│  2. Wildcard match: split domain at first ".", lookup remainder in          │
-│     wildcardBase (single-level wildcard only)                               │
+│  1. Exact match: lookup "e:" + domain                                       │
+│  2. Wildcard match: split domain at first ".", lookup "w:" + remainder      │
+│     (single-level wildcard only)                                            │
 │  3. Return route with lowest metric                                         │
 │                                                                             │
 │  Example lookups:                                                           │

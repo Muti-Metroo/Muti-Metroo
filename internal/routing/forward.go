@@ -3,8 +3,6 @@ package routing
 
 import (
 	"fmt"
-	"sort"
-	"sync"
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
@@ -28,7 +26,7 @@ type ForwardRoute struct {
 	// Metric is the route cost (lower is better)
 	Metric uint16
 
-	// Path is the AS-path style list of agent IDs (nil if encrypted and can't decrypt)
+	// Path is the AS-path style list of agent IDs
 	Path []identity.AgentID
 
 	// Sequence is used for route versioning
@@ -62,23 +60,28 @@ func (r *ForwardRoute) Clone() *ForwardRoute {
 	return clone
 }
 
+// forwardRouteEntryOps adapts *ForwardRoute to the generic keyedTable skeleton.
+var forwardRouteEntryOps = entryOps[*ForwardRoute]{
+	clone:         func(r *ForwardRoute) *ForwardRoute { return r.Clone() },
+	origin:        func(r *ForwardRoute) identity.AgentID { return r.OriginAgent },
+	nextHop:       func(r *ForwardRoute) identity.AgentID { return r.NextHop },
+	metric:        func(r *ForwardRoute) uint16 { return r.Metric },
+	sequence:      func(r *ForwardRoute) uint64 { return r.Sequence },
+	path:          func(r *ForwardRoute) []identity.AgentID { return r.Path },
+	lastUpdate:    func(r *ForwardRoute) time.Time { return r.LastUpdate },
+	setLastUpdate: func(r *ForwardRoute, t time.Time) { r.LastUpdate = t },
+}
+
 // ForwardTable is a thread-safe port forward routing table.
+// The storage skeleton is the generic keyedTable (see generic_table.go).
 type ForwardTable struct {
-	mu sync.RWMutex
-
-	// routes maps forward key to route entries
-	// Key: forward routing key (e.g., "my-web-server")
-	routes map[string][]*ForwardRoute
-
-	// localID is this agent's ID (for loop detection)
-	localID identity.AgentID
+	entries *keyedTable[string, *ForwardRoute]
 }
 
 // NewForwardTable creates a new port forward routing table.
 func NewForwardTable(localID identity.AgentID) *ForwardTable {
 	return &ForwardTable{
-		routes:  make(map[string][]*ForwardRoute),
-		localID: localID,
+		entries: newKeyedTable[string](localID, forwardRouteEntryOps, false, false),
 	}
 }
 
@@ -88,182 +91,65 @@ func (t *ForwardTable) AddRoute(route *ForwardRoute) bool {
 	if route == nil || route.Key == "" {
 		return false
 	}
-
-	// Check for routing loops (is our ID in the path?)
-	for _, id := range route.Path {
-		if id == t.localID {
-			return false // Loop detected
-		}
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	key := route.Key
-
-	// Check if we already have a route from this origin
-	for i, r := range t.routes[key] {
-		if r.OriginAgent == route.OriginAgent {
-			// Update if newer sequence or better metric
-			if route.Sequence > r.Sequence ||
-				(route.Sequence == r.Sequence && route.Metric < r.Metric) {
-				cloned := route.Clone()
-				cloned.LastUpdate = time.Now()
-				t.routes[key][i] = cloned
-				t.sortRoutes(key)
-				return true
-			}
-			return false // Older/worse route
-		}
-	}
-
-	// New route from this origin
-	cloned := route.Clone()
-	cloned.LastUpdate = time.Now()
-	t.routes[key] = append(t.routes[key], cloned)
-	t.sortRoutes(key)
-	return true
-}
-
-// sortRoutes sorts routes for a key by metric (lowest first), breaking
-// ties on origin agent ID (lowest first) so equal-metric routes resolve
-// deterministically.
-func (t *ForwardTable) sortRoutes(key string) {
-	routes := t.routes[key]
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].Metric != routes[j].Metric {
-			return routes[i].Metric < routes[j].Metric
-		}
-		return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
-	})
+	return t.entries.add(route.Key, route)
 }
 
 // RemoveRoute removes a port forward route from a specific origin.
 func (t *ForwardTable) RemoveRoute(key string, originAgent identity.AgentID) bool {
-	return t.removeRoute(key, originAgent, 0, false)
+	if key == "" {
+		return false
+	}
+	return t.entries.remove(key, originAgent)
 }
 
 // RemoveRouteWithSeq removes a port forward route from a specific origin, but
 // only when the installed route's sequence is not newer than seq. Guards
 // against a stale ROUTE_WITHDRAW deleting a fresher re-advertised route.
 func (t *ForwardTable) RemoveRouteWithSeq(key string, originAgent identity.AgentID, seq uint64) bool {
-	return t.removeRoute(key, originAgent, seq, true)
-}
-
-func (t *ForwardTable) removeRoute(key string, originAgent identity.AgentID, seq uint64, checkSeq bool) bool {
 	if key == "" {
 		return false
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	routes := t.routes[key]
-	for i, r := range routes {
-		if r.OriginAgent == originAgent {
-			if checkSeq && r.Sequence > seq {
-				return false // Stale withdraw; installed route is newer
-			}
-			t.routes[key] = append(routes[:i], routes[i+1:]...)
-			if len(t.routes[key]) == 0 {
-				delete(t.routes, key)
-			}
-			return true
-		}
-	}
-	return false
+	return t.entries.removeWithSeq(key, originAgent, seq)
 }
 
 // RemoveRoutesFromPeer removes all port forward routes learned from a specific peer.
 // Returns the removed routes so the caller can propagate withdrawals.
 func (t *ForwardTable) RemoveRoutesFromPeer(peerID identity.AgentID) []*ForwardRoute {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	var removed []*ForwardRoute
-	for key, routes := range t.routes {
-		filtered := routes[:0]
-		for _, r := range routes {
-			if r.NextHop != peerID {
-				filtered = append(filtered, r)
-			} else {
-				removed = append(removed, r)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(t.routes, key)
-		} else {
-			t.routes[key] = filtered
-		}
-	}
-	return removed
+	return t.entries.removeFromPeer(peerID)
 }
 
 // Lookup finds the best port forward route for a routing key.
 func (t *ForwardTable) Lookup(key string) *ForwardRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if routes, ok := t.routes[key]; ok && len(routes) > 0 {
-		return routes[0].Clone() // First is best due to sorting by metric
+	route, ok := t.entries.first(key)
+	if !ok {
+		return nil
 	}
-	return nil
+	return route
 }
 
 // GetAllRoutes returns all port forward routes in the table.
 func (t *ForwardTable) GetAllRoutes() []*ForwardRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var all []*ForwardRoute
-	for _, routes := range t.routes {
-		for _, r := range routes {
-			all = append(all, r.Clone())
-		}
-	}
-	return all
+	return t.entries.all()
 }
 
 // GetRoutesFromAgent returns all port forward routes originating from a specific agent.
 func (t *ForwardTable) GetRoutesFromAgent(agentID identity.AgentID) []*ForwardRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var matching []*ForwardRoute
-	for _, routes := range t.routes {
-		for _, r := range routes {
-			if r.OriginAgent == agentID {
-				matching = append(matching, r.Clone())
-			}
-		}
-	}
-	return matching
+	return t.entries.allFromOrigin(agentID)
 }
 
 // Size returns the number of unique port forward keys in the table.
 func (t *ForwardTable) Size() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.routes)
+	return t.entries.size()
 }
 
 // TotalRoutes returns the total number of port forward route entries.
 func (t *ForwardTable) TotalRoutes() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	count := 0
-	for _, routes := range t.routes {
-		count += len(routes)
-	}
-	return count
+	return t.entries.total()
 }
 
 // Clear removes all port forward routes from the table.
 func (t *ForwardTable) Clear() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.routes = make(map[string][]*ForwardRoute)
+	t.entries.clear()
 }
 
 // HasRoute checks if a port forward route exists for the given key and origin.
@@ -271,16 +157,7 @@ func (t *ForwardTable) HasRoute(key string, originAgent identity.AgentID) bool {
 	if key == "" {
 		return false
 	}
-
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	for _, r := range t.routes[key] {
-		if r.OriginAgent == originAgent {
-			return true
-		}
-	}
-	return false
+	return t.entries.has(key, originAgent)
 }
 
 // ConflictingOriginsForKey returns origin agent IDs that already advertise
@@ -289,10 +166,8 @@ func (t *ForwardTable) ConflictingOriginsForKey(key string, candidateOrigin iden
 	if key == "" {
 		return nil
 	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
 	var conflicts []identity.AgentID
-	for _, r := range t.routes[key] {
+	for _, r := range t.entries.allForKey(key) {
 		if r.OriginAgent != candidateOrigin {
 			conflicts = append(conflicts, r.OriginAgent)
 		}
@@ -304,28 +179,7 @@ func (t *ForwardTable) ConflictingOriginsForKey(key string, candidateOrigin iden
 // Local routes (where OriginAgent == localID) are never removed.
 // Returns the number of routes removed.
 func (t *ForwardTable) CleanupStaleRoutes(maxAge time.Duration) int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	now := time.Now()
-	removed := 0
-
-	for key, routes := range t.routes {
-		var kept []*ForwardRoute
-		for _, r := range routes {
-			if r.OriginAgent == t.localID || now.Sub(r.LastUpdate) <= maxAge {
-				kept = append(kept, r)
-			} else {
-				removed++
-			}
-		}
-		if len(kept) > 0 {
-			t.routes[key] = kept
-		} else {
-			delete(t.routes, key)
-		}
-	}
-	return removed
+	return t.entries.cleanupStale(maxAge)
 }
 
 // LocalForwardRoute represents a locally-announced port forward route.

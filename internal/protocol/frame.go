@@ -457,6 +457,171 @@ func DecodePeerHello(buf []byte) (*PeerHello, error) {
 // EphemeralKeySize is the size of X25519 ephemeral public keys.
 const EphemeralKeySize = 32
 
+// openWire is the shared wire layout of StreamOpen and UDPOpen:
+//
+//	requestID(8) + addrType(1) + address(var) + port(2) + ttl(1) +
+//	pathLen(1) + path + ephemeralPubKey(32)
+//
+// ICMPOpen deliberately differs (no port, length-prefixed IP) and does not
+// use this layout. The two public Open types encode through these helpers so
+// their serializers cannot drift apart; the wire format is unchanged.
+type openWire struct {
+	RequestID       uint64
+	AddressType     uint8
+	Address         []byte
+	Port            uint16
+	TTL             uint8
+	RemainingPath   []identity.AgentID
+	EphemeralPubKey [EphemeralKeySize]byte
+}
+
+func (o *openWire) encode() []byte {
+	w := newBufferWriter(8 + 1 + len(o.Address) + 2 + 1 + 1 + len(o.RemainingPath)*16 + EphemeralKeySize)
+	w.writeUint64(o.RequestID)
+	w.writeUint8(o.AddressType)
+	w.writeBytes(o.Address)
+	w.writeUint16(o.Port)
+	w.writeUint8(o.TTL)
+	w.writeAgentIDs(o.RemainingPath)
+	w.writeBytes(o.EphemeralPubKey[:])
+
+	return w.bytes()
+}
+
+func decodeOpenWire(buf []byte, name string) (*openWire, error) {
+	if len(buf) < 13+EphemeralKeySize { // 8 + 1 + 2 + 1 + 1 + 32 (minimum with key)
+		return nil, fmt.Errorf("%w: %s too short", ErrInvalidFrame, name)
+	}
+
+	r := newBufferReader(buf, name)
+	o := &openWire{
+		RequestID:   r.readUint64(),
+		AddressType: r.readUint8(),
+	}
+
+	// Determine address length based on type
+	var addrLen int
+	if o.AddressType == AddrTypeDomain {
+		if r.offset >= len(buf) {
+			return nil, fmt.Errorf("%w: %s domain length missing", ErrInvalidFrame, name)
+		}
+		addrLen = 1 + int(buf[r.offset])
+	} else {
+		var err error
+		addrLen, err = addressLength(o.AddressType, 0)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	o.Address = r.readBytes(addrLen)
+	o.Port = r.readUint16()
+	o.TTL = r.readUint8()
+	o.RemainingPath = r.readAgentIDs()
+	o.EphemeralPubKey = r.readEphemeralKey()
+
+	if r.err != nil {
+		return nil, r.err
+	}
+	return o, nil
+}
+
+// ackWire is the shared wire layout of StreamOpenAck and UDPOpenAck:
+//
+//	requestID(8) + boundAddrType(1) + boundAddr(var) + boundPort(2) +
+//	ephemeralPubKey(32)
+//
+// ICMPOpenAck is smaller (no bound address) and does not use this layout.
+type ackWire struct {
+	RequestID       uint64
+	BoundAddrType   uint8
+	BoundAddr       []byte
+	BoundPort       uint16
+	EphemeralPubKey [EphemeralKeySize]byte
+}
+
+func (a *ackWire) encode() []byte {
+	w := newBufferWriter(8 + 1 + len(a.BoundAddr) + 2 + EphemeralKeySize)
+	w.writeUint64(a.RequestID)
+	w.writeUint8(a.BoundAddrType)
+	w.writeBytes(a.BoundAddr)
+	w.writeUint16(a.BoundPort)
+	w.writeBytes(a.EphemeralPubKey[:])
+
+	return w.bytes()
+}
+
+func decodeAckWire(buf []byte, name string) (*ackWire, error) {
+	if len(buf) < 12+EphemeralKeySize { // 8 + 1 + 1 + 2 + 32 minimum (empty addr + key)
+		return nil, fmt.Errorf("%w: %s too short", ErrInvalidFrame, name)
+	}
+
+	r := newBufferReader(buf, name)
+	a := &ackWire{
+		RequestID:     r.readUint64(),
+		BoundAddrType: r.readUint8(),
+	}
+
+	// Determine address length (only IPv4/IPv6 for bound addresses)
+	var addrLen int
+	switch a.BoundAddrType {
+	case AddrTypeIPv4:
+		addrLen = 4
+	case AddrTypeIPv6:
+		addrLen = 16
+	default:
+		addrLen = 0
+	}
+
+	a.BoundAddr = r.readBytes(addrLen)
+	a.BoundPort = r.readUint16()
+	a.EphemeralPubKey = r.readEphemeralKey()
+
+	if r.err != nil {
+		return nil, r.err
+	}
+	return a, nil
+}
+
+// errWire is the shared wire layout of StreamOpenErr, UDPOpenErr, and
+// ICMPOpenErr:
+//
+//	requestID(8) + errorCode(2) + messageLen(1) + message
+type errWire struct {
+	RequestID uint64
+	ErrorCode uint16
+	Message   string
+}
+
+func (e *errWire) encode() []byte {
+	msg := clampString(e.Message)
+
+	w := newBufferWriter(8 + 2 + 1 + len(msg))
+	w.writeUint64(e.RequestID)
+	w.writeUint16(e.ErrorCode)
+	w.writeString(msg)
+
+	return w.bytes()
+}
+
+func decodeErrWire(buf []byte, name string) (*errWire, error) {
+	if len(buf) < 11 { // 8 + 2 + 1
+		return nil, fmt.Errorf("%w: %s too short", ErrInvalidFrame, name)
+	}
+
+	r := newBufferReader(buf, name)
+	e := &errWire{
+		RequestID: r.readUint64(),
+		ErrorCode: r.readUint16(),
+		Message:   r.readString(),
+	}
+
+	if r.err != nil {
+		return nil, r.err
+	}
+	return e, nil
+}
+
 // StreamOpen is the payload for STREAM_OPEN frames.
 type StreamOpen struct {
 	RequestID       uint64
@@ -470,57 +635,32 @@ type StreamOpen struct {
 
 // Encode serializes StreamOpen to bytes.
 func (s *StreamOpen) Encode() []byte {
-	size := 8 + 1 + len(s.Address) + 2 + 1 + 1 + len(s.RemainingPath)*16 + EphemeralKeySize
-
-	w := newBufferWriter(size)
-	w.writeUint64(s.RequestID)
-	w.writeUint8(s.AddressType)
-	w.writeBytes(s.Address)
-	w.writeUint16(s.Port)
-	w.writeUint8(s.TTL)
-	w.writeAgentIDs(s.RemainingPath)
-	w.writeBytes(s.EphemeralPubKey[:])
-
-	return w.bytes()
+	return (&openWire{
+		RequestID:       s.RequestID,
+		AddressType:     s.AddressType,
+		Address:         s.Address,
+		Port:            s.Port,
+		TTL:             s.TTL,
+		RemainingPath:   s.RemainingPath,
+		EphemeralPubKey: s.EphemeralPubKey,
+	}).encode()
 }
 
 // DecodeStreamOpen deserializes StreamOpen from bytes.
 func DecodeStreamOpen(buf []byte) (*StreamOpen, error) {
-	if len(buf) < 13+EphemeralKeySize { // 8 + 1 + 2 + 1 + 1 + 32 (minimum with key)
-		return nil, fmt.Errorf("%w: StreamOpen too short", ErrInvalidFrame)
+	o, err := decodeOpenWire(buf, "StreamOpen")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "StreamOpen")
-	s := &StreamOpen{
-		RequestID:   r.readUint64(),
-		AddressType: r.readUint8(),
-	}
-
-	// Determine address length based on type
-	var addrLen int
-	if s.AddressType == AddrTypeDomain {
-		if r.offset >= len(buf) {
-			return nil, fmt.Errorf("%w: StreamOpen domain length missing", ErrInvalidFrame)
-		}
-		addrLen = 1 + int(buf[r.offset])
-	} else {
-		var err error
-		addrLen, err = addressLength(s.AddressType, 0)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	s.Address = r.readBytes(addrLen)
-	s.Port = r.readUint16()
-	s.TTL = r.readUint8()
-	s.RemainingPath = r.readAgentIDs()
-	s.EphemeralPubKey = r.readEphemeralKey()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return s, nil
+	return &StreamOpen{
+		RequestID:       o.RequestID,
+		AddressType:     o.AddressType,
+		Address:         o.Address,
+		Port:            o.Port,
+		TTL:             o.TTL,
+		RemainingPath:   o.RemainingPath,
+		EphemeralPubKey: o.EphemeralPubKey,
+	}, nil
 }
 
 // GetDestinationIP returns the destination IP for IPv4/IPv6 addresses.
@@ -554,47 +694,28 @@ type StreamOpenAck struct {
 
 // Encode serializes StreamOpenAck to bytes.
 func (s *StreamOpenAck) Encode() []byte {
-	w := newBufferWriter(8 + 1 + len(s.BoundAddr) + 2 + EphemeralKeySize)
-	w.writeUint64(s.RequestID)
-	w.writeUint8(s.BoundAddrType)
-	w.writeBytes(s.BoundAddr)
-	w.writeUint16(s.BoundPort)
-	w.writeBytes(s.EphemeralPubKey[:])
-
-	return w.bytes()
+	return (&ackWire{
+		RequestID:       s.RequestID,
+		BoundAddrType:   s.BoundAddrType,
+		BoundAddr:       s.BoundAddr,
+		BoundPort:       s.BoundPort,
+		EphemeralPubKey: s.EphemeralPubKey,
+	}).encode()
 }
 
 // DecodeStreamOpenAck deserializes StreamOpenAck from bytes.
 func DecodeStreamOpenAck(buf []byte) (*StreamOpenAck, error) {
-	if len(buf) < 12+EphemeralKeySize { // 8 + 1 + 1 + 2 + 32 minimum (empty addr + key)
-		return nil, fmt.Errorf("%w: StreamOpenAck too short", ErrInvalidFrame)
+	a, err := decodeAckWire(buf, "StreamOpenAck")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "StreamOpenAck")
-	s := &StreamOpenAck{
-		RequestID:     r.readUint64(),
-		BoundAddrType: r.readUint8(),
-	}
-
-	// Determine address length (only IPv4/IPv6 for bound addresses)
-	var addrLen int
-	switch s.BoundAddrType {
-	case AddrTypeIPv4:
-		addrLen = 4
-	case AddrTypeIPv6:
-		addrLen = 16
-	default:
-		addrLen = 0
-	}
-
-	s.BoundAddr = r.readBytes(addrLen)
-	s.BoundPort = r.readUint16()
-	s.EphemeralPubKey = r.readEphemeralKey()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return s, nil
+	return &StreamOpenAck{
+		RequestID:       a.RequestID,
+		BoundAddrType:   a.BoundAddrType,
+		BoundAddr:       a.BoundAddr,
+		BoundPort:       a.BoundPort,
+		EphemeralPubKey: a.EphemeralPubKey,
+	}, nil
 }
 
 // StreamOpenErr is the payload for STREAM_OPEN_ERR frames.
@@ -606,33 +727,16 @@ type StreamOpenErr struct {
 
 // Encode serializes StreamOpenErr to bytes.
 func (s *StreamOpenErr) Encode() []byte {
-	msg := clampString(s.Message)
-
-	w := newBufferWriter(8 + 2 + 1 + len(msg))
-	w.writeUint64(s.RequestID)
-	w.writeUint16(s.ErrorCode)
-	w.writeString(msg)
-
-	return w.bytes()
+	return (&errWire{RequestID: s.RequestID, ErrorCode: s.ErrorCode, Message: s.Message}).encode()
 }
 
 // DecodeStreamOpenErr deserializes StreamOpenErr from bytes.
 func DecodeStreamOpenErr(buf []byte) (*StreamOpenErr, error) {
-	if len(buf) < 11 { // 8 + 2 + 1
-		return nil, fmt.Errorf("%w: StreamOpenErr too short", ErrInvalidFrame)
+	e, err := decodeErrWire(buf, "StreamOpenErr")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "StreamOpenErr")
-	s := &StreamOpenErr{
-		RequestID: r.readUint64(),
-		ErrorCode: r.readUint16(),
-		Message:   r.readString(),
-	}
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return s, nil
+	return &StreamOpenErr{RequestID: e.RequestID, ErrorCode: e.ErrorCode, Message: e.Message}, nil
 }
 
 // StreamReset is the payload for STREAM_RESET frames.
@@ -683,6 +787,88 @@ type Route struct {
 	PrefixLength  uint8
 	Prefix        []byte // 4 or 16 bytes for IP, length-prefixed string for domain
 	Metric        uint16
+}
+
+// routesEncodedSize returns the wire size of a route list:
+// family(1) + prefixLen(1) + prefix(var) + metric(2) per route.
+// Variable-length (domain, forward) and unknown families are sized from the
+// actual prefix bytes so the buffer is always exact; the decoder rejects
+// unknown families explicitly.
+func routesEncodedSize(routes []Route) int {
+	size := 0
+	for _, route := range routes {
+		pLen, err := prefixLength(route.AddressFamily)
+		if err != nil || route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
+			pLen = len(route.Prefix)
+		}
+		size += 2 + pLen + 2
+	}
+	return size
+}
+
+// encodeRoutes writes the route list shared by ROUTE_ADVERTISE and
+// ROUTE_WITHDRAW.
+func encodeRoutes(w *bufferWriter, routes []Route) {
+	for _, route := range routes {
+		w.writeUint8(route.AddressFamily)
+		w.writeUint8(route.PrefixLength)
+		w.writeBytes(route.Prefix)
+		w.writeUint16(route.Metric)
+	}
+}
+
+// decodeRoutes reads count routes in the layout written by encodeRoutes.
+// Errors are recorded on rd (rd.err), matching the bufferReader idiom.
+func decodeRoutes(rd *bufferReader, buf []byte, count int) []Route {
+	routes := make([]Route, count)
+	for i := 0; i < count && rd.err == nil; i++ {
+		route := &routes[i]
+		route.AddressFamily = rd.readUint8()
+		route.PrefixLength = rd.readUint8()
+
+		// Determine prefix length based on address family
+		var pLen int
+		switch route.AddressFamily {
+		case AddrFamilyDomain:
+			// Domain routes use length-prefixed strings: [1 byte len][domain]
+			if rd.offset >= len(buf) {
+				rd.setError("prefix length missing")
+				break
+			}
+			pLen = 1 + int(buf[rd.offset])
+		case AddrFamilyForward:
+			// Forward routes: [1 byte key len][key][1 byte target len][target]
+			if rd.offset >= len(buf) {
+				rd.setError("forward key length missing")
+				break
+			}
+			keyLen := int(buf[rd.offset])
+			// Calculate total: keyLen byte + key + targetLen byte + target
+			targetLenOffset := rd.offset + 1 + keyLen
+			if targetLenOffset >= len(buf) {
+				rd.setError("forward target length missing")
+				break
+			}
+			targetLen := int(buf[targetLenOffset])
+			pLen = 1 + keyLen + 1 + targetLen
+		case AddrFamilyAgent:
+			// Agent presence routes: 16-byte AgentID prefix
+			pLen = 16
+		default:
+			// IPv4/IPv6 routes have fixed prefix lengths; an unrecognized
+			// family fails loudly here instead of guessing a size and
+			// mis-parsing the rest of the frame.
+			if pl, err := prefixLength(route.AddressFamily); err != nil {
+				rd.setError(err.Error())
+			} else {
+				pLen = pl
+			}
+		}
+
+		route.Prefix = rd.readBytes(pLen)
+		route.Metric = rd.readUint16()
+	}
+	return routes
 }
 
 // Encode serializes Route to bytes.
@@ -832,17 +1018,7 @@ func (r *RouteAdvertise) Encode() []byte {
 
 	// Calculate size
 	size := 16 + 1 + len(r.OriginDisplayName) + 8 + 1
-	for _, route := range r.Routes {
-		// Domain and forward routes use variable-length prefixes, sized from
-		// the actual bytes. Unknown families are sized the same way so the
-		// buffer is always exact; the receiving decoder rejects them
-		// explicitly.
-		pLen, err := prefixLength(route.AddressFamily)
-		if err != nil || route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
-			pLen = len(route.Prefix)
-		}
-		size += 2 + pLen + 2
-	}
+	size += routesEncodedSize(r.Routes)
 	size += len(encPathBytes)
 	size += 1 + len(r.SeenBy)*16
 	// Optional trailing Comments block; omitted when empty so the
@@ -860,12 +1036,7 @@ func (r *RouteAdvertise) Encode() []byte {
 	w.writeUint64(r.Sequence)
 	w.writeUint8(uint8(len(r.Routes)))
 
-	for _, route := range r.Routes {
-		w.writeUint8(route.AddressFamily)
-		w.writeUint8(route.PrefixLength)
-		w.writeBytes(route.Prefix)
-		w.writeUint16(route.Metric)
-	}
+	encodeRoutes(w, r.Routes)
 
 	w.writeBytes(encPathBytes)
 	w.writeAgentIDs(r.SeenBy)
@@ -900,54 +1071,7 @@ func DecodeRouteAdvertise(buf []byte) (*RouteAdvertise, error) {
 	}
 
 	routeCount := int(rd.readUint8())
-	ra.Routes = make([]Route, routeCount)
-	for i := 0; i < routeCount && rd.err == nil; i++ {
-		route := &ra.Routes[i]
-		route.AddressFamily = rd.readUint8()
-		route.PrefixLength = rd.readUint8()
-
-		// Determine prefix length based on address family
-		var pLen int
-		switch route.AddressFamily {
-		case AddrFamilyDomain:
-			// Domain routes use length-prefixed strings: [1 byte len][domain]
-			if rd.offset >= len(buf) {
-				rd.setError("prefix length missing")
-				break
-			}
-			pLen = 1 + int(buf[rd.offset])
-		case AddrFamilyForward:
-			// Forward routes: [1 byte key len][key][1 byte target len][target]
-			if rd.offset >= len(buf) {
-				rd.setError("forward key length missing")
-				break
-			}
-			keyLen := int(buf[rd.offset])
-			// Calculate total: keyLen byte + key + targetLen byte + target
-			targetLenOffset := rd.offset + 1 + keyLen
-			if targetLenOffset >= len(buf) {
-				rd.setError("forward target length missing")
-				break
-			}
-			targetLen := int(buf[targetLenOffset])
-			pLen = 1 + keyLen + 1 + targetLen
-		case AddrFamilyAgent:
-			// Agent presence routes: 16-byte AgentID prefix
-			pLen = 16
-		default:
-			// IPv4/IPv6 routes have fixed prefix lengths; an unrecognized
-			// family fails loudly here instead of guessing a size and
-			// mis-parsing the rest of the frame.
-			if pl, err := prefixLength(route.AddressFamily); err != nil {
-				rd.setError(err.Error())
-			} else {
-				pLen = pl
-			}
-		}
-
-		route.Prefix = rd.readBytes(pLen)
-		route.Metric = rd.readUint16()
-	}
+	ra.Routes = decodeRoutes(rd, buf, routeCount)
 	if rd.err != nil {
 		return nil, rd.err
 	}
@@ -1006,15 +1130,7 @@ type RouteWithdraw struct {
 func (r *RouteWithdraw) Encode() []byte {
 	// Calculate size: origin + seq + routeCount + routes + seenBy
 	size := 16 + 8 + 1
-	for _, route := range r.Routes {
-		// Same sizing rules as RouteAdvertise.Encode: variable-length and
-		// unknown families are sized from the actual prefix bytes.
-		pLen, err := prefixLength(route.AddressFamily)
-		if err != nil || route.AddressFamily == AddrFamilyDomain || route.AddressFamily == AddrFamilyForward {
-			pLen = len(route.Prefix)
-		}
-		size += 2 + pLen + 2
-	}
+	size += routesEncodedSize(r.Routes)
 	size += 1 + len(r.SeenBy)*16
 
 	w := newBufferWriter(size)
@@ -1022,12 +1138,7 @@ func (r *RouteWithdraw) Encode() []byte {
 	w.writeUint64(r.Sequence)
 	w.writeUint8(uint8(len(r.Routes)))
 
-	for _, route := range r.Routes {
-		w.writeUint8(route.AddressFamily)
-		w.writeUint8(route.PrefixLength)
-		w.writeBytes(route.Prefix)
-		w.writeUint16(route.Metric)
-	}
+	encodeRoutes(w, r.Routes)
 
 	w.writeAgentIDs(r.SeenBy)
 	return w.bytes()
@@ -1046,47 +1157,7 @@ func DecodeRouteWithdraw(buf []byte) (*RouteWithdraw, error) {
 	}
 
 	routeCount := int(rd.readUint8())
-	rw.Routes = make([]Route, routeCount)
-	for i := 0; i < routeCount && rd.err == nil; i++ {
-		route := &rw.Routes[i]
-		route.AddressFamily = rd.readUint8()
-		route.PrefixLength = rd.readUint8()
-
-		var pLen int
-		switch route.AddressFamily {
-		case AddrFamilyDomain:
-			if rd.offset >= len(buf) {
-				rd.setError("prefix length missing")
-				break
-			}
-			pLen = 1 + int(buf[rd.offset])
-		case AddrFamilyForward:
-			if rd.offset >= len(buf) {
-				rd.setError("forward key length missing")
-				break
-			}
-			keyLen := int(buf[rd.offset])
-			targetLenOffset := rd.offset + 1 + keyLen
-			if targetLenOffset >= len(buf) {
-				rd.setError("forward target length missing")
-				break
-			}
-			targetLen := int(buf[targetLenOffset])
-			pLen = 1 + keyLen + 1 + targetLen
-		case AddrFamilyAgent:
-			pLen = 16
-		default:
-			// Fail loudly on unrecognized families (see DecodeRouteAdvertise).
-			if pl, err := prefixLength(route.AddressFamily); err != nil {
-				rd.setError(err.Error())
-			} else {
-				pLen = pl
-			}
-		}
-
-		route.Prefix = rd.readBytes(pLen)
-		route.Metric = rd.readUint16()
-	}
+	rw.Routes = decodeRoutes(rd, buf, routeCount)
 	if rd.err != nil {
 		return nil, rd.err
 	}
@@ -1719,55 +1790,32 @@ type UDPOpen struct {
 
 // Encode serializes UDPOpen to bytes.
 func (u *UDPOpen) Encode() []byte {
-	w := newBufferWriter(8 + 1 + len(u.Address) + 2 + 1 + 1 + len(u.RemainingPath)*16 + EphemeralKeySize)
-	w.writeUint64(u.RequestID)
-	w.writeUint8(u.AddressType)
-	w.writeBytes(u.Address)
-	w.writeUint16(u.Port)
-	w.writeUint8(u.TTL)
-	w.writeAgentIDs(u.RemainingPath)
-	w.writeBytes(u.EphemeralPubKey[:])
-
-	return w.bytes()
+	return (&openWire{
+		RequestID:       u.RequestID,
+		AddressType:     u.AddressType,
+		Address:         u.Address,
+		Port:            u.Port,
+		TTL:             u.TTL,
+		RemainingPath:   u.RemainingPath,
+		EphemeralPubKey: u.EphemeralPubKey,
+	}).encode()
 }
 
 // DecodeUDPOpen deserializes UDPOpen from bytes.
 func DecodeUDPOpen(buf []byte) (*UDPOpen, error) {
-	if len(buf) < 13+EphemeralKeySize { // 8 + 1 + 2 + 1 + 1 + 32 minimum
-		return nil, fmt.Errorf("%w: UDPOpen too short", ErrInvalidFrame)
+	o, err := decodeOpenWire(buf, "UDPOpen")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "UDPOpen")
-	u := &UDPOpen{
-		RequestID:   r.readUint64(),
-		AddressType: r.readUint8(),
-	}
-
-	// Determine address length based on type
-	var addrLen int
-	if u.AddressType == AddrTypeDomain {
-		if r.offset >= len(buf) {
-			return nil, fmt.Errorf("%w: UDPOpen domain length missing", ErrInvalidFrame)
-		}
-		addrLen = 1 + int(buf[r.offset])
-	} else {
-		var err error
-		addrLen, err = addressLength(u.AddressType, 0)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	u.Address = r.readBytes(addrLen)
-	u.Port = r.readUint16()
-	u.TTL = r.readUint8()
-	u.RemainingPath = r.readAgentIDs()
-	u.EphemeralPubKey = r.readEphemeralKey()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return u, nil
+	return &UDPOpen{
+		RequestID:       o.RequestID,
+		AddressType:     o.AddressType,
+		Address:         o.Address,
+		Port:            o.Port,
+		TTL:             o.TTL,
+		RemainingPath:   o.RemainingPath,
+		EphemeralPubKey: o.EphemeralPubKey,
+	}, nil
 }
 
 // UDPOpenAck is the payload for UDP_OPEN_ACK frames.
@@ -1782,47 +1830,28 @@ type UDPOpenAck struct {
 
 // Encode serializes UDPOpenAck to bytes.
 func (u *UDPOpenAck) Encode() []byte {
-	w := newBufferWriter(8 + 1 + len(u.BoundAddr) + 2 + EphemeralKeySize)
-	w.writeUint64(u.RequestID)
-	w.writeUint8(u.BoundAddrType)
-	w.writeBytes(u.BoundAddr)
-	w.writeUint16(u.BoundPort)
-	w.writeBytes(u.EphemeralPubKey[:])
-
-	return w.bytes()
+	return (&ackWire{
+		RequestID:       u.RequestID,
+		BoundAddrType:   u.BoundAddrType,
+		BoundAddr:       u.BoundAddr,
+		BoundPort:       u.BoundPort,
+		EphemeralPubKey: u.EphemeralPubKey,
+	}).encode()
 }
 
 // DecodeUDPOpenAck deserializes UDPOpenAck from bytes.
 func DecodeUDPOpenAck(buf []byte) (*UDPOpenAck, error) {
-	if len(buf) < 12+EphemeralKeySize { // 8 + 1 + 1 + 2 + 32 minimum
-		return nil, fmt.Errorf("%w: UDPOpenAck too short", ErrInvalidFrame)
+	a, err := decodeAckWire(buf, "UDPOpenAck")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "UDPOpenAck")
-	u := &UDPOpenAck{
-		RequestID:     r.readUint64(),
-		BoundAddrType: r.readUint8(),
-	}
-
-	// Determine address length (only IPv4/IPv6 for bound addresses)
-	var addrLen int
-	switch u.BoundAddrType {
-	case AddrTypeIPv4:
-		addrLen = 4
-	case AddrTypeIPv6:
-		addrLen = 16
-	default:
-		addrLen = 0
-	}
-
-	u.BoundAddr = r.readBytes(addrLen)
-	u.BoundPort = r.readUint16()
-	u.EphemeralPubKey = r.readEphemeralKey()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return u, nil
+	return &UDPOpenAck{
+		RequestID:       a.RequestID,
+		BoundAddrType:   a.BoundAddrType,
+		BoundAddr:       a.BoundAddr,
+		BoundPort:       a.BoundPort,
+		EphemeralPubKey: a.EphemeralPubKey,
+	}, nil
 }
 
 // UDPOpenErr is the payload for UDP_OPEN_ERR frames.
@@ -1835,33 +1864,16 @@ type UDPOpenErr struct {
 
 // Encode serializes UDPOpenErr to bytes.
 func (u *UDPOpenErr) Encode() []byte {
-	msg := clampString(u.Message)
-
-	w := newBufferWriter(8 + 2 + 1 + len(msg))
-	w.writeUint64(u.RequestID)
-	w.writeUint16(u.ErrorCode)
-	w.writeString(msg)
-
-	return w.bytes()
+	return (&errWire{RequestID: u.RequestID, ErrorCode: u.ErrorCode, Message: u.Message}).encode()
 }
 
 // DecodeUDPOpenErr deserializes UDPOpenErr from bytes.
 func DecodeUDPOpenErr(buf []byte) (*UDPOpenErr, error) {
-	if len(buf) < 11 { // 8 + 2 + 1
-		return nil, fmt.Errorf("%w: UDPOpenErr too short", ErrInvalidFrame)
+	e, err := decodeErrWire(buf, "UDPOpenErr")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "UDPOpenErr")
-	u := &UDPOpenErr{
-		RequestID: r.readUint64(),
-		ErrorCode: r.readUint16(),
-		Message:   r.readString(),
-	}
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return u, nil
+	return &UDPOpenErr{RequestID: e.RequestID, ErrorCode: e.ErrorCode, Message: e.Message}, nil
 }
 
 // UDPDatagram is the payload for UDP_DATAGRAM frames.
@@ -1943,17 +1955,16 @@ const (
 
 // Encode serializes UDPClose to bytes.
 func (u *UDPClose) Encode() []byte {
-	return []byte{u.Reason}
+	return encodeCloseReason(u.Reason)
 }
 
 // DecodeUDPClose deserializes UDPClose from bytes.
 func DecodeUDPClose(buf []byte) (*UDPClose, error) {
-	if len(buf) < 1 {
-		return nil, fmt.Errorf("%w: UDPClose too short", ErrInvalidFrame)
+	reason, err := decodeCloseReason(buf, "UDPClose")
+	if err != nil {
+		return nil, err
 	}
-	return &UDPClose{
-		Reason: buf[0],
-	}, nil
+	return &UDPClose{Reason: reason}, nil
 }
 
 // ============================================================================
@@ -2056,33 +2067,16 @@ type ICMPOpenErr struct {
 
 // Encode serializes ICMPOpenErr to bytes.
 func (i *ICMPOpenErr) Encode() []byte {
-	msg := clampString(i.Message)
-
-	w := newBufferWriter(8 + 2 + 1 + len(msg))
-	w.writeUint64(i.RequestID)
-	w.writeUint16(i.ErrorCode)
-	w.writeString(msg)
-
-	return w.bytes()
+	return (&errWire{RequestID: i.RequestID, ErrorCode: i.ErrorCode, Message: i.Message}).encode()
 }
 
 // DecodeICMPOpenErr deserializes ICMPOpenErr from bytes.
 func DecodeICMPOpenErr(buf []byte) (*ICMPOpenErr, error) {
-	if len(buf) < 11 { // 8 + 2 + 1
-		return nil, fmt.Errorf("%w: ICMPOpenErr too short", ErrInvalidFrame)
+	e, err := decodeErrWire(buf, "ICMPOpenErr")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "ICMPOpenErr")
-	i := &ICMPOpenErr{
-		RequestID: r.readUint64(),
-		ErrorCode: r.readUint16(),
-		Message:   r.readString(),
-	}
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return i, nil
+	return &ICMPOpenErr{RequestID: e.RequestID, ErrorCode: e.ErrorCode, Message: e.Message}, nil
 }
 
 // ICMPEcho is the payload for ICMP_ECHO frames.
@@ -2148,17 +2142,31 @@ type ICMPClose struct {
 
 // Encode serializes ICMPClose to bytes.
 func (i *ICMPClose) Encode() []byte {
-	return []byte{i.Reason}
+	return encodeCloseReason(i.Reason)
 }
 
 // DecodeICMPClose deserializes ICMPClose from bytes.
 func DecodeICMPClose(buf []byte) (*ICMPClose, error) {
-	if len(buf) < 1 {
-		return nil, fmt.Errorf("%w: ICMPClose too short", ErrInvalidFrame)
+	reason, err := decodeCloseReason(buf, "ICMPClose")
+	if err != nil {
+		return nil, err
 	}
-	return &ICMPClose{
-		Reason: buf[0],
-	}, nil
+	return &ICMPClose{Reason: reason}, nil
+}
+
+// encodeCloseReason serializes the single-reason-byte close payloads
+// (UDPClose, ICMPClose). The reason enums differ per protocol but the wire
+// layout is one byte.
+func encodeCloseReason(reason uint8) []byte {
+	return []byte{reason}
+}
+
+// decodeCloseReason deserializes a single-reason-byte close payload.
+func decodeCloseReason(buf []byte, name string) (uint8, error) {
+	if len(buf) < 1 {
+		return 0, fmt.Errorf("%w: %s too short", ErrInvalidFrame, name)
+	}
+	return buf[0], nil
 }
 
 // ============================================================================
@@ -2168,16 +2176,92 @@ func DecodeICMPClose(buf []byte) (*ICMPClose, error) {
 // SignatureSize is the size of Ed25519 signatures in bytes.
 const SignatureSize = 64
 
-// SleepCommand is the payload for SLEEP_COMMAND frames.
-// This command floods through the mesh to instruct agents to hibernate.
-//
-// Wire format:
+// sleepWakeWire is the shared wire layout of SleepCommand and WakeCommand:
 //
 //	OriginAgent [16 bytes] \
 //	CommandID   [8 bytes]   } Signed data (SignableBytes)
 //	Timestamp   [8 bytes]  /
 //	Signature   [64 bytes]   Ed25519 signature (or zeros if unsigned)
 //	SeenBy      [variable]   NOT signed (changes during propagation)
+//
+// Both commands encode through these helpers so the two serializers cannot
+// drift apart; the wire format is unchanged.
+type sleepWakeWire struct {
+	OriginAgent identity.AgentID
+	CommandID   uint64
+	Timestamp   uint64
+	Signature   [SignatureSize]byte
+	SeenBy      []identity.AgentID
+}
+
+// signableBytes returns the bytes that are signed (OriginAgent + CommandID +
+// Timestamp). SeenBy is excluded because it changes during propagation.
+func (c *sleepWakeWire) signableBytes() []byte {
+	w := newBufferWriter(16 + 8 + 8)
+	w.writeBytes(c.OriginAgent[:])
+	w.writeUint64(c.CommandID)
+	w.writeUint64(c.Timestamp)
+	return w.bytes()
+}
+
+// isZeroSignature returns true if the signature is all zeros (unsigned command).
+func (c *sleepWakeWire) isZeroSignature() bool {
+	for _, b := range c.Signature {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// encodedLen is the exact wire size of this command. Encode sizes its buffer
+// from it and DecodeQueuedState advances past an embedded command by it, so
+// the two cannot drift apart.
+func (c *sleepWakeWire) encodedLen() int {
+	return 16 + 8 + 8 + SignatureSize + 1 + len(c.SeenBy)*16
+}
+
+func (c *sleepWakeWire) encode() []byte {
+	w := newBufferWriter(c.encodedLen())
+	w.writeBytes(c.OriginAgent[:])
+	w.writeUint64(c.CommandID)
+	w.writeUint64(c.Timestamp)
+	w.writeBytes(c.Signature[:])
+	w.writeAgentIDs(c.SeenBy)
+
+	return w.bytes()
+}
+
+func decodeSleepWakeWire(buf []byte, name string) (*sleepWakeWire, error) {
+	if len(buf) < 16+8+8+SignatureSize+1 { // Minimum with signature
+		return nil, fmt.Errorf("%w: %s too short", ErrInvalidFrame, name)
+	}
+
+	r := newBufferReader(buf, name)
+	c := &sleepWakeWire{
+		OriginAgent: r.readAgentID(),
+		CommandID:   r.readUint64(),
+		Timestamp:   r.readUint64(),
+	}
+
+	// Read signature
+	sigBytes := r.readBytes(SignatureSize)
+	if r.err != nil {
+		return nil, r.err
+	}
+	copy(c.Signature[:], sigBytes)
+
+	c.SeenBy = r.readAgentIDs()
+
+	if r.err != nil {
+		return nil, r.err
+	}
+	return c, nil
+}
+
+// SleepCommand is the payload for SLEEP_COMMAND frames.
+// This command floods through the mesh to instruct agents to hibernate.
+// Wire format: see sleepWakeWire.
 type SleepCommand struct {
 	OriginAgent identity.AgentID    // Agent that initiated the sleep command
 	CommandID   uint64              // Unique command ID for deduplication
@@ -2186,83 +2270,55 @@ type SleepCommand struct {
 	SeenBy      []identity.AgentID  // Loop prevention (agents that have seen this)
 }
 
+func (s *SleepCommand) wire() *sleepWakeWire {
+	return &sleepWakeWire{
+		OriginAgent: s.OriginAgent,
+		CommandID:   s.CommandID,
+		Timestamp:   s.Timestamp,
+		Signature:   s.Signature,
+		SeenBy:      s.SeenBy,
+	}
+}
+
 // SignableBytes returns the bytes that are signed (OriginAgent + CommandID + Timestamp).
 // SeenBy is excluded because it changes during propagation.
 func (s *SleepCommand) SignableBytes() []byte {
-	w := newBufferWriter(16 + 8 + 8)
-	w.writeBytes(s.OriginAgent[:])
-	w.writeUint64(s.CommandID)
-	w.writeUint64(s.Timestamp)
-	return w.bytes()
+	return s.wire().signableBytes()
 }
 
 // IsZeroSignature returns true if the signature is all zeros (unsigned command).
 func (s *SleepCommand) IsZeroSignature() bool {
-	for _, b := range s.Signature {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
+	return s.wire().isZeroSignature()
+}
+
+// encodedLen is the exact wire size of this command (see sleepWakeWire).
+func (s *SleepCommand) encodedLen() int {
+	return s.wire().encodedLen()
 }
 
 // Encode serializes SleepCommand to bytes.
-// encodedLen is the exact wire size of this command. Encode sizes its buffer
-// from it and DecodeQueuedState advances past an embedded command by it, so
-// the two cannot drift apart.
-func (s *SleepCommand) encodedLen() int {
-	return 16 + 8 + 8 + SignatureSize + 1 + len(s.SeenBy)*16
-}
-
 func (s *SleepCommand) Encode() []byte {
-	w := newBufferWriter(s.encodedLen())
-	w.writeBytes(s.OriginAgent[:])
-	w.writeUint64(s.CommandID)
-	w.writeUint64(s.Timestamp)
-	w.writeBytes(s.Signature[:])
-	w.writeAgentIDs(s.SeenBy)
-
-	return w.bytes()
+	return s.wire().encode()
 }
 
 // DecodeSleepCommand deserializes SleepCommand from bytes.
 func DecodeSleepCommand(buf []byte) (*SleepCommand, error) {
-	if len(buf) < 16+8+8+SignatureSize+1 { // Minimum with signature
-		return nil, fmt.Errorf("%w: SleepCommand too short", ErrInvalidFrame)
+	c, err := decodeSleepWakeWire(buf, "SleepCommand")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "SleepCommand")
-	s := &SleepCommand{
-		OriginAgent: r.readAgentID(),
-		CommandID:   r.readUint64(),
-		Timestamp:   r.readUint64(),
-	}
-
-	// Read signature
-	sigBytes := r.readBytes(SignatureSize)
-	if r.err != nil {
-		return nil, r.err
-	}
-	copy(s.Signature[:], sigBytes)
-
-	s.SeenBy = r.readAgentIDs()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return s, nil
+	return &SleepCommand{
+		OriginAgent: c.OriginAgent,
+		CommandID:   c.CommandID,
+		Timestamp:   c.Timestamp,
+		Signature:   c.Signature,
+		SeenBy:      c.SeenBy,
+	}, nil
 }
 
 // WakeCommand is the payload for WAKE_COMMAND frames.
 // This command floods through the mesh to instruct agents to wake from sleep.
-//
-// Wire format:
-//
-//	OriginAgent [16 bytes] \
-//	CommandID   [8 bytes]   } Signed data (SignableBytes)
-//	Timestamp   [8 bytes]  /
-//	Signature   [64 bytes]   Ed25519 signature (or zeros if unsigned)
-//	SeenBy      [variable]   NOT signed (changes during propagation)
+// Wire format: see sleepWakeWire.
 type WakeCommand struct {
 	OriginAgent identity.AgentID    // Agent that initiated the wake command
 	CommandID   uint64              // Unique command ID for deduplication
@@ -2271,64 +2327,45 @@ type WakeCommand struct {
 	SeenBy      []identity.AgentID  // Loop prevention (agents that have seen this)
 }
 
+func (w *WakeCommand) wire() *sleepWakeWire {
+	return &sleepWakeWire{
+		OriginAgent: w.OriginAgent,
+		CommandID:   w.CommandID,
+		Timestamp:   w.Timestamp,
+		Signature:   w.Signature,
+		SeenBy:      w.SeenBy,
+	}
+}
+
 // SignableBytes returns the bytes that are signed (OriginAgent + CommandID + Timestamp).
 // SeenBy is excluded because it changes during propagation.
 func (w *WakeCommand) SignableBytes() []byte {
-	bw := newBufferWriter(16 + 8 + 8)
-	bw.writeBytes(w.OriginAgent[:])
-	bw.writeUint64(w.CommandID)
-	bw.writeUint64(w.Timestamp)
-	return bw.bytes()
+	return w.wire().signableBytes()
 }
 
 // IsZeroSignature returns true if the signature is all zeros (unsigned command).
 func (w *WakeCommand) IsZeroSignature() bool {
-	for _, b := range w.Signature {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
+	return w.wire().isZeroSignature()
 }
 
 // Encode serializes WakeCommand to bytes.
 func (w *WakeCommand) Encode() []byte {
-	bw := newBufferWriter(16 + 8 + 8 + SignatureSize + 1 + len(w.SeenBy)*16)
-	bw.writeBytes(w.OriginAgent[:])
-	bw.writeUint64(w.CommandID)
-	bw.writeUint64(w.Timestamp)
-	bw.writeBytes(w.Signature[:])
-	bw.writeAgentIDs(w.SeenBy)
-
-	return bw.bytes()
+	return w.wire().encode()
 }
 
 // DecodeWakeCommand deserializes WakeCommand from bytes.
 func DecodeWakeCommand(buf []byte) (*WakeCommand, error) {
-	if len(buf) < 16+8+8+SignatureSize+1 { // Minimum with signature
-		return nil, fmt.Errorf("%w: WakeCommand too short", ErrInvalidFrame)
+	c, err := decodeSleepWakeWire(buf, "WakeCommand")
+	if err != nil {
+		return nil, err
 	}
-
-	r := newBufferReader(buf, "WakeCommand")
-	w := &WakeCommand{
-		OriginAgent: r.readAgentID(),
-		CommandID:   r.readUint64(),
-		Timestamp:   r.readUint64(),
-	}
-
-	// Read signature
-	sigBytes := r.readBytes(SignatureSize)
-	if r.err != nil {
-		return nil, r.err
-	}
-	copy(w.Signature[:], sigBytes)
-
-	w.SeenBy = r.readAgentIDs()
-
-	if r.err != nil {
-		return nil, r.err
-	}
-	return w, nil
+	return &WakeCommand{
+		OriginAgent: c.OriginAgent,
+		CommandID:   c.CommandID,
+		Timestamp:   c.Timestamp,
+		Signature:   c.Signature,
+		SeenBy:      c.SeenBy,
+	}, nil
 }
 
 // SleepState represents the sleep state for queued state messages.

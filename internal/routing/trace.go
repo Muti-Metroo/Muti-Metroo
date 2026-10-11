@@ -30,23 +30,15 @@ type Trace struct {
 // metric, then lowest origin ID). Uses the best-per-CIDR (routes[0]) so the
 // result mirrors what the live code path would pick.
 func (t *Table) Explain(ip net.IP) *Trace {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	ip16 := ip.To16()
 
 	var candidates []*TraceCandidate
-	for _, routes := range t.routes {
-		if len(routes) == 0 {
-			continue
-		}
-		first := routes[0]
-		if !first.Network.Contains(ip16) {
-			continue
-		}
+	for _, first := range t.entries.collectFirsts(func(r *Route) bool {
+		return r.Network.Contains(ip16)
+	}) {
 		ones, _ := first.Network.Mask.Size()
 		candidates = append(candidates, &TraceCandidate{
-			Route:     first.Clone(),
+			Route:     first,
 			PrefixLen: ones,
 		})
 	}
@@ -94,11 +86,8 @@ type DomainTrace struct {
 // rule mirrors Lookup: exact match first, then single-level wildcard on the
 // parent domain.
 func (t *DomainTable) Explain(domain string) *DomainTrace {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	return &DomainTrace{
 		Domain: strings.ToLower(domain),
-		Winner: t.lookupUnlocked(domain),
+		Winner: t.Lookup(domain),
 	}
 }

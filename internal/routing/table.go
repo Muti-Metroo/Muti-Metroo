@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
@@ -66,22 +65,34 @@ func (r *Route) Clone() *Route {
 	return clone
 }
 
+// routeEntryOps adapts *Route to the generic keyedTable skeleton.
+var routeEntryOps = entryOps[*Route]{
+	clone:         func(r *Route) *Route { return r.Clone() },
+	origin:        func(r *Route) identity.AgentID { return r.OriginAgent },
+	nextHop:       func(r *Route) identity.AgentID { return r.NextHop },
+	metric:        func(r *Route) uint16 { return r.Metric },
+	sequence:      func(r *Route) uint64 { return r.Sequence },
+	path:          func(r *Route) []identity.AgentID { return r.Path },
+	lastUpdate:    func(r *Route) time.Time { return r.LastUpdate },
+	setLastUpdate: func(r *Route, t time.Time) { r.LastUpdate = t },
+	refreshInPlace: func(stored, incoming *Route) {
+		if stored.Comment != incoming.Comment {
+			stored.Comment = incoming.Comment
+		}
+	},
+}
+
 // Table is a thread-safe routing table with longest-prefix match support.
+// The storage skeleton (add/remove/cleanup/clone-on-read) is the generic
+// keyedTable; longest-prefix match over CIDR keys stays here.
 type Table struct {
-	mu sync.RWMutex
-
-	// routes maps CIDR string to route entries (may have multiple routes per prefix)
-	routes map[string][]*Route
-
-	// localID is this agent's ID (for loop detection)
-	localID identity.AgentID
+	entries *keyedTable[string, *Route]
 }
 
 // NewTable creates a new routing table.
 func NewTable(localID identity.AgentID) *Table {
 	return &Table{
-		routes:  make(map[string][]*Route),
-		localID: localID,
+		entries: newKeyedTable[string](localID, routeEntryOps, false, false),
 	}
 }
 
@@ -91,63 +102,7 @@ func (t *Table) AddRoute(route *Route) bool {
 	if route == nil || route.Network == nil {
 		return false
 	}
-
-	// Check for routing loops (is our ID in the path?)
-	for _, id := range route.Path {
-		if id == t.localID {
-			return false // Loop detected
-		}
-	}
-
-	key := route.Network.String()
-	now := time.Now()
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Check if we already have a route from this origin
-	existing := t.routes[key]
-	for i, r := range existing {
-		if r.OriginAgent == route.OriginAgent {
-			// Update if newer sequence or better metric
-			if route.Sequence > r.Sequence ||
-				(route.Sequence == r.Sequence && route.Metric < r.Metric) {
-				cloned := route.Clone()
-				cloned.LastUpdate = now
-				t.routes[key][i] = cloned
-				t.sortRoutes(key)
-				return true
-			}
-			// Same-sequence same-metric refresh: only the operator
-			// comment may have changed. Mutating in place is safe
-			// because we hold t.mu.Lock() and readers RLock + Clone.
-			if route.Comment != r.Comment {
-				r.Comment = route.Comment
-			}
-			return false // Older/worse route (or comment-only refresh)
-		}
-	}
-
-	// New route from this origin
-	cloned := route.Clone()
-	cloned.LastUpdate = now
-	t.routes[key] = append(t.routes[key], cloned)
-	t.sortRoutes(key)
-	return true
-}
-
-// sortRoutes sorts routes for a key by metric (lowest first), breaking
-// ties on origin agent ID (lowest first) so equal-metric routes for the
-// same CIDR resolve deterministically. This matches the winner that route
-// trace reports ("lost origin tiebreaker").
-func (t *Table) sortRoutes(key string) {
-	routes := t.routes[key]
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].Metric != routes[j].Metric {
-			return routes[i].Metric < routes[j].Metric
-		}
-		return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
-	})
+	return t.entries.add(route.Network.String(), route)
 }
 
 // SetLocalComment updates the operator comment on the route from origin
@@ -158,15 +113,9 @@ func (t *Table) SetLocalComment(network *net.IPNet, origin identity.AgentID, com
 	if network == nil {
 		return
 	}
-	key := network.String()
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, r := range t.routes[key] {
-		if r.OriginAgent == origin {
-			r.Comment = comment
-			return
-		}
-	}
+	t.entries.updateInPlace(network.String(),
+		func(r *Route) bool { return r.OriginAgent == origin },
+		func(r *Route) { r.Comment = comment })
 }
 
 // RemoveRoute removes a route from a specific origin.
@@ -174,13 +123,7 @@ func (t *Table) RemoveRoute(network *net.IPNet, originAgent identity.AgentID) bo
 	if network == nil {
 		return false
 	}
-
-	key := network.String()
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.removeRouteUnlocked(key, originAgent, 0, false)
+	return t.entries.remove(network.String(), originAgent)
 }
 
 // RemoveRouteWithSeq removes a route from a specific origin, but only when the
@@ -191,132 +134,49 @@ func (t *Table) RemoveRouteWithSeq(network *net.IPNet, originAgent identity.Agen
 	if network == nil {
 		return false
 	}
-
-	key := network.String()
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.removeRouteUnlocked(key, originAgent, seq, true)
-}
-
-// removeRouteUnlocked removes the route for key from originAgent. When
-// checkSeq is set, removal happens only if the installed route's sequence is
-// less than or equal to seq. Caller must hold t.mu.
-func (t *Table) removeRouteUnlocked(key string, originAgent identity.AgentID, seq uint64, checkSeq bool) bool {
-	routes := t.routes[key]
-	for i, r := range routes {
-		if r.OriginAgent == originAgent {
-			if checkSeq && r.Sequence > seq {
-				return false // Stale withdraw; installed route is newer
-			}
-			t.routes[key] = append(routes[:i], routes[i+1:]...)
-			if len(t.routes[key]) == 0 {
-				delete(t.routes, key)
-			}
-			return true
-		}
-	}
-	return false
+	return t.entries.removeWithSeq(network.String(), originAgent, seq)
 }
 
 // RemoveRoutesFromPeer removes all routes learned from a specific peer.
 // Returns the removed routes so the caller can propagate withdrawals.
 func (t *Table) RemoveRoutesFromPeer(peerID identity.AgentID) []*Route {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	var removed []*Route
-	for key, routes := range t.routes {
-		filtered := routes[:0]
-		for _, r := range routes {
-			if r.NextHop != peerID {
-				filtered = append(filtered, r)
-			} else {
-				removed = append(removed, r)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(t.routes, key)
-		} else {
-			t.routes[key] = filtered
-		}
-	}
-	return removed
+	return t.entries.removeFromPeer(peerID)
 }
 
 // Lookup finds the best route for an IP address using longest-prefix match.
+// Equal-prefix matches break ties on metric, then on origin agent ID, so
+// selection is deterministic across process restarts regardless of Go map
+// iteration order. Each per-key list is already sorted best-first (see
+// keyedTable.sortRoutes), so only the first entry of each key competes.
 func (t *Table) Lookup(ip net.IP) *Route {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.lookupUnlocked(ip)
-}
-
-// lookupUnlocked performs longest-prefix-match with metric and OriginAgent
-// tiebreakers. Caller must hold the lock. The OriginAgent tiebreaker keeps
-// selection deterministic across process restarts regardless of Go map
-// iteration order.
-func (t *Table) lookupUnlocked(ip net.IP) *Route {
-	var bestRoute *Route
-	var bestPrefixLen = -1
-
 	ip = ip.To16()
 
-	for _, routes := range t.routes {
-		if len(routes) == 0 {
-			continue
-		}
-
-		// routes[0] is the best entry for this CIDR key (sorted by metric).
-		first := routes[0]
-		if !first.Network.Contains(ip) {
-			continue
-		}
-
-		ones, _ := first.Network.Mask.Size()
-
-		switch {
-		case ones > bestPrefixLen:
-			bestPrefixLen = ones
-			bestRoute = first
-		case ones == bestPrefixLen && bestRoute != nil:
-			if first.Metric < bestRoute.Metric {
-				bestRoute = first
-			} else if first.Metric == bestRoute.Metric &&
-				first.OriginAgent.Compare(bestRoute.OriginAgent) < 0 {
-				bestRoute = first
+	best, ok := t.entries.lookupBest(
+		func(r *Route) bool { return r.Network.Contains(ip) },
+		func(candidate, current *Route) bool {
+			candOnes, _ := candidate.Network.Mask.Size()
+			curOnes, _ := current.Network.Mask.Size()
+			if candOnes != curOnes {
+				return candOnes > curOnes
 			}
-		}
+			if candidate.Metric != current.Metric {
+				return candidate.Metric < current.Metric
+			}
+			return candidate.OriginAgent.Compare(current.OriginAgent) < 0
+		})
+	if !ok {
+		return nil
 	}
-
-	if bestRoute != nil {
-		return bestRoute.Clone()
-	}
-	return nil
+	return best
 }
 
 // LookupAll returns all routes for an IP address, sorted by prefix length then metric.
 func (t *Table) LookupAll(ip net.IP) []*Route {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	ip = ip.To16()
-	var matches []*Route
 
-	for _, routes := range t.routes {
-		if len(routes) == 0 {
-			continue
-		}
-
-		first := routes[0]
-		if !first.Network.Contains(ip) {
-			continue
-		}
-
-		// Add best route from each matching prefix
-		matches = append(matches, first.Clone())
-	}
+	matches := t.entries.collectFirsts(func(r *Route) bool {
+		return r.Network.Contains(ip)
+	})
 
 	// Sort by prefix length (longest first), then by metric, then by
 	// origin agent ID so equal-metric matches resolve deterministically.
@@ -340,17 +200,11 @@ func (t *Table) GetRoute(network *net.IPNet) *Route {
 	if network == nil {
 		return nil
 	}
-
-	key := network.String()
-
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	routes := t.routes[key]
-	if len(routes) > 0 {
-		return routes[0].Clone()
+	route, ok := t.entries.first(network.String())
+	if !ok {
+		return nil
 	}
-	return nil
+	return route
 }
 
 // GetAllRoutesForNetwork returns all routes for a specific network.
@@ -358,74 +212,32 @@ func (t *Table) GetAllRoutesForNetwork(network *net.IPNet) []*Route {
 	if network == nil {
 		return nil
 	}
-
-	key := network.String()
-
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	routes := t.routes[key]
-	result := make([]*Route, len(routes))
-	for i, r := range routes {
-		result[i] = r.Clone()
-	}
-	return result
+	return t.entries.allForKey(network.String())
 }
 
 // GetAllRoutes returns all routes in the table.
 func (t *Table) GetAllRoutes() []*Route {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var all []*Route
-	for _, routes := range t.routes {
-		for _, r := range routes {
-			all = append(all, r.Clone())
-		}
-	}
-	return all
+	return t.entries.all()
 }
 
 // GetRoutesFromAgent returns all routes originating from a specific agent.
 func (t *Table) GetRoutesFromAgent(agentID identity.AgentID) []*Route {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var matching []*Route
-	for _, routes := range t.routes {
-		for _, r := range routes {
-			if r.OriginAgent == agentID {
-				matching = append(matching, r.Clone())
-			}
-		}
-	}
-	return matching
+	return t.entries.allFromOrigin(agentID)
 }
 
 // Size returns the number of unique prefixes in the table.
 func (t *Table) Size() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.routes)
+	return t.entries.size()
 }
 
 // TotalRoutes returns the total number of route entries.
 func (t *Table) TotalRoutes() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	count := 0
-	for _, routes := range t.routes {
-		count += len(routes)
-	}
-	return count
+	return t.entries.total()
 }
 
 // Clear removes all routes from the table.
 func (t *Table) Clear() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.routes = make(map[string][]*Route)
+	t.entries.clear()
 }
 
 // HasRoute checks if a route exists for the given network and origin.
@@ -433,18 +245,7 @@ func (t *Table) HasRoute(network *net.IPNet, originAgent identity.AgentID) bool 
 	if network == nil {
 		return false
 	}
-
-	key := network.String()
-
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	for _, r := range t.routes[key] {
-		if r.OriginAgent == originAgent {
-			return true
-		}
-	}
-	return false
+	return t.entries.has(network.String(), originAgent)
 }
 
 // ParseCIDR parses a CIDR string into a net.IPNet.
@@ -469,35 +270,5 @@ func MustParseCIDR(cidr string) *net.IPNet {
 // Local routes (where OriginAgent == localID) are never removed.
 // Returns the number of routes removed.
 func (t *Table) CleanupStaleRoutes(maxAge time.Duration) int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	now := time.Now()
-	removed := 0
-
-	for key, routes := range t.routes {
-		var kept []*Route
-		for _, r := range routes {
-			// Never remove local routes
-			if r.OriginAgent == t.localID {
-				kept = append(kept, r)
-				continue
-			}
-
-			// Keep routes that are still fresh
-			if now.Sub(r.LastUpdate) <= maxAge {
-				kept = append(kept, r)
-			} else {
-				removed++
-			}
-		}
-
-		if len(kept) > 0 {
-			t.routes[key] = kept
-		} else {
-			delete(t.routes, key)
-		}
-	}
-
-	return removed
+	return t.entries.cleanupStale(maxAge)
 }

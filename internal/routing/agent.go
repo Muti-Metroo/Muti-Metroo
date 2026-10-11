@@ -3,8 +3,6 @@ package routing
 
 import (
 	"fmt"
-	"sort"
-	"sync"
 	"time"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
@@ -57,22 +55,32 @@ func (r *AgentRoute) Clone() *AgentRoute {
 	return clone
 }
 
+// agentRouteEntryOps adapts *AgentRoute to the generic keyedTable skeleton.
+var agentRouteEntryOps = entryOps[*AgentRoute]{
+	clone:         func(r *AgentRoute) *AgentRoute { return r.Clone() },
+	origin:        func(r *AgentRoute) identity.AgentID { return r.OriginAgent },
+	nextHop:       func(r *AgentRoute) identity.AgentID { return r.NextHop },
+	metric:        func(r *AgentRoute) uint16 { return r.Metric },
+	sequence:      func(r *AgentRoute) uint64 { return r.Sequence },
+	path:          func(r *AgentRoute) []identity.AgentID { return r.Path },
+	lastUpdate:    func(r *AgentRoute) time.Time { return r.LastUpdate },
+	setLastUpdate: func(r *AgentRoute, t time.Time) { r.LastUpdate = t },
+}
+
 // AgentTable is a thread-safe agent presence routing table.
+//
+// Unlike the other tables, an agent can hold several entries per origin (one
+// per next hop), so entries are keyed on (origin, next hop) pairs and a
+// sequenced withdraw removes every entry from the origin that passes the
+// sequence guard (see keyedTable).
 type AgentTable struct {
-	mu sync.RWMutex
-
-	// routes maps agent ID to route entries
-	routes map[identity.AgentID][]*AgentRoute
-
-	// localID is this agent's ID (for loop detection)
-	localID identity.AgentID
+	entries *keyedTable[identity.AgentID, *AgentRoute]
 }
 
 // NewAgentTable creates a new agent presence routing table.
 func NewAgentTable(localID identity.AgentID) *AgentTable {
 	return &AgentTable{
-		routes:  make(map[identity.AgentID][]*AgentRoute),
-		localID: localID,
+		entries: newKeyedTable[identity.AgentID](localID, agentRouteEntryOps, true, true),
 	}
 }
 
@@ -82,75 +90,12 @@ func (t *AgentTable) AddRoute(route *AgentRoute) bool {
 	if route == nil {
 		return false
 	}
-
-	// Check for routing loops (is our ID in the path?)
-	for _, id := range route.Path {
-		if id == t.localID {
-			return false // Loop detected
-		}
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	key := route.AgentID
-
-	// Check if we already have a route from this origin via this next hop
-	for i, r := range t.routes[key] {
-		if r.OriginAgent == route.OriginAgent && r.NextHop == route.NextHop {
-			// Update if newer sequence or better metric
-			if route.Sequence > r.Sequence ||
-				(route.Sequence == r.Sequence && route.Metric < r.Metric) {
-				cloned := route.Clone()
-				cloned.LastUpdate = time.Now()
-				t.routes[key][i] = cloned
-				t.sortRoutes(key)
-				return true
-			}
-			return false // Older/worse route
-		}
-	}
-
-	// New route from this origin/nexthop
-	cloned := route.Clone()
-	cloned.LastUpdate = time.Now()
-	t.routes[key] = append(t.routes[key], cloned)
-	t.sortRoutes(key)
-	return true
-}
-
-// sortRoutes sorts routes for an agent by metric (lowest first), breaking
-// ties on origin agent ID and then next hop (lowest first) so equal-metric
-// routes resolve deterministically.
-func (t *AgentTable) sortRoutes(key identity.AgentID) {
-	routes := t.routes[key]
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].Metric != routes[j].Metric {
-			return routes[i].Metric < routes[j].Metric
-		}
-		if routes[i].OriginAgent != routes[j].OriginAgent {
-			return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
-		}
-		return routes[i].NextHop.Compare(routes[j].NextHop) < 0
-	})
+	return t.entries.add(route.AgentID, route)
 }
 
 // RemoveRoute removes an agent presence route from a specific origin.
 func (t *AgentTable) RemoveRoute(agentID, originAgent identity.AgentID) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	routes := t.routes[agentID]
-	for i, r := range routes {
-		if r.OriginAgent == originAgent {
-			t.routes[agentID] = append(routes[:i], routes[i+1:]...)
-			if len(t.routes[agentID]) == 0 {
-				delete(t.routes, agentID)
-			}
-			return true
-		}
-	}
-	return false
+	return t.entries.remove(agentID, originAgent)
 }
 
 // RemoveRouteWithSeq removes agent presence routes from a specific origin, but
@@ -159,154 +104,57 @@ func (t *AgentTable) RemoveRoute(agentID, originAgent identity.AgentID) bool {
 // Unlike the other tables, an agent can hold several entries per origin (one
 // per next hop), so all entries passing the guard are removed.
 func (t *AgentTable) RemoveRouteWithSeq(agentID, originAgent identity.AgentID, seq uint64) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	routes := t.routes[agentID]
-	removed := false
-	filtered := routes[:0]
-	for _, r := range routes {
-		if r.OriginAgent == originAgent && r.Sequence <= seq {
-			removed = true
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-	if !removed {
-		return false
-	}
-	if len(filtered) == 0 {
-		delete(t.routes, agentID)
-	} else {
-		t.routes[agentID] = filtered
-	}
-	return true
+	return t.entries.removeWithSeq(agentID, originAgent, seq)
 }
 
 // RemoveRoutesFromPeer removes all agent routes learned from a specific peer.
 // Returns the removed routes so the caller can propagate withdrawals.
 func (t *AgentTable) RemoveRoutesFromPeer(peerID identity.AgentID) []*AgentRoute {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	var removed []*AgentRoute
-	for agentID, routes := range t.routes {
-		filtered := routes[:0]
-		for _, r := range routes {
-			if r.NextHop != peerID {
-				filtered = append(filtered, r)
-			} else {
-				removed = append(removed, r)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(t.routes, agentID)
-		} else {
-			t.routes[agentID] = filtered
-		}
-	}
-	return removed
+	return t.entries.removeFromPeer(peerID)
 }
 
 // Lookup finds the best agent presence route for a target agent.
 func (t *AgentTable) Lookup(agentID identity.AgentID) *AgentRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if routes, ok := t.routes[agentID]; ok && len(routes) > 0 {
-		return routes[0].Clone() // First is best due to sorting by metric
+	route, ok := t.entries.first(agentID)
+	if !ok {
+		return nil
 	}
-	return nil
+	return route
 }
 
 // GetAllRoutes returns all agent presence routes in the table.
 func (t *AgentTable) GetAllRoutes() []*AgentRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var all []*AgentRoute
-	for _, routes := range t.routes {
-		for _, r := range routes {
-			all = append(all, r.Clone())
-		}
-	}
-	return all
+	return t.entries.all()
 }
 
 // GetRoutesForAgent returns all agent presence routes for a specific agent.
 func (t *AgentTable) GetRoutesForAgent(agentID identity.AgentID) []*AgentRoute {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	var matching []*AgentRoute
-	for _, r := range t.routes[agentID] {
-		matching = append(matching, r.Clone())
-	}
-	return matching
+	return t.entries.allForKey(agentID)
 }
 
 // Size returns the number of unique agents in the table.
 func (t *AgentTable) Size() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.routes)
+	return t.entries.size()
 }
 
 // TotalRoutes returns the total number of agent route entries.
 func (t *AgentTable) TotalRoutes() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	count := 0
-	for _, routes := range t.routes {
-		count += len(routes)
-	}
-	return count
+	return t.entries.total()
 }
 
 // Clear removes all agent routes from the table.
 func (t *AgentTable) Clear() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.routes = make(map[identity.AgentID][]*AgentRoute)
+	t.entries.clear()
 }
 
 // CleanupStaleRoutes removes agent routes that haven't been updated within maxAge.
 // Local routes (where OriginAgent == localID) are never removed.
 // Returns the number of routes removed.
 func (t *AgentTable) CleanupStaleRoutes(maxAge time.Duration) int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	now := time.Now()
-	removed := 0
-
-	for agentID, routes := range t.routes {
-		var kept []*AgentRoute
-		for _, r := range routes {
-			if r.OriginAgent == t.localID || now.Sub(r.LastUpdate) <= maxAge {
-				kept = append(kept, r)
-			} else {
-				removed++
-			}
-		}
-		if len(kept) > 0 {
-			t.routes[agentID] = kept
-		} else {
-			delete(t.routes, agentID)
-		}
-	}
-	return removed
+	return t.entries.cleanupStale(maxAge)
 }
 
 // GetAllAgentIDs returns all unique agent IDs in the table.
 func (t *AgentTable) GetAllAgentIDs() []identity.AgentID {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	ids := make([]identity.AgentID, 0, len(t.routes))
-	for id := range t.routes {
-		ids = append(ids, id)
-	}
-	return ids
+	return t.entries.keys()
 }

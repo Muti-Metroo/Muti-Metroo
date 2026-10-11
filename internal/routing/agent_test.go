@@ -311,13 +311,13 @@ func TestAgentTable_CleanupStaleRoutes(t *testing.T) {
 	table.AddRoute(route)
 
 	// Make the route stale by backdating
-	table.mu.Lock()
-	for _, routes := range table.routes {
+	table.entries.mu.Lock()
+	for _, routes := range table.entries.routes {
 		for _, r := range routes {
 			r.LastUpdate = time.Now().Add(-10 * time.Minute)
 		}
 	}
-	table.mu.Unlock()
+	table.entries.mu.Unlock()
 
 	removed := table.CleanupStaleRoutes(5 * time.Minute)
 	if removed != 1 {
@@ -343,13 +343,13 @@ func TestAgentTable_CleanupPreservesLocalRoutes(t *testing.T) {
 	table.AddRoute(route)
 
 	// Make it stale
-	table.mu.Lock()
-	for _, routes := range table.routes {
+	table.entries.mu.Lock()
+	for _, routes := range table.entries.routes {
 		for _, r := range routes {
 			r.LastUpdate = time.Now().Add(-10 * time.Minute)
 		}
 	}
-	table.mu.Unlock()
+	table.entries.mu.Unlock()
 
 	removed := table.CleanupStaleRoutes(5 * time.Minute)
 	if removed != 0 {
@@ -607,13 +607,13 @@ func TestManager_CleanupStaleAgentRoutes(t *testing.T) {
 
 	// Backdate the route
 	agentTable := mgr.AgentTable()
-	agentTable.mu.Lock()
-	for _, routes := range agentTable.routes {
+	agentTable.entries.mu.Lock()
+	for _, routes := range agentTable.entries.routes {
 		for _, r := range routes {
 			r.LastUpdate = r.LastUpdate.Add(-10 * time.Minute)
 		}
 	}
-	agentTable.mu.Unlock()
+	agentTable.entries.mu.Unlock()
 
 	removed := mgr.CleanupStaleAgentRoutes(5 * time.Minute)
 	if removed != 1 {

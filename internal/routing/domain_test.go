@@ -397,9 +397,9 @@ func TestDomainTable_CleanupStaleRoutes(t *testing.T) {
 	}
 
 	// Manually set last update to simulate stale route
-	table.mu.Lock()
-	table.exactRoutes["api.example.com"] = []*DomainRoute{route}
-	table.mu.Unlock()
+	table.entries.mu.Lock()
+	table.entries.routes[domainRouteKey("api.example.com", false, "")] = []*DomainRoute{route}
+	table.entries.mu.Unlock()
 
 	// Cleanup with 5 minute max age
 	removed := table.CleanupStaleRoutes(5 * time.Minute)
