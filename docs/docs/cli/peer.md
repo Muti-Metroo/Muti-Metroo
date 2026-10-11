@@ -18,7 +18,7 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 
 ## Prerequisites
 
-- The HTTP API must be enabled with `http.remote_api: true` for `add`, `remove`, and `list` (see [HTTP configuration](../configuration/http.md)). `peer status` reads `/api/dashboard` and needs `http.dashboard: true`.
+- `add`, `remove`, and `list` need `http.remote_api` on the agent at `-a`, and `peer status` needs `http.dashboard`. Both are on by default (see [HTTP configuration](../configuration/http.md)).
 - `peer add` and `peer remove` are mutations. The agent that serves the API (the one `-a` points at) must have `management.signing_private_key` configured, otherwise the request is refused. When `-t` targets a remote agent, the API agent signs the request and the target verifies it with its `management.signing_public_key`. See [Management keys](../configuration/management.md).
 - If the API agent has `management.public_key` configured without `management.private_key`, `add`, `remove`, and `list` are refused.
 

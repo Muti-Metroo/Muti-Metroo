@@ -111,7 +111,7 @@ The parent directory is not writable. Create the data directory in advance, or c
 
 ### Service fails with `status=226/NAMESPACE`
 
-The systemd unit lists a directory in `ReadWritePaths` that does not exist. See [System Service - Troubleshooting](/deployment/system-service#troubleshooting).
+The systemd unit lists a directory in `ReadWritePaths` that does not exist. See [System Service: Troubleshooting](/deployment/system-service#troubleshooting).
 
 ## Peers do not connect
 
@@ -152,7 +152,7 @@ curl: (97) Can't complete SOCKS5 connection to 10.0.12.5. (5)
 | 5 | Connection refused | The destination refused the TCP connection. The mesh path works. |
 | 6 | Timeout | The connection attempt timed out at the exit or along the path. |
 
-When no route matches the destination, the ingress agent does not return an error. It connects to the destination directly from its own host. If traffic leaves from the wrong place, check the routes with `muti-metroo route trace <destination>`; see [Connectivity Troubleshooting - Routing](/troubleshooting/connectivity#routing-problems).
+When no route matches the destination, the ingress agent does not return an error. It connects to the destination directly from its own host. If traffic leaves from the wrong place, check the routes with `muti-metroo route trace <destination>`; see [Connectivity Troubleshooting: Routing problems](/troubleshooting/connectivity#routing-problems).
 
 ### Authentication rejected
 
@@ -202,7 +202,7 @@ The target has no signing public key, so it rejects every privileged request. Ad
 Error: remote error: failed to start session: command 'ls' is not allowed
 ```
 
-The command is not in the target's `shell.whitelist`. Add it, or use `["*"]` to allow every command. See [Configuration - Shell](/configuration/shell).
+The command is not in the target's `shell.whitelist`. Add it, or use `["*"]` to allow every command. See [Management Commands Configuration](/configuration/shell).
 
 ### File transfer path or size rejected
 
@@ -210,7 +210,7 @@ The command is not in the target's `shell.whitelist`. Add it, or use `["*"]` to 
 Error: upload failed: remote error: path not in allowed list: /tmp/report.txt
 ```
 
-The path is outside the target's `file_transfer.allowed_paths`. Add the directory to the list. See [Configuration - File Transfer](/configuration/file-transfer).
+The path is outside the target's `file_transfer.allowed_paths`. Add the directory to the list. See [File Transfer Configuration](/configuration/file-transfer).
 
 ```text
 Error: upload failed: remote error: file too large: 104857600 bytes (max 10485760)
@@ -235,7 +235,7 @@ tls:
 
 ### The agent stops when the SSH session ends
 
-Processes started in an SSH session are terminated when the session closes. Start the agent with `run --detach`, or install it as a service. See [System Service - Windows](/deployment/system-service#windows-background-start-without-a-service).
+Processes started in an SSH session are terminated when the session closes. Start the agent with `run --detach`, or install it as a service. See [System Service: Windows background start](/deployment/system-service#windows-background-start-without-a-service).
 
 ### Windows Firewall blocks inbound peers
 
@@ -257,8 +257,8 @@ Set `agent.log_level: "debug"` in the config and restart the agent to get detail
 
 ## See Also
 
-- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Diagnosing peers and routes step by step
-- [Performance Troubleshooting](/troubleshooting/performance) - Latency, throughput, and resource use
-- [FAQ](/troubleshooting/faq) - Short answers to common questions
-- [CLI Overview](/cli/overview) - Exit codes and global flags
-- [System Service](/deployment/system-service) - Service logs and startup problems
+- [Connectivity Troubleshooting](/troubleshooting/connectivity): diagnosing peers and routes step by step
+- [Performance Troubleshooting](/troubleshooting/performance): latency, throughput, and resource use
+- [FAQ](/troubleshooting/faq): short answers to common questions
+- [CLI Overview](/cli/overview): exit codes and global flags
+- [System Service](/deployment/system-service): service logs and startup problems

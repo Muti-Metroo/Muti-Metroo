@@ -112,7 +112,7 @@ Shown when the Ingress role is selected.
 | Prompt                   | Default          | Notes                                                                                                   |
 | ------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------- |
 | `Listen Address`         | `127.0.0.1:1080` | `host:port` for the SOCKS listener.                                                                     |
-| `Enable authentication?` | No               | Yes asks for one username and a password (at least 8 characters). The password is stored in plaintext, as SOCKS5 requires. |
+| `Enable authentication?` | No               | Yes asks for one username and a password (at least 8 characters). The wizard writes the password in plaintext to the deprecated `password` key; replace it with a bcrypt `password_hash` from [`muti-metroo hash`](/cli/hash) to keep it out of the file. |
 
 See [SOCKS5](/configuration/socks5).
 

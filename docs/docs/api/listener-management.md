@@ -128,11 +128,12 @@ curl -X POST http://localhost:8080/listeners/manage \
 | ------ | ---- | ----- |
 | 400 | `{"error":"address is required"}` | Missing `address` |
 | 400 | `{"error":"invalid transport: xyz (must be quic, h2, or ws)"}` | Invalid `transport` |
-| 400 | `{"error":"path is required for h2 transport"}` | `h2` or `ws` without `path` |
+| 400 | `{"error":"path is required for h2 transport"}`, `{"error":"path is required for ws transport"}` | `h2` or `ws` without `path` |
 | 400 | `{"error":"listener \"0.0.0.0:4433\" is a config listener and cannot be replaced"}` | `add` on a configured address |
 | 400 | `{"error":"listener \"0.0.0.0:4433\" is a config listener and cannot be removed"}` | `remove` of a configured listener |
 | 400 | `{"error":"dynamic listener \"0.0.0.0:4499\" not found"}` | `remove` of an unknown address |
 | 400 | `{"error":"start listener: ..."}` | The address could not be bound |
+| 400 | `{"error":"advertise.address: host \"127.0.0.1\" is loopback; advertise.address must be a publicly reachable host"}` | `advertise_address` is a loopback or unspecified host |
 | 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
 | 403 | `management signing private key not configured on this agent` | Mutation without a signing private key |
 | 403 | `listener management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
@@ -145,7 +146,7 @@ Manages listeners of a remote agent. The request body and responses are the same
 ```bash
 curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/listeners/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "transport": "quic", "address": "0.0.0.0:4433"}'
+  -d '{"action": "add", "transport": "quic", "address": "0.0.0.0:4434"}'
 ```
 
 The local agent signs `add` and `remove` and forwards the request over the mesh; the target verifies the signature with its `management.signing_public_key`. Additional errors:

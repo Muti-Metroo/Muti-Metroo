@@ -93,6 +93,8 @@ Clients such as Muti Metroo Manager use the two `*_management` flags to decide w
 
 ## Container probes
 
+A Kubernetes liveness and readiness probe pair for an agent whose HTTP server listens on port 8080. The kubelet connects to the pod IP, so `http.address` must bind an address the kubelet can reach (for example `0.0.0.0:8080`), not `127.0.0.1`.
+
 ```yaml
 livenessProbe:
   httpGet:

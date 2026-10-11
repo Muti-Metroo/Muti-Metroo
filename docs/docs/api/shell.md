@@ -76,7 +76,7 @@ Every WebSocket message is binary. The first byte is the message type; the rest 
 2. Send META.
 3. Read the first message. ACK with `success: true` means the command started. ERROR or ACK with `success: false` means it did not; the server then closes the WebSocket.
 4. Exchange STDIN, STDOUT, STDERR, RESIZE, SIGNAL, and STDIN_CLOSE messages.
-5. When the command exits, the server sends EXIT and closes the WebSocket.
+5. When the command exits, the server sends EXIT and closes the connection. Treat EXIT as the end of the session.
 
 ## Errors
 
@@ -88,13 +88,12 @@ Errors after the WebSocket is open arrive as ERROR messages:
 | `22` | Signature rejected: wrong key, wrong target, or expired |
 | omitted | Any other failure, for example the command is not in the whitelist, the session limit is reached, or the target has management commands disabled |
 
-Errors before the upgrade are plain HTTP responses: `401` for a missing bearer token, `503 shell not available` when the agent has no shell support, and `400` for an invalid agent ID or a failed upgrade.
+Errors before the upgrade are plain HTTP responses: `401` for a missing or wrong bearer token, `400 invalid agent ID format` for an ID that is not a full 32-character agent ID, and `426 Upgrade Required` for a request that is not a WebSocket upgrade.
 
-WebSocket close codes:
+WebSocket close codes for sessions that fail:
 
 | Code | Meaning |
 | ---- | ------- |
-| 1000 | Normal closure |
 | 1002 | Protocol error: the first message was not a valid META |
 | 1011 | The session could not be opened or ended unexpectedly |
 

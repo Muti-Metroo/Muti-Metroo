@@ -283,12 +283,7 @@ Without Administrator rights, install a per-user service that starts the [DLL](/
 muti-metroo.exe service install --user --dll C:\Users\alice\muti-metroo\muti-metroo.dll -c C:\Users\alice\muti-metroo\config.yaml
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--user` | Install a user service instead of a Windows Service. |
-| `--dll` | Path to the DLL that matches the host architecture. Required. |
-| `-c`, `--config` | Path to the config file. Required. |
-| `-n`, `--name` | Service name. Default `muti-metroo`. |
+`--dll` is required in this mode and must point to the DLL that matches the host architecture. See [CLI - service](/cli/service) for the other flags.
 
 The command:
 

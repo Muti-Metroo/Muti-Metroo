@@ -14,7 +14,7 @@ These endpoints control [sleep mode](/features/sleep-mode): `POST /sleep` and `P
 | `POST /wake` | Wake this agent and the mesh |
 | `GET /sleep/status` | Sleep state of this agent |
 
-`POST /sleep` and `POST /wake` need `sleep.enabled: true` on the agent serving the request. When it has `management.signing_private_key`, the command is signed; agents with `management.signing_public_key` ignore unsigned or wrongly signed commands. The HTTP response only confirms that the command was sent. See [Sleep Configuration](/configuration/sleep).
+`POST /sleep` and `POST /wake` need `sleep.enabled: true` on the agent serving the request. When it has `management.signing_private_key`, the command is signed; agents with `management.signing_public_key` ignore unsigned or wrongly signed commands. A successful response means the serving agent changed state and sent the command; it does not confirm that other agents received it. Check each agent with `GET /sleep/status`. See [Sleep Configuration](/configuration/sleep).
 
 ## `POST /sleep`
 
@@ -33,7 +33,9 @@ curl -X POST http://localhost:8080/sleep
 
 ## `POST /wake`
 
-Reconnects this agent, restarts its services, and sends the wake command repeatedly so that sleeping agents receive it during one of their polls. The request body is ignored.
+Wakes this agent immediately (reconnects peers and restarts its services), then re-sends the wake command at intervals so that sleeping agents receive it during one of their polls. The request body is ignored.
+
+The response is sent only after the re-send period ends: twice `sleep.poll_interval` plus `sleep.poll_duration`, and at least 5 seconds. With the default settings that is 10 minutes 30 seconds, which is longer than `http.write_timeout`, so the client may receive no response at all even though the wake succeeded. Confirm the result with `GET /sleep/status`.
 
 ```bash
 curl -X POST http://localhost:8080/wake
@@ -60,9 +62,9 @@ curl http://localhost:8080/sleep/status
   "enabled": true,
   "sleep_start_time": "2026-10-11T14:56:03.519736+03:00",
   "last_poll_time": "0001-01-01T00:00:00Z",
-  "next_poll_time": "2026-10-11T14:57:00.35768573+03:00",
+  "next_poll_time": "2026-10-11T15:00:40.59777454+03:00",
   "queued_peers": 0,
-  "poll_interval_sec": 60,
+  "poll_interval_sec": 300,
   "poll_interval_jitter": 0.3
 }
 ```
@@ -77,7 +79,7 @@ curl http://localhost:8080/sleep/status
   "last_poll_time": "0001-01-01T00:00:00Z",
   "next_poll_time": "0001-01-01T00:00:00Z",
   "queued_peers": 0,
-  "poll_interval_sec": 60,
+  "poll_interval_sec": 300,
   "poll_interval_jitter": 0.3
 }
 ```

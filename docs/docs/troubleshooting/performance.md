@@ -38,7 +38,7 @@ iperf3 -c relay.example.com
 
 Every new connection through the mesh needs one round trip along the whole path before data flows, in addition to the TCP handshake at the exit. Interactive tools that open many short connections feel this most.
 
-- **Reduce the number of hops.** Check the path with `muti-metroo route trace <destination>`; the `hops` value is the number of agents between ingress and exit. Peer the ingress closer to the exit, or place relays where they shorten the path.
+- **Reduce the number of hops.** Check the path with `muti-metroo route trace <destination>`; the `hops` value is the number of peer links between the ingress and the exit (`1` when the exit is a direct peer). Peer the ingress closer to the exit, or place relays where they shorten the path.
 - **Reduce per-hop latency.** Place relays in regions close to both neighbors.
 - **Check DNS.** With `socks5h://`, the ingress resolves host names (or the exit, for domain routes). A slow resolver adds its delay to every new connection.
 
@@ -106,8 +106,8 @@ curl "http://localhost:8080/debug/pprof/goroutine?debug=2"
 
 ## See Also
 
-- [API - Debugging](/api/debugging) - pprof endpoints and how to disable them
-- [Configuration - Limits](/configuration/limits) - Stream limits and their defaults
-- [Transports](/concepts/transports) - QUIC, HTTP/2, and WebSocket compared
-- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Path and route diagnosis
-- [High Availability](/deployment/high-availability) - Placing relays and exits
+- [Debugging API](/api/debugging): pprof endpoints and how to disable them
+- [Limits Configuration](/configuration/limits): stream limits and their defaults
+- [Transports](/concepts/transports): QUIC, HTTP/2, and WebSocket compared
+- [Connectivity Troubleshooting](/troubleshooting/connectivity): path and route diagnosis
+- [High Availability](/deployment/high-availability): placing relays and exits

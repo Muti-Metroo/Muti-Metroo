@@ -76,7 +76,7 @@ For a hostname from a SOCKS client, the ingress agent checks domain routes first
 - A wildcard such as `*.example.com` matches exactly one extra label: `foo.example.com`, but not `a.b.example.com` or `example.com`.
 - Matching is case-insensitive.
 
-If a domain route matches, the hostname travels to the exit and the exit resolves it, with its `exit.dns` servers or the system resolver. Otherwise the ingress resolves the name itself (mesh hostname registry first, then system DNS) and continues with the IP.
+If a domain route matches, the hostname travels to the exit and the exit resolves it, with its `exit.dns` servers or the system resolver. Otherwise the ingress resolves the name itself (mesh hostname registry first, then system DNS) and continues with the first address returned.
 
 For an IP address, the CIDR route with the longest matching prefix wins. When two routes have the same prefix, the one with the lower metric (fewer hops) wins. For example, `10.1.2.0/24` beats `10.0.0.0/8` for `10.1.2.3`.
 

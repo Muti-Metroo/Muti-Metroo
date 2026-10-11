@@ -167,25 +167,7 @@ Hashes are not validated when the configuration loads. A malformed or truncated 
 
 ## Keep secrets out of configuration files
 
-Configuration values can come from environment variables:
-
-```yaml
-http:
-  token_hash: "${HTTP_TOKEN_HASH}"
-
-socks5:
-  auth:
-    enabled: true
-    users:
-      - username: "${SOCKS5_USER}"
-        password_hash: "${SOCKS5_PASSWORD_HASH}"
-
-management:
-  signing_public_key: "${MESH_SIGNING_PUBLIC_KEY}"
-  signing_private_key: "${MESH_SIGNING_PRIVATE_KEY}"
-```
-
-See [Environment Variables](/configuration/environment-variables).
+Any configuration value, including `http.token_hash`, `socks5.auth.users[].password_hash`, and `management.signing_private_key`, can be read from an environment variable with `${VAR}` syntax. [Best Practices](/security/best-practices#secrets-in-configuration) shows a complete example, and [Environment Variables](/configuration/environment-variables) describes the syntax.
 
 ## See Also
 

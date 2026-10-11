@@ -35,7 +35,7 @@ curl -s http://localhost:8080/healthz | jq
 }
 ```
 
-`peer_count` is the number of connected peers. `route_count` is the number of routes in this agent's table. Both require the HTTP API (`http.enabled: true`); see [API - Health](/api/health).
+`peer_count` is the number of connected peers. `route_count` is the number of routes in this agent's table. Both require the HTTP API (`http.enabled: true`); see [Health API](/api/health).
 
 ## Peers do not connect
 
@@ -55,7 +55,7 @@ bff2a511     exitB                CONNECTED      dialer     -
 Total: 1 peer(s)
 ```
 
-A configured peer that never appears here is failing to connect. Look for `failed to connect to peer` in the dialing agent's log; the `error` field gives the reason. The table in [Common Issues - Peers do not connect](/troubleshooting/common-issues#peers-do-not-connect) explains the usual values.
+A configured peer that never appears here is failing to connect. Look for `failed to connect to peer` in the dialing agent's log; the `error` field gives the reason. The table in [Common Issues: Peers do not connect](/troubleshooting/common-issues#peers-do-not-connect) explains the usual values.
 
 Then check, in order:
 
@@ -181,9 +181,9 @@ journalctl -u muti-metroo -f
 
 ## See Also
 
-- [Common Issues](/troubleshooting/common-issues) - Error messages and fixes
-- [CLI - peer](/cli/peer) - `peer status`, `peer add`, and `peer list`
-- [CLI - route](/cli/route) - `route status` and `route trace`
-- [CLI - probe](/cli/probe) - Testing listeners from another host
-- [Routing](/concepts/routing) - How routes are advertised and selected
-- [Configuration - Connections](/configuration/connections) - Keepalive, timeouts, and reconnection
+- [Common Issues](/troubleshooting/common-issues): error messages and fixes
+- [peer CLI](/cli/peer): `peer status`, `peer add`, and `peer list`
+- [route CLI](/cli/route): `route status` and `route trace`
+- [probe CLI](/cli/probe): testing listeners from another host
+- [Routing](/concepts/routing): how routes are advertised and selected
+- [Connections Configuration](/configuration/connections): keepalive, timeouts, and reconnection

@@ -41,7 +41,7 @@ The agent writes its log to stderr.
 | PM2 | `pm2 logs muti-metroo` |
 | Windows Service, DLL | Not captured |
 
-Set `agent.log_level: "debug"` for more detail and `agent.log_format: "json"` for machine-readable output. See [Configuration - Agent](/configuration/agent).
+Set `agent.log_level: "debug"` for more detail and `agent.log_format: "json"` for machine-readable output. See [Agent Configuration](/configuration/agent).
 
 ### Do I have to restart after changing the config file?
 
@@ -130,7 +130,7 @@ For listeners, yes, if the certificate uses an ECDSA key (Certbot: `--key-type e
 
 ### How do I rotate certificates?
 
-Generate new certificates from the same CA, replace the files, and restart the agent. `muti-metroo cert info <file>` shows the expiry date, and `muti-metroo run` warns at startup when a configured certificate expires within 60 days. See [CLI - cert](/cli/cert).
+Generate new certificates from the same CA, replace the files, and restart the agent. `muti-metroo cert info <file>` shows the expiry date, and `muti-metroo run` warns at startup when a configured certificate expires within 60 days. See [cert CLI](/cli/cert).
 
 ## Management
 
@@ -159,11 +159,11 @@ See [Connectivity Troubleshooting](/troubleshooting/connectivity).
 
 ### Is there an API for monitoring?
 
-Yes. `/health` and `/healthz` report agent health, and the dashboard endpoints (`/api/dashboard`, `/api/topology`, `/api/nodes`) describe the mesh. See [API - Health](/api/health) and [API - Dashboard](/api/dashboard). For a browser interface, see [Muti Metroo Manager](/muti-metroo-manager).
+Yes. `/health` and `/healthz` report agent health, and the dashboard endpoints (`/api/dashboard`, `/api/topology`, `/api/nodes`) describe the mesh. See [Health API](/api/health) and [Dashboard API](/api/dashboard). For a browser interface, see [Muti Metroo Manager](/muti-metroo-manager).
 
 ## See Also
 
-- [Common Issues](/troubleshooting/common-issues) - Error messages and fixes
-- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Peers and routes step by step
-- [CLI Overview](/cli/overview) - All commands
-- [Configuration Overview](/configuration/overview) - All config sections
+- [Common Issues](/troubleshooting/common-issues): error messages and fixes
+- [Connectivity Troubleshooting](/troubleshooting/connectivity): peers and routes step by step
+- [CLI Overview](/cli/overview): all commands
+- [Configuration Overview](/configuration/overview): all config sections

@@ -76,10 +76,10 @@ sudo mutiauk daemon start
 On a machine that can reach an agent's HTTP API, start Manager and point it at that agent:
 
 ```bash
-muti-metroo-manager --agent http://192.168.1.10:8080
+muti-metroo-manager -addr 127.0.0.1:3000 -agent http://192.168.1.10:8080
 ```
 
-Then open `http://localhost:3000` in a browser. If the agent's API requires a bearer token, pass it with `--agent-token`. See [Muti Metroo Manager](/muti-metroo-manager) for all options.
+Then open `http://localhost:3000` in a browser. If the agent's API requires a bearer token, give it to Manager with `-agent-token-file`. Manager has no login of its own, so keep it on a loopback address or behind an authenticating reverse proxy. See [Muti Metroo Manager](/muti-metroo-manager) for all options.
 
 ## Downloads
 

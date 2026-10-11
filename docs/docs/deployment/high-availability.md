@@ -53,7 +53,7 @@ Keep `route_ttl` at least two or three times `advertise_interval`, so one lost a
 curl -X POST http://localhost:8080/routes/advertise
 ```
 
-See [Configuration - Routing](/configuration/routing) for the routing keys.
+See [Routing configuration](/configuration/routing) for the routing keys and [Connections](/configuration/connections) for the keepalive keys.
 
 ## Pattern 1: Redundant transit
 
@@ -210,8 +210,8 @@ curl -x socks5h://localhost:1080 http://10.0.0.5/
 
 ## See Also
 
-- [Routing](/concepts/routing) - Route advertisement and selection
-- [Configuration - Routing](/configuration/routing) - `advertise_interval`, `route_ttl`, and `max_hops`
-- [Configuration - Exit](/configuration/exit) - Route metrics on exit agents
-- [API - Health](/api/health) - `/health` and `/healthz` responses
-- [Deployment Scenarios](/deployment/scenarios) - Complete example topologies
+- [Routing concepts](/concepts/routing) for route advertisement and selection
+- [Routing configuration](/configuration/routing) for `advertise_interval` and `route_ttl`
+- [Exit](/configuration/exit) for route metrics on exit agents
+- [Health API](/api/health) for the `/health` and `/healthz` responses
+- [Deployment Scenarios](/deployment/scenarios) for complete example topologies

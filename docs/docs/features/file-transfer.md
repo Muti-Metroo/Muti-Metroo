@@ -107,7 +107,7 @@ The actions are `roots` (the browsable root paths), `list`, `stat`, `chmod`, and
 Error: download failed: remote error: path not in allowed list: /etc/shadow
 ```
 
-The path is outside every `allowed_paths` entry on the target agent, or `allowed_paths` is empty.
+The path is outside every `allowed_paths` entry on the target agent. When `allowed_paths` is empty, the error reads `no paths are allowed (allowed_paths is empty)` instead.
 
 ### management signing private key not configured on this agent
 

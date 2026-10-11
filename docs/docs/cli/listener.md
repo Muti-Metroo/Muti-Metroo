@@ -13,7 +13,7 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 
 ## Prerequisites
 
-- The HTTP API must be enabled with `http.remote_api: true` (see [HTTP configuration](../configuration/http.md)).
+- The agent at `-a` must have the HTTP API enabled with `http.remote_api` left at its default of `true` (see [HTTP configuration](../configuration/http.md)).
 - `listener add` and `listener remove` are mutations. The agent that serves the API (the one `-a` points at) must have `management.signing_private_key` configured, otherwise the request is refused. When `-t` targets a remote agent, the API agent signs the request and the target verifies it with its `management.signing_public_key`. See [Management keys](../configuration/management.md).
 - If the API agent has `management.public_key` configured without `management.private_key`, all listener subcommands are refused.
 
@@ -148,6 +148,12 @@ With `--json`:
       "address": "127.0.0.1:18433",
       "plaintext": false,
       "dynamic": false
+    },
+    {
+      "transport": "quic",
+      "address": "127.0.0.1:18434",
+      "plaintext": false,
+      "dynamic": true
     },
     {
       "transport": "ws",

@@ -50,9 +50,9 @@ Each list entry accepts these keys:
 | `path`                | string | `""`               | HTTP path that accepts connections. Required for `h2` and `ws`; not used by `quic`.                                              |
 | `plaintext`           | bool   | `false`            | Serve WebSocket without TLS. Only valid with `transport: ws`.                                                                    |
 | `tls.cert`            | string | global `tls.cert`  | Certificate file for this listener.                                                                                              |
-| `tls.key`             | string | global `tls.key`   | Private key file for this listener.                                                                                              |
+| `tls.key`             | string | global `tls.key`   | Private key file for this listener. Redacted by `config show`.                                                                  |
 | `tls.cert_pem`        | string | `""`               | Inline certificate PEM; takes precedence over `tls.cert`.                                                                        |
-| `tls.key_pem`         | string | `""`               | Inline private key PEM; takes precedence over `tls.key`.                                                                         |
+| `tls.key_pem`         | string | `""`               | Inline private key PEM; takes precedence over `tls.key`. Redacted by `config show`.                                              |
 | `tls.mtls`            | bool   | global `tls.mtls`  | Require client certificates on this listener. Client certificates are always verified against the global `tls.ca`.               |
 | `advertise.address`   | string | required in block  | Public `host:port` other agents should dial. Loopback and unspecified hosts (`127.0.0.1`, `::1`, `0.0.0.0`, `::`) are rejected. |
 | `advertise.path`      | string | listener `path`    | Path to advertise, when a reverse proxy publishes the listener under a different path.                                          |

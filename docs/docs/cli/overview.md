@@ -87,6 +87,8 @@ muti-metroo status -a 192.168.1.10:8080
 muti-metroo shell -a https://mesh.example.com/muti-metroo abc123def456789012345678901234ab whoami
 ```
 
+The agent must have the HTTP API enabled (`http.enabled`). Commands that change runtime configuration (the `add`, `remove`, and `list` subcommands of `peer`, `route`, `listener`, `forward`, and `host`, plus `route trace`, `display-name`, `sleep`, `wake`, and `stop`) and every command that targets a remote agent also need `http.remote_api`, which is on by default. See [HTTP configuration](../configuration/http.md).
+
 Remote operations are sent to the agent named by `-a` and forwarded through the mesh to the target agent. Management commands select the target with `-t`, `--target`; action commands such as `shell`, `ping`, `upload`, and `download` take the target agent ID as an argument. Without a target, management commands act on the agent named by `-a`.
 
 ## Global flags
@@ -120,7 +122,7 @@ Operations that are mesh-wide or hard to undo ask for confirmation before acting
 | --- | --- |
 | [`sleep`, `wake`](sleep.md) | `[y/N]` |
 | [`stop`](stop.md) | `[y/N]` |
-| [`route add`](route.md#route-add) with `0.0.0.0/0` or `::/0` | Requires typing `add default route`. `--allow-default-route` skips it. |
+| [`route add`](route.md#route-add) with `0.0.0.0/0` or `::/0` | Requires typing `add default route`. `--allow-default-route` or `--yes` skips it. |
 | [`route remove`](route.md#route-remove) | `[y/N]` |
 | [`peer remove`](peer.md#peer-remove) | `[y/N]` |
 | [`listener remove`](listener.md#listener-remove) | `[y/N]` |

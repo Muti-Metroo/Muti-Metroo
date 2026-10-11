@@ -82,7 +82,7 @@ A Run entry created by hand is not known to `muti-metroo service status` or `ser
 
 ## Stop the agent
 
-The DLL does not handle console signals, and it does not act on [`muti-metroo stop`](/cli/stop). Terminate the process instead. To stop only the `rundll32.exe` process that loaded the agent DLL:
+The DLL does not handle console signals, and it does not act on [`muti-metroo stop`](/cli/stop): the request is accepted, but the agent keeps running. Terminate the process instead. To stop only the `rundll32.exe` process that loaded the agent DLL:
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
@@ -114,7 +114,8 @@ The DLL runs with the privileges of the user who started `rundll32.exe`. Antivir
 
 ## See Also
 
-- [System Service](/deployment/system-service) - Windows Service, Registry Run, and `run --detach`
-- [CLI - service](/cli/service) - `service install --user --dll` reference
-- [CLI - status](/cli/status) - Check a running agent from the command line
-- [Download](/download) - DLL and EXE builds for amd64 and ARM64
+- [System Service](/deployment/system-service) for Windows Service, Registry Run, and `run --detach` setups
+- [service CLI](/cli/service) for the `service install --user --dll` flags
+- [status CLI](/cli/status) to check a running agent from the command line
+- [HTTP API](/configuration/http) to enable the API that the EXE uses to reach a DLL agent
+- [Download](/download) for the DLL and EXE builds for amd64 and ARM64

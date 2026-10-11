@@ -33,7 +33,7 @@ tls:
 | `ca`                 | string | `""`    | CA certificate file. Verifies peer certificates when `strict` is on, and client certificates on listeners with mTLS.                             |
 | `ca_pem`             | string | `""`    | Inline CA certificate PEM. Takes precedence over `ca`.                                                                                            |
 | `cert`               | string | `""`    | Agent certificate file, served by listeners and presented as the client certificate to peers. Generated per listener when unset.                  |
-| `key`                | string | `""`    | Private key file for `cert`.                                                                                                                      |
+| `key`                | string | `""`    | Private key file for `cert`. Redacted by `config show`.                                                                                           |
 | `cert_pem`           | string | `""`    | Inline certificate PEM. Takes precedence over `cert`.                                                                                             |
 | `key_pem`            | string | `""`    | Inline private key PEM. Takes precedence over `key`. Redacted by `config show`.                                                                   |
 | `strict`             | bool   | `false` | Verify peer certificates against the CA. Requires `ca` or `ca_pem` in this section.                                                              |

@@ -12,7 +12,7 @@ sidebar_position: 17
 
 The `management` section holds two independent key pairs:
 
-- **Topology encryption keys** (X25519) encrypt node information, and agents without the private key also withhold route paths from their HTTP API, so only agents with the private key can see the mesh layout. Route paths themselves travel unencrypted, because transit agents need them to forward streams.
+- **Topology encryption keys** (X25519) encrypt the node information each agent floods to the mesh, and limit what the HTTP API of an agent without the private key reveals about other agents, so only agents with the private key can see the mesh layout.
 - **Signing keys** (Ed25519) authorize privileged operations: management commands, file transfer, runtime configuration changes, and sleep and wake.
 
 Either pair can be used without the other. Distribute the public keys to every agent and keep the private keys on operator agents only.
@@ -42,12 +42,12 @@ Generate the pairs with [`muti-metroo management-key generate`](/cli/management-
 
 ## Topology encryption keys
 
-With `public_key` set, the agent encrypts its node information (display name, system details, peer list, advertised listeners) and the agent path of its route advertisements before flooding them. Destinations (CIDRs, domain patterns, forward keys) stay readable, so routing works on every agent.
+With `public_key` set, the agent encrypts its node information (display name, system details, peer list, advertised listeners) before flooding it, and leaves its display name out of route advertisements. The rest of each route advertisement stays readable: destinations (CIDRs, domain patterns, forward keys) and agent paths travel unencrypted, because every agent needs them to route streams.
 
 | Agent has                      | Effect                                                                                                                                      |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | no keys                        | Sends and reads topology in the clear.                                                                                                      |
-| `public_key` only              | Encrypts its own topology data and cannot read anyone else's. Its HTTP API limits the `/agents/` endpoints, mesh test, and route trace to the local agent, and refuses requests aimed at other agents with HTTP 403 and a message ending in `restricted: management key decryption unavailable`. |
+| `public_key` only              | Encrypts its own topology data and cannot read anyone else's. Its HTTP API shows only the local agent in `/agents`, the dashboard API, and mesh test. It refuses route trace, requests aimed at other agents, and the local `/routes/manage`, `/peers/manage`, `/listeners/manage`, `/forward/manage`, `/forward/endpoints/manage`, and `/display-name/manage` endpoints, with HTTP 403 and a message ending in `restricted: management key decryption unavailable`. |
 | `public_key` and `private_key` | Encrypts its own data and decrypts everyone's; shows the full topology.                                                                      |
 
 All agents in a mesh need the same `public_key`. An agent without it sends its topology unencrypted, which other agents can read.

@@ -94,7 +94,7 @@ curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211
 }
 ```
 
-The fields match [`GET /healthz`](/api/health#get-healthz), with `agent_id` added and the exit flag named `exit_running`.
+The fields match [`GET /healthz`](/api/health#get-healthz), with `agent_id` added, no `status` field, and the exit flag named `exit_running`.
 
 ## `GET /agents/{id}/routes`
 
@@ -190,6 +190,7 @@ curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/interfaces
 | 404 | HTML page | `http.remote_api` is disabled |
 | 405 | `method not allowed` | Method other than `GET` |
 | 502 | `failed to fetch: <reason>` | The agent is unknown, unreachable, or did not answer within 30 seconds; for example `failed to fetch: no route to agent 93cdf211` |
+| 502 | `remote agent error: <reason>` | The remote agent received the request but could not answer it |
 
 ## See Also
 

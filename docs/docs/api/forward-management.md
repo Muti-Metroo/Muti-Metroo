@@ -129,11 +129,11 @@ curl -X POST http://localhost:8080/forward/endpoints/manage \
 ```json
 {
   "status": "ok",
-  "message": "forward endpoint \"ssh\" added -> 127.0.0.1:22"
+  "message": "forward endpoint \"ssh\" added -\u003e 127.0.0.1:22"
 }
 ```
 
-The `>` escape in `message` is the `>` character.
+The agent escapes `>` as `\u003e` in JSON strings, so a JSON parser reads the message as `forward endpoint "ssh" added -> 127.0.0.1:22`.
 
 ```bash
 curl -X POST http://localhost:8080/forward/endpoints/manage \

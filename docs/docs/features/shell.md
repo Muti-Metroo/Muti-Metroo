@@ -93,13 +93,7 @@ Windows agents use ConPTY for interactive mode, which requires Windows 10 versio
 
 ## Other options
 
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `-a`, `--agent` | `localhost:8080` | Gateway agent API address |
-| `-w`, `--timeout` | `0` | End the session after this duration (`30s`, `5m`); `0` means no limit |
-| `--tty` | off | Interactive mode with a pseudo-terminal |
-
-The target agent ID can be a unique prefix of the full ID. See [shell CLI](/cli/shell) for details and [Management Commands API](/api/shell) for the WebSocket protocol used by the CLI and the web dashboard.
+`-a` selects the gateway agent (default `localhost:8080`), and `-w` ends the session after a set duration such as `30s` or `5m` (default `0`, no limit). The target agent ID can be a unique prefix of the full ID. See [shell CLI](/cli/shell) for every flag and [Management Commands API](/api/shell) for the WebSocket protocol used by the CLI and the web dashboard.
 
 ## Available shells
 

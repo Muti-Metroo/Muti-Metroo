@@ -200,11 +200,13 @@ To use the mesh from a browser, set its SOCKS5 proxy to `localhost:1080` and ena
 When you run `curl -x socks5h://localhost:1080 https://example.com`:
 
 1. curl connects to Agent A's SOCKS5 proxy and asks for `example.com:443`.
-2. Agent A resolves `example.com` and looks up the address in its route table. The only match is `0.0.0.0/0`, advertised by Agent B.
+2. Agent A resolves `example.com`, takes the first address the resolver returns, and looks it up in its route table. For an IPv4 address the only match is `0.0.0.0/0`, advertised by Agent B.
 3. Agent A opens an end-to-end encrypted stream to Agent B.
 4. Agent B opens a TCP connection to the destination and relays data in both directions.
 
 Because Agent A resolves the name for CIDR routes, it must be able to resolve the hostnames you use. To resolve names at the exit instead, use [domain routes](/features/exit-routing).
+
+If the first address is IPv6 and no route covers it, Agent A opens the connection from its own host instead of through the mesh. `muti-metroo route trace example.com` shows the resolved addresses and the route for each. When Agent B has IPv6 connectivity, add `"::/0"` to its `exit.routes`.
 
 ## Add a transit agent
 

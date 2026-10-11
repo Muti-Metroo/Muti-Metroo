@@ -110,22 +110,7 @@ Public Key:
 
 ## Configuration
 
-Field agents carry only the public key:
-
-```yaml
-management:
-  public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
-```
-
-Operator agents carry both:
-
-```yaml
-management:
-  public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
-  private_key: "88f462338e9fb8970e782d8cd23d935a3f0769a1c48e777f7d68bd427f28e36a"
-```
-
-The configuration validator rejects `private_key` without `public_key`. Agent IDs and advertised route prefixes stay in plaintext because routing needs them. An agent that has the public key but not the private key also limits its remote agent queries, mesh tests, and route traces to itself. The full behavior is described on the [management configuration](../configuration/management.md) page.
+Paste the keys into the `management` section, as in the snippets that `generate` prints: field agents carry only `public_key`, operator agents carry both `public_key` and `private_key`. The configuration validator rejects `private_key` without `public_key`. Agent IDs and advertised route prefixes stay in plaintext because routing needs them. An agent that has the public key but not the private key also limits its remote agent queries, mesh tests, and route traces to itself. The full behavior is described on the [management configuration](../configuration/management.md) page.
 
 ## See Also
 

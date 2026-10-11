@@ -284,7 +284,7 @@ Muti Metroo agents keep their peer connections up and reconnect with exponential
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
 ```
 
-See [Peers configuration](/configuration/peers) for the reconnection settings and [System Service](/deployment/system-service) for service installation.
+See [Connections configuration](/configuration/connections) for the reconnection settings and [System Service](/deployment/system-service) for service installation.
 
 ## Security
 
@@ -318,7 +318,6 @@ ssh -L 5432:10.20.30.41:5432 -J admin@bastion.example.com admin@10.20.30.40
 - The topology has several sites, branches, or redundant paths.
 - Outbound traffic must go through an HTTP proxy, or only HTTPS is allowed.
 - Access should stay up without a person keeping sessions open.
-- Intermediate hosts should not be able to read the traffic they relay.
 
 ## Using both
 

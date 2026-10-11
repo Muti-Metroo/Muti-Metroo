@@ -10,7 +10,7 @@ sidebar_position: 18
 
 # Shell
 
-The `shell` section lets operators run management commands on this agent through the mesh, either streaming (for `whoami` or `journalctl -f`) or interactive with a terminal (for `htop` or `vim`). It is disabled by default. Every request must also be signed with the mesh management signing key, see [Management](/configuration/management#command-signing-keys).
+The `shell` section lets operators run management commands on this agent through the mesh, either streaming (for `whoami` or `journalctl -f`) or interactive with a terminal (for `htop` or `vim`). It is disabled by default. Every request must also be signed with the mesh management signing key; see [Management](/configuration/management#command-signing-keys).
 
 ## Configuration
 

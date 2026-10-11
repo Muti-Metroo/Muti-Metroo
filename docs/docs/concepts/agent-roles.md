@@ -46,7 +46,7 @@ See [SOCKS5 Proxy](/features/socks5-proxy) and [SOCKS5 configuration](/configura
 
 ## Transit
 
-Every agent relays traffic for its peers. An agent becomes a transit hop simply by being connected to two or more agents that need to reach each other through it. There is no transit setting.
+Every agent relays traffic for its peers. An agent becomes a transit hop by being connected to two or more agents that need to reach each other through it. There is no transit setting.
 
 A transit agent:
 
@@ -70,9 +70,7 @@ Typical placements: inside a private network to reach internal hosts, or on an i
 
 See [Exit Routing](/features/exit-routing) and [Exit configuration](/configuration/exit).
 
-:::info Agent reachability
 Every agent in the mesh is reachable by its agent ID for management operations (shell, file transfer, ping, and status queries), whether or not it has exit routes. Exit routes only control which destinations an agent opens connections to on behalf of clients.
-:::
 
 ## Combining roles
 

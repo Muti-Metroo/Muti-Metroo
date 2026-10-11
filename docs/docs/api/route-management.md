@@ -177,6 +177,7 @@ Errors returned by the operation use status `400` and a JSON body:
 | `{"error":"route 10.20.0.0/16 exists as a config route"}` | `add` of a prefix from `exit.routes` |
 | `{"error":"route 10.20.0.0/16 is a config route and cannot be removed dynamically"}` | `remove` of a prefix from `exit.routes` |
 | `{"error":"route 172.16.0.0/12 not found"}` | `remove` of an unknown prefix |
+| `{"error":"source_ip ::1 address family does not match CIDR 10.9.0.0/16"}` | `source_ip` is not in the same address family as `network` |
 | `{"error":"exit handler not configured"}` | `set_source_ip` or `set_interface` on an agent that is not an exit |
 | `{"error":"unknown scope \"zzz\" (expected \"\", \"dynamic\", or \"all\")"}` | Invalid `scope` |
 | `{"error":"unknown action \"bogus\" (expected add, remove, list, set_comment, set_source_ip, or set_interface)"}` | Invalid `action` |

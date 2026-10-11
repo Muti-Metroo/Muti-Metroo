@@ -18,7 +18,7 @@ Most of an agent's mesh settings can be changed while it runs, without editing i
 | Rename the agent | `muti-metroo display-name set` | Yes |
 | Register or remove a mesh hostname | `muti-metroo host add` / `remove` | No |
 
-Every command group has a `list` subcommand (and `peer status` / `route status` for live state) that shows configured and runtime entries side by side. Entries from the configuration file cannot be removed at runtime.
+Each command group except `display-name` has a `list` subcommand that shows configured and runtime entries side by side; `display-name get` shows the current name, and `peer status` / `route status` show live state. Entries from the configuration file cannot be removed at runtime.
 
 ## Before you start
 

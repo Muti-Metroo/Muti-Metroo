@@ -129,7 +129,7 @@ See [Routing](/concepts/routing) for route selection and expiry.
 | Stream payload | End-to-end encryption between ingress and exit with X25519 key exchange and ChaCha20-Poly1305. Transit agents cannot read the payload. |
 | SOCKS clients | Optional username/password authentication. |
 | HTTP API | Optional bearer token (`http.token_hash`). |
-| Privileged operations | Shell, file transfer, sleep/wake, and dynamic configuration changes require requests signed with the management signing key. |
+| Privileged operations | Shell, file transfer, and dynamic configuration changes require requests signed with the management signing key. Sleep and wake require a signature on agents that have the signing public key configured. |
 | Topology | Optional management key that encrypts node information, so only operators with the private key can read the mesh layout. |
 
 A WebSocket listener with `plaintext: true` has no TLS of its own and relies on a reverse proxy in front of it to terminate TLS.

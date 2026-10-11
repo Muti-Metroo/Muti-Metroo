@@ -80,6 +80,7 @@ The response does not mark which entries come from the configuration. Only entri
 | 400 | `{"error":"invalid host entry: ipv4 \"bad\" is not a valid IPv4 address"}` | Invalid address |
 | 400 | `{"error":"invalid host entry: name is required"}` | Missing `name` |
 | 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
+| 400 | `{"error":"invalid request: ..."}` | Body is not valid JSON |
 | 403 | `{"error":"config-seeded host, cannot remove dynamically: db.mesh"}` | `remove` of an entry from `mesh_hosts` |
 | 403 | `management signing private key not configured on this agent` | Mutation without a signing private key (plain text) |
 | 404 | `{"error":"host not found: nope.mesh"}` | `remove` of an unknown name |
@@ -118,6 +119,7 @@ curl -X POST http://localhost:8080/hosts/suffixes/manage \
 | Status | Body | Cause |
 | ------ | ---- | ----- |
 | 400 | `{"error":"invalid host entry: suffix \".bad\" must not start with a dot"}` | Invalid suffix |
+| 400 | `{"error":"invalid request: ..."}` | Body is not valid JSON |
 | 403 | `management signing private key not configured on this agent` | Mutation without a signing private key (plain text) |
 | 404 | `{"error":"host not found: zzz"}` | `remove` of a suffix that is not active |
 | 405 | `method not allowed` | Method other than `POST` |

@@ -36,8 +36,10 @@ All messages are JSON text messages with a `type` field.
 | `init` | client to server | `dest_ip`: destination IP address. Must be the first message. |
 | `init_ack` | server to client | `success`; `error` when `success` is `false` |
 | `echo` | client to server | `sequence`: number from 0 to 65535; `payload`: optional string |
-| `reply` | server to client | `sequence`; `src_ip`: address that answered, when known |
-| `error` | server to client | `sequence`; `error`: reason, for example a timeout |
+| `reply` | server to client | `sequence`; `src_ip`: the source address the target agent uses to reach `dest_ip`, when known |
+| `error` | server to client | `sequence`; `error`: the reply arrived but could not be decrypted |
+
+The server sends nothing for an echo request that gets no answer within the target's `icmp.echo_timeout`. Clients apply their own per-request timeout; [`muti-metroo ping`](/cli/ping) uses its `--timeout` value.
 
 ## Session flow
 
@@ -59,7 +61,7 @@ All messages are JSON text messages with a `type` field.
    {"type": "init_ack", "success": false, "error": "invalid destination IP"}
    ```
 
-3. Send one `echo` per request and read a `reply` or `error` for each:
+3. Send one `echo` per request and wait for the matching `reply`:
 
    ```json
    {"type": "echo", "sequence": 1}
@@ -99,10 +101,13 @@ ws.onmessage = (event) => {
 
 | Situation | Result |
 | --------- | ------ |
+| `{id}` is not a full 32-character agent ID | HTTP `400 invalid agent ID format` before the upgrade |
+| Request is not a WebSocket upgrade | HTTP `426 Upgrade Required` |
+| Missing or wrong bearer token | HTTP `401 unauthorized` before the upgrade |
 | First message is not valid JSON or not `init` | WebSocket closed with code 1002 |
-| `dest_ip` is not an IP address | `init_ack` with `error: "invalid destination IP"` |
-| Target unreachable, ICMP disabled on the target, or session limit reached | `init_ack` with the error |
-| Agent has no ICMP support | HTTP `503 ICMP not available` before the upgrade |
+| `dest_ip` is not an IP address | `init_ack` with `error: "invalid destination IP"`, then the WebSocket is closed with code 1002 |
+| Target unreachable, ICMP disabled on the target, or session limit reached | `init_ack` with the error, then the WebSocket is closed with code 1011 |
+| No answer to an `echo` | Nothing is sent; the client times out |
 
 ## See Also
 

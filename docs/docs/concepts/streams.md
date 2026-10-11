@@ -75,7 +75,7 @@ No configuration is needed. See [End-to-End Encryption](/security/e2e-encryption
 
 ## Limits
 
-Stream limits are set under `limits` in the agent configuration: the number of concurrent streams per peer and in total (`max_streams_per_peer`, `max_streams_total`), the number of stream opens waiting for an answer (`max_pending_opens`), the per-stream buffer (`buffer_size`), and the time allowed for a stream open to complete across all hops (`stream_open_timeout`, default `30s`). On high-latency multi-hop paths, raise `stream_open_timeout` if stream opens time out before the exit can connect.
+Each agent caps the number of concurrent streams it carries at `limits.max_streams_total` (default 10000); a stream open beyond the cap is refused. A SOCKS or port-forward stream open times out if the exit has not answered within 30 seconds. The other keys in the `limits` section and their current effect are listed on the [Limits configuration](/configuration/limits) page.
 
 See [Limits configuration](/configuration/limits) for every key and its default.
 
@@ -83,5 +83,6 @@ See [Limits configuration](/configuration/limits) for every key and its default.
 
 - [Routing](/concepts/routing): how the ingress agent chooses the exit for a stream
 - [End-to-End Encryption](/security/e2e-encryption): how stream payloads are protected
-- [Routing configuration](/configuration/routing): stream limits, timeouts, and connection tuning
+- [Limits configuration](/configuration/limits): stream counts, buffer size, and the stream open timeout
+- [Connections configuration](/configuration/connections): the idle timeout that closes quiet connections at the exit
 - [Performance troubleshooting](/troubleshooting/performance): diagnosing slow or stalled streams

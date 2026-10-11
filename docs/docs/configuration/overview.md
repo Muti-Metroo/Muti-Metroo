@@ -93,7 +93,7 @@ It has no effect when the configuration is loaded from a file.
 
 ## Environment variables
 
-Every value in the file can reference environment variables with `${VAR}` or `${VAR:-default}`:
+Every value in the file can reference environment variables with `${VAR}`, `${VAR:-default}`, or `$VAR`:
 
 ```yaml
 agent:
@@ -130,7 +130,7 @@ Validation checks syntax, required keys, value ranges, and key formats. It does 
 ## See Also
 
 - [Agent](/configuration/agent) for identity and the data directory, the first section most configurations set
-- [config CLI](/cli/overview) for `config validate` and `config show` exit codes
+- [config CLI](/cli/config) for `config validate` and `config show` flags and exit status
 - [Environment Variables](/configuration/environment-variables) for substitution syntax
 - [Embedded Configuration](/deployment/embedded-config) for single-file binaries that use `default_action`
 - [Interactive Setup](/getting-started/interactive-setup) to generate a configuration with the wizard

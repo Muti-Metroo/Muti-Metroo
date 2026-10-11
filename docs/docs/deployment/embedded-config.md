@@ -42,15 +42,24 @@ agent:
   private_key: "7878954c7da02d0edcda90f57cb9eb1fa8de675ef8375fd90831c2ae693b555b"
 ```
 
-The values above are an example; generate your own with `muti-metroo init` or the setup wizard. When `agent.id` and `agent.private_key` are both set, `agent.data_dir` can be omitted. Without a data directory, runtime changes made with the dynamic management commands (`route add`, `peer add`, and similar) are not persisted across restarts.
+The values above are an example. The setup wizard generates both when it embeds a config. When you prepare a config for `embed-config` yourself, copy the values from a data directory that an agent has already started with: `agent_id`, and the key in `agent_key` (`muti-metroo init` creates only `agent_id`; the key is generated on first start). Alternatively, keep `data_dir` set so the agent creates and keeps its own identity.
 
-The setup wizard sets these fields automatically when it embeds a config. When you prepare a config for `embed-config` yourself, copy the values from an initialized data directory (`agent_id` and `agent_key`) or leave `data_dir` set so the agent creates and keeps its own identity.
+When `agent.id` and `agent.private_key` are both set, the agent does not need a data directory. To run without one, set it to an empty string:
+
+```yaml
+agent:
+  id: "ed65187723415eea4de1ea73e3a540fc"
+  private_key: "7878954c7da02d0edcda90f57cb9eb1fa8de675ef8375fd90831c2ae693b555b"
+  data_dir: ""
+```
+
+A config that leaves `data_dir` out still uses the default `./data`, relative to the working directory, and the agent creates it there. Without a data directory, runtime changes made with the dynamic management commands (`route add`, `peer add`, and similar) are not persisted across restarts.
 
 ## Create an embedded binary
 
 ### With `embed-config`
 
-[`muti-metroo embed-config`](/cli/overview) embeds a prepared YAML file without prompts, for scripts and CI pipelines:
+[`muti-metroo embed-config`](/cli/embed-config) embeds a prepared YAML file without prompts, for scripts and CI pipelines:
 
 ```bash
 # Write a new binary, leaving the source untouched
@@ -88,7 +97,7 @@ Choosing **Embed in binary** prompts for:
 - **Service name**: used for the default output file name and, if you install a service, for the service and installed binary name.
 - **Output binary path**: defaults to the system temporary directory, for example `/tmp/<service-name>`.
 
-The wizard embeds the generated identity in the config, clears `data_dir`, copies the running binary to the output path with the config appended, and saves a copy of the config to the config path from the first step for reference. It then offers to install the embedded binary as a system service.
+The wizard embeds the generated identity in the config, leaves `data_dir` out of it (so the default `./data` applies, as described in [Embedded identity](#embedded-identity)), copies the running binary to the output path with the config appended, and saves a copy of the config to the config path from the first step for reference. It then offers to install the embedded binary as a system service.
 
 ## Run an embedded binary
 
@@ -138,8 +147,9 @@ The service is enabled and started as part of the installation. Manage it as des
 
 ## See Also
 
-- [CLI - setup](/cli/setup) - Interactive wizard, including the embed option
-- [CLI - config](/cli/overview) - `config show` and `config validate` on embedded binaries
-- [System Service](/deployment/system-service) - Managing the installed service
-- [Configuration - Agent](/configuration/agent) - `agent.id`, `agent.private_key`, and `data_dir`
-- [Security Best Practices](/security/best-practices) - Protecting keys and secrets
+- [embed-config CLI](/cli/embed-config) for the full `embed-config` reference
+- [setup CLI](/cli/setup) for the interactive wizard, including the embed option
+- [config CLI](/cli/config) for `config show` and `config validate` on embedded binaries
+- [System Service](/deployment/system-service) for managing the installed service
+- [Agent](/configuration/agent) for `agent.id`, `agent.private_key`, and `data_dir`
+- [Security Best Practices](/security/best-practices) for protecting keys and secrets

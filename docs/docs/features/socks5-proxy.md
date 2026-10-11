@@ -25,7 +25,7 @@ When a client connects, the ingress agent picks a path for the destination:
 
 1. If the client sends a hostname that matches a [domain route](/features/exit-routing#route-types), the connection goes to that exit by name and the exit agent resolves it.
 2. Otherwise a hostname is resolved at the ingress agent, first against the [mesh hostname registry](/features/mesh-hostnames), then through the system resolver.
-3. The resulting IP is matched against the CIDR route table (longest prefix wins) and the connection goes to the exit that advertised the route.
+3. The IP (for a resolved hostname, the first address returned) is matched against the CIDR route table (longest prefix wins) and the connection goes to the exit that advertised the route.
 4. If no route matches, the ingress agent dials the destination directly from its own host, as if it were the exit.
 
 :::warning Unrouted destinations

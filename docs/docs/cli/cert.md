@@ -17,6 +17,14 @@ Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](
 
 All generated keys are ECDSA P-256. Certificates are written with mode `0644` and private keys with mode `0600`. The output directory is created if it does not exist. Existing files with the same name are overwritten without a prompt, so take care not to replace a CA you still need.
 
+## Certificate types
+
+| Type | Command | Server authentication | Client authentication | Typical use |
+| --- | --- | --- | --- | --- |
+| CA | `cert ca` | No | No | Signs agent and client certificates. |
+| Agent | `cert agent` | Yes | Yes | Listeners and peer connections. |
+| Client | `cert client` | No | Yes | Connections that only dial out with mutual TLS. |
+
 ## cert ca
 
 ```bash
@@ -191,14 +199,6 @@ The `Status` line uses fixed bands:
 The default of 365 days suits deployments that are rotated by hand once a year. Where certificate rotation is automated, a shorter `--days` value such as 90 limits how long a leaked key stays useful.
 
 The validity of an agent or client certificate is not limited by the CA's validity. A certificate whose `Not After` is later than the CA's stops validating when the CA expires, so plan CA rotation before issuing long-lived certificates from it.
-
-## Certificate types
-
-| Type | Command | Server authentication | Client authentication | Typical use |
-| --- | --- | --- | --- | --- |
-| CA | `cert ca` | No | No | Signs agent and client certificates. |
-| Agent | `cert agent` | Yes | Yes | Listeners and peer connections. |
-| Client | `cert client` | No | Yes | Connections that only dial out with mutual TLS. |
 
 ## See Also
 

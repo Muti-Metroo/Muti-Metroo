@@ -200,8 +200,8 @@ docker run --rm -v "$(pwd)/config.yaml:/app/config.yaml:ro" muti-metroo config v
 
 ## See Also
 
-- [System Service](/deployment/system-service) - Running the agent directly on the host
-- [Configuration Overview](/configuration/overview) - Every config section
-- [Environment Variables](/configuration/environment-variables) - `${VAR}` substitution in configs
-- [CLI - cert](/cli/cert) - Generating CA and agent certificates
-- [High Availability](/deployment/high-availability) - Redundant paths and exits
+- [System Service](/deployment/system-service) for running the agent directly on the host instead
+- [Configuration Overview](/configuration/overview) for every config section and where it is documented
+- [Environment Variables](/configuration/environment-variables) for `${VAR}` substitution in configs
+- [cert CLI](/cli/cert) for generating CA and agent certificates
+- [HTTP API](/configuration/http) for protecting the API port with a bearer token

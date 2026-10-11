@@ -1,6 +1,6 @@
 ---
 title: Dashboard Endpoints
-description: JSON endpoints for dashboards and integrations - agent overview, topology, node details, mesh test, interfaces, and setup defaults.
+description: "JSON endpoints for dashboards and integrations: agent overview, topology, node details, mesh test, interfaces, and setup defaults."
 sidebar_position: 16
 ---
 
@@ -542,7 +542,7 @@ curl http://localhost:8080/api/setup-defaults
 | ------ | ---- | ----- |
 | 404 | HTML page | `http.dashboard` is disabled |
 | 405 | `method not allowed` | Wrong method |
-| 503 | `provider not configured` | The agent has not finished starting |
+| 503 | `provider not configured`, `remote provider not configured` | The agent has not finished starting |
 
 ## See Also
 
