@@ -391,6 +391,7 @@ func (a *Agent) initComponents() error {
 	peerCfg.KeepaliveInterval = a.cfg.Connections.IdleThreshold
 	peerCfg.KeepaliveTimeout = a.cfg.Connections.Timeout
 	peerCfg.KeepaliveJitter = a.cfg.Connections.KeepaliveJitter
+	peerCfg.WriteTimeout = a.cfg.Connections.WriteTimeout
 	peerCfg.Logger = a.logger
 	peerCfg.ReconnectConfig = peer.ReconnectConfig{
 		InitialDelay: a.cfg.Connections.Reconnect.InitialDelay,

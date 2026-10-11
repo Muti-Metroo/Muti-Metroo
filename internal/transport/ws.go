@@ -360,8 +360,19 @@ type WebSocketStream struct {
 	ctx    context.Context
 	id     uint64
 	reader io.Reader
-	readMu sync.Mutex // Only protects reader buffer, not blocking read
-	closed atomic.Bool
+	// readerCancel belongs to the deadline context that produced reader. The
+	// library's message reader keeps using that context on every Read, so the
+	// cancel must not run until the message is fully drained.
+	readerCancel context.CancelFunc
+	readMu       sync.Mutex // Only protects reader buffer, not blocking read
+	closed       atomic.Bool
+
+	// The websocket library takes contexts rather than deadlines, so the
+	// deadlines are stored and converted into a per-operation context on each
+	// Read/Write. A zero deadline means no timeout, matching net.Conn.
+	deadlineMu    sync.Mutex
+	readDeadline  time.Time
+	writeDeadline time.Time
 }
 
 // StreamID returns the stream ID.
@@ -377,6 +388,10 @@ func (s *WebSocketStream) Read(p []byte) (int, error) {
 		n, err := s.reader.Read(p)
 		if err == io.EOF {
 			s.reader = nil
+			if s.readerCancel != nil {
+				s.readerCancel()
+				s.readerCancel = nil
+			}
 			s.readMu.Unlock()
 			// If we read some data, return it
 			if n > 0 {
@@ -391,22 +406,44 @@ func (s *WebSocketStream) Read(p []byte) (int, error) {
 		s.readMu.Unlock()
 	}
 
-	// Read next WebSocket message (without holding mutex - this blocks)
-	msgType, reader, err := s.conn.Reader(s.ctx)
+	// Read next WebSocket message (without holding mutex - this blocks).
+	// A set read deadline becomes the context deadline for this read. The
+	// derived context outlives this call: the library's message reader keeps
+	// using it, so cancel runs only when the message is drained (or fails).
+	ctx := s.ctx
+	var cancel context.CancelFunc
+	s.deadlineMu.Lock()
+	if !s.readDeadline.IsZero() {
+		ctx, cancel = context.WithDeadline(s.ctx, s.readDeadline)
+	}
+	s.deadlineMu.Unlock()
+
+	msgType, reader, err := s.conn.Reader(ctx)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return 0, err
 	}
 
 	if msgType != websocket.MessageBinary {
+		if cancel != nil {
+			cancel()
+		}
 		return 0, fmt.Errorf("unexpected message type: %v", msgType)
 	}
 
 	// Store reader and read from it (with mutex)
 	s.readMu.Lock()
 	s.reader = reader
+	s.readerCancel = cancel
 	n, err := s.reader.Read(p)
 	if err == io.EOF {
 		s.reader = nil
+		if s.readerCancel != nil {
+			s.readerCancel()
+			s.readerCancel = nil
+		}
 		err = nil
 	}
 	s.readMu.Unlock()
@@ -419,7 +456,19 @@ func (s *WebSocketStream) Write(p []byte) (int, error) {
 		return 0, fmt.Errorf("stream closed")
 	}
 
-	err := s.conn.Write(s.ctx, websocket.MessageBinary, p)
+	// A set write deadline becomes the context deadline for this write; the
+	// library maps it onto the underlying net.Conn write deadline, so a peer
+	// that stops reading makes the write fail instead of blocking forever.
+	ctx := s.ctx
+	s.deadlineMu.Lock()
+	if !s.writeDeadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(s.ctx, s.writeDeadline)
+		defer cancel()
+	}
+	s.deadlineMu.Unlock()
+
+	err := s.conn.Write(ctx, websocket.MessageBinary, p)
 	if err != nil {
 		return 0, err
 	}
@@ -440,19 +489,30 @@ func (s *WebSocketStream) Close() error {
 	return s.conn.Close(websocket.StatusNormalClosure, "stream closed")
 }
 
-// SetDeadline sets read and write deadlines.
+// SetDeadline sets read and write deadlines. Deadlines are absolute points in
+// time applied to every subsequent Read/Write until changed, matching net.Conn
+// semantics; the zero time disables the deadline.
 func (s *WebSocketStream) SetDeadline(t time.Time) error {
-	// WebSocket library uses context-based timeouts, not deadlines
+	s.deadlineMu.Lock()
+	s.readDeadline = t
+	s.writeDeadline = t
+	s.deadlineMu.Unlock()
 	return nil
 }
 
-// SetReadDeadline sets the read deadline.
+// SetReadDeadline sets the read deadline. See SetDeadline.
 func (s *WebSocketStream) SetReadDeadline(t time.Time) error {
+	s.deadlineMu.Lock()
+	s.readDeadline = t
+	s.deadlineMu.Unlock()
 	return nil
 }
 
-// SetWriteDeadline sets the write deadline.
+// SetWriteDeadline sets the write deadline. See SetDeadline.
 func (s *WebSocketStream) SetWriteDeadline(t time.Time) error {
+	s.deadlineMu.Lock()
+	s.writeDeadline = t
+	s.deadlineMu.Unlock()
 	return nil
 }
 

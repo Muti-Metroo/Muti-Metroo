@@ -3,6 +3,9 @@ package transport
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -277,5 +280,74 @@ func TestH2Stream_StreamID(t *testing.T) {
 	stream := &H2Stream{id: 42}
 	if stream.StreamID() != 42 {
 		t.Errorf("StreamID() = %d, want 42", stream.StreamID())
+	}
+}
+
+// TestH2Stream_WriteDeadlineExpires verifies that a write blocked on the
+// unbuffered pipe (nobody draining the read side, simulating a pump stuck on a
+// peer that stopped reading) fails once the write deadline passes.
+func TestH2Stream_WriteDeadlineExpires(t *testing.T) {
+	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
+
+	stream := &H2Stream{writer: pipeWriter, writePipeReader: pipeReader, id: 1}
+
+	if err := stream.SetWriteDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+
+	start := time.Now()
+	_, err := stream.Write([]byte("blocked"))
+	if err == nil {
+		t.Fatal("Write() blocked on a full pipe should fail at the deadline")
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("Write() error = %v, want os.ErrDeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Write() took %v, want roughly the 200ms deadline", elapsed)
+	}
+}
+
+// TestH2Stream_WriteDeadlineZeroDisables verifies the default (no deadline)
+// leaves writes blocking until the read side drains, and that a write with
+// room in the pipe succeeds when a deadline is set.
+func TestH2Stream_WriteWithReaderSucceeds(t *testing.T) {
+	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
+
+	stream := &H2Stream{writer: pipeWriter, id: 1}
+
+	if err := stream.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+
+	readResult := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 16)
+		n, _ := pipeReader.Read(buf)
+		readResult <- buf[:n]
+	}()
+
+	if _, err := stream.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	select {
+	case got := <-readResult:
+		if string(got) != "hello" {
+			t.Errorf("Read() = %q, want %q", got, "hello")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader never received the write")
+	}
+}
+
+// TestH2Stream_SetReadDeadlineNoOp documents that read deadlines are
+// intentionally unsupported on HTTP/2 streams.
+func TestH2Stream_SetReadDeadlineNoOp(t *testing.T) {
+	stream := &H2Stream{id: 1}
+	if err := stream.SetReadDeadline(time.Now()); err != nil {
+		t.Errorf("SetReadDeadline() error = %v, want nil (documented no-op)", err)
 	}
 }

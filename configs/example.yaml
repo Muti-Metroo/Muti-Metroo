@@ -316,6 +316,10 @@ connections:
     30s # SO_KEEPALIVE period for TCP transports (h2, ws); keeps NAT
     # mappings warm so idle links don't drop. 0 disables. QUIC
     # manages its own keepalive and ignores this.
+  write_timeout:
+    30s # Per-frame write deadline on peer connections (default 30s). A peer
+    # that stops reading makes the write fail -- and the connection tear down --
+    # instead of blocking every frame behind the stalled write. 0 disables.
 
   # Reconnection behavior
   reconnect:

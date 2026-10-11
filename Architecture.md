@@ -597,6 +597,9 @@ type Stream interface {
 │  • Use io.Pipe for request body streaming                                   │
 │  • Call http.Flusher.Flush() to disable buffering                           │
 │  • Set Content-Type: application/octet-stream                               │
+│  • Write deadlines poison the pipe's read end (CloseWithError), unblocking  │
+│    a Write stalled behind a non-reading peer with os.ErrDeadlineExceeded;   │
+│    read deadlines are unsupported (the response body has no timeout knob)   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -639,6 +642,9 @@ type Stream interface {
 │  • After upgrade, fully symmetric bidirectional                             │
 │  • Binary frames for efficiency                                             │
 │  • Our frame protocol provides multiplexing                                 │
+│  • Read/write deadlines are stored on the stream and applied as the         │
+│    context deadline of each Read/Write (the library maps them onto the      │
+│    underlying net.Conn)                                                     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -4072,7 +4078,10 @@ muti-metroo/
 │    ICMP_ECHO frames; count = fastLaneWorkerCount)                           │
 │                                                                             │
 │  Writes are serialised via a mutex (writeMu) around synchronous WriteFrame  │
-│  calls; there is no dedicated writer goroutine.                             │
+│  calls; there is no dedicated writer goroutine. Each WriteFrame arms a      │
+│  per-write deadline (connections.write_timeout, default 30s) on the         │
+│  control stream so a peer that stops reading fails the write -- and tears   │
+│  down the connection -- instead of holding writeMu forever.                 │
 │                                                                             │
 │  Per stream (at endpoints):                                                 │
 │  • 2 goroutines for bidirectional relay                                     │

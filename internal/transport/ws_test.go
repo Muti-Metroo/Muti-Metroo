@@ -578,3 +578,154 @@ func TestWebSocketTransport_PlainText_RequiresWSTransport(t *testing.T) {
 	}
 	listener.Close()
 }
+
+// dialPlainWSPair sets up a plaintext WebSocket client/server pair and returns
+// one opened stream on each side. The server side accepts the connection and
+// the single stream but otherwise does nothing with it unless the test drives
+// it.
+func dialPlainWSPair(t *testing.T) (client, server Stream) {
+	t.Helper()
+
+	tr := NewWebSocketTransport()
+	t.Cleanup(func() { tr.Close() })
+
+	listener, err := tr.Listen("127.0.0.1:0", ListenOptions{
+		Path:      "/mesh",
+		PlainText: true,
+	})
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	serverStreamCh := make(chan Stream, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		conn, err := listener.Accept(ctx)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		t.Cleanup(func() { conn.Close() })
+		stream, err := conn.AcceptStream(ctx)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		serverStreamCh <- stream
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	clientConn, err := tr.Dial(ctx, "ws://"+listener.Addr().String()+"/mesh", DialOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	t.Cleanup(func() { clientConn.Close() })
+
+	clientStream, err := clientConn.OpenStream(ctx)
+	if err != nil {
+		t.Fatalf("OpenStream() error = %v", err)
+	}
+
+	select {
+	case serverStream := <-serverStreamCh:
+		return clientStream, serverStream
+	case err := <-errCh:
+		t.Fatalf("server accept error = %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for server stream")
+	}
+	return nil, nil
+}
+
+// TestWebSocketStream_WriteDeadlineExpires verifies that a write to a peer
+// that never reads fails once the write deadline passes instead of blocking
+// forever.
+func TestWebSocketStream_WriteDeadlineExpires(t *testing.T) {
+	client, _ := dialPlainWSPair(t)
+
+	// The server side never reads, so once the kernel buffers fill the write
+	// stalls; the 300ms deadline must break it.
+	if err := client.SetWriteDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+
+	buf := make([]byte, 1<<20)
+	giveUp := time.After(15 * time.Second)
+	for {
+		_, err := client.Write(buf)
+		if err != nil {
+			// Expected: the deadline fired while the write was stalled.
+			return
+		}
+		select {
+		case <-giveUp:
+			t.Fatal("write never timed out against a non-reading peer")
+		default:
+		}
+		// Refresh the deadline for the next chunk.
+		client.SetWriteDeadline(time.Now().Add(300 * time.Millisecond))
+	}
+}
+
+// TestWebSocketStream_ExpiredWriteDeadline verifies that an already-expired
+// deadline fails the write immediately. A failed websocket write is terminal
+// for the connection, so this uses its own pair and does not attempt recovery.
+func TestWebSocketStream_ExpiredWriteDeadline(t *testing.T) {
+	client, _ := dialPlainWSPair(t)
+
+	if err := client.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+	if _, err := client.Write([]byte("x")); err == nil {
+		t.Error("Write() with expired deadline should fail")
+	}
+}
+
+// TestWebSocketStream_ClearWriteDeadline verifies that the zero time disables
+// the deadline and writes flow normally again.
+func TestWebSocketStream_ClearWriteDeadline(t *testing.T) {
+	client, server := dialPlainWSPair(t)
+
+	if err := client.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+	if err := client.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatalf("SetWriteDeadline(zero) error = %v", err)
+	}
+	if _, err := client.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	buf := make([]byte, 16)
+	if err := server.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	n, err := server.Read(buf)
+	if err != nil || string(buf[:n]) != "hello" {
+		t.Errorf("Read() = %q, %v; want %q, nil", buf[:n], err, "hello")
+	}
+}
+
+// TestWebSocketStream_ReadDeadlineExpires verifies that a read with a deadline
+// and no incoming data fails at the deadline.
+func TestWebSocketStream_ReadDeadlineExpires(t *testing.T) {
+	client, _ := dialPlainWSPair(t)
+
+	if err := client.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+
+	start := time.Now()
+	_, err := client.Read(make([]byte, 16))
+	if err == nil {
+		t.Fatal("Read() with deadline and no data should fail")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Read() took %v, want roughly the 200ms deadline", elapsed)
+	}
+}

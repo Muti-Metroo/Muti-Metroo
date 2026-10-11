@@ -64,6 +64,7 @@ type Connection struct {
 	writer        *protocol.FrameWriter
 	controlStream transport.Stream
 	writeMu       sync.Mutex
+	writeTimeout  time.Duration // Per-write deadline; 0 disables
 
 	// Streams
 	streamAlloc *transport.StreamIDAllocator
@@ -94,6 +95,7 @@ type ConnectionConfig struct {
 	ExpectedPeerID   identity.AgentID // Optional: verify peer ID during handshake
 	Capabilities     []string
 	HandshakeTimeout time.Duration
+	WriteTimeout     time.Duration // Per-frame write deadline; 0 disables
 	OnFrame          func(*Connection, *protocol.Frame)
 	OnDisconnect     func(*Connection, error)
 }
@@ -104,6 +106,7 @@ func DefaultConnectionConfig(localID identity.AgentID) ConnectionConfig {
 		LocalID:          localID,
 		Capabilities:     []string{},
 		HandshakeTimeout: 10 * time.Second,
+		WriteTimeout:     30 * time.Second,
 	}
 }
 
@@ -124,6 +127,7 @@ func NewConnection(conn transport.PeerConn, cfg ConnectionConfig) *Connection {
 		isDialer:     conn.IsDialer(),
 		capabilities: cfg.Capabilities,
 		streamAlloc:  transport.NewStreamIDAllocator(conn.IsDialer()),
+		writeTimeout: cfg.WriteTimeout,
 		ctx:          ctx,
 		cancel:       cancel,
 		closed:       make(chan struct{}),
@@ -234,6 +238,16 @@ func (c *Connection) WriteFrame(f *protocol.Frame) error {
 
 	if c.writer == nil {
 		return fmt.Errorf("connection not initialized")
+	}
+
+	// Bound every write: writeMu is held across the socket write, so a peer
+	// that stops reading would otherwise block every subsequent frame --
+	// including keepalives -- forever. A write that misses its deadline
+	// errors out and the caller treats it as fatal for the connection.
+	// Per-write deadlines leave long-idle-but-healthy connections alone.
+	if c.writeTimeout > 0 && c.controlStream != nil {
+		_ = c.controlStream.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+		defer c.controlStream.SetWriteDeadline(time.Time{})
 	}
 
 	c.updateActivity()

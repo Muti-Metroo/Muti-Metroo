@@ -637,6 +637,7 @@ type ConnectionsConfig struct {
 	Timeout         time.Duration   `yaml:"timeout,omitempty"`
 	KeepaliveJitter float64         `yaml:"keepalive_jitter,omitempty"` // Jitter fraction for keepalive timing (0.0-1.0)
 	TCPKeepAlive    time.Duration   `yaml:"tcp_keepalive,omitempty"`    // SO_KEEPALIVE period for TCP transports (h2, ws); 0 disables
+	WriteTimeout    time.Duration   `yaml:"write_timeout,omitempty"`    // Per-frame write deadline on peer connections; 0 disables
 	Reconnect       ReconnectConfig `yaml:"reconnect,omitempty"`
 }
 
@@ -948,6 +949,7 @@ func Default() *Config {
 			Timeout:         90 * time.Second,
 			KeepaliveJitter: 0.2,              // 20% jitter makes timing patterns less distinguishable
 			TCPKeepAlive:    30 * time.Second, // SO_KEEPALIVE on TCP transports keeps NAT mappings warm
+			WriteTimeout:    30 * time.Second, // Per-frame write deadline; a stalled peer write fails instead of blocking forever
 			Reconnect: ReconnectConfig{
 				InitialDelay: 1 * time.Second,
 				MaxDelay:     60 * time.Second,
@@ -1193,6 +1195,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Connections.TCPKeepAlive < 0 {
 		errs = append(errs, "connections.tcp_keepalive must not be negative")
+	}
+	if c.Connections.WriteTimeout < 0 {
+		errs = append(errs, "connections.write_timeout must not be negative")
 	}
 
 	// Validate identity keypair configuration

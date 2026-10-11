@@ -37,6 +37,7 @@ type ManagerConfig struct {
 	KeepaliveInterval time.Duration
 	KeepaliveTimeout  time.Duration
 	KeepaliveJitter   float64 // Jitter fraction (0.0-1.0) to randomize keepalive timing
+	WriteTimeout      time.Duration // Per-frame write deadline on peer connections; 0 disables
 	ReconnectConfig   ReconnectConfig
 	Logger            *slog.Logger
 	OnPeerConnected   func(*Connection)
@@ -54,6 +55,7 @@ func DefaultManagerConfig(localID identity.AgentID, tr transport.Transport) Mana
 		KeepaliveInterval: 30 * time.Second,
 		KeepaliveTimeout:  10 * time.Second,
 		KeepaliveJitter:   0.2, // 20% jitter makes timing patterns less distinguishable
+		WriteTimeout:      30 * time.Second,
 		ReconnectConfig:   DefaultReconnectConfig(),
 	}
 }
@@ -233,6 +235,7 @@ func (m *Manager) buildConnectionConfig(info *PeerInfo) (ConnectionConfig, trans
 		ExpectedPeerID:   expectedID,
 		Capabilities:     m.cfg.Capabilities,
 		HandshakeTimeout: m.cfg.HandshakeTimeout,
+		WriteTimeout:     m.cfg.WriteTimeout,
 		OnFrame:          m.cfg.OnFrame,
 		OnDisconnect:     m.handleDisconnect,
 	}

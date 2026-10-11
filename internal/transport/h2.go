@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -184,11 +185,12 @@ func (t *H2Transport) Dial(ctx context.Context, addr string, opts DialOptions) (
 	}
 
 	return &H2PeerConn{
-		reader:       resp.Body,
-		writer:       pipeWriter,
-		isDialer:     true,
-		cancelDialFn: connCancel, // Cancel connection context on Close()
-		h2Transport:  h2Transport,
+		reader:          resp.Body,
+		writer:          pipeWriter,
+		writePipeReader: pipeReader,
+		isDialer:        true,
+		cancelDialFn:    connCancel, // Cancel connection context on Close()
+		h2Transport:     h2Transport,
 	}, nil
 }
 
@@ -360,12 +362,13 @@ func (l *H2Listener) handleH2Stream(w http.ResponseWriter, r *http.Request) {
 
 	// Create peer connection with doneCh initialized to avoid race condition
 	peerConn := &H2PeerConn{
-		reader:     r.Body,
-		writer:     pipeWriter,
-		isDialer:   false,
-		flusher:    flusher,
-		respWriter: w,
-		doneCh:     make(chan struct{}),
+		reader:          r.Body,
+		writer:          pipeWriter,
+		writePipeReader: pipeReader,
+		isDialer:        false,
+		flusher:         flusher,
+		respWriter:      w,
+		doneCh:          make(chan struct{}),
 	}
 
 	// Start goroutine to pump from pipe to response
@@ -469,16 +472,20 @@ func (l *H2Listener) Close() error {
 // this connection provides a single "stream" that the peer manager
 // uses as its control stream.
 type H2PeerConn struct {
-	reader       io.ReadCloser
-	writer       io.WriteCloser
-	isDialer     bool
-	flusher      http.Flusher
-	respWriter   http.ResponseWriter
-	streamOnce   sync.Once
-	stream       *H2Stream
-	closed       atomic.Bool
-	doneCh       chan struct{}
-	cancelDialFn context.CancelFunc // Cancel function for dial context (client only)
+	reader io.ReadCloser
+	writer io.WriteCloser
+	// writePipeReader is the read end of the pipe backing writer. The write
+	// deadline watchdog closes it with an error to unblock a stalled Write;
+	// closing the writer itself would only surface a generic io.ErrClosedPipe.
+	writePipeReader *io.PipeReader
+	isDialer        bool
+	flusher         http.Flusher
+	respWriter      http.ResponseWriter
+	streamOnce      sync.Once
+	stream          *H2Stream
+	closed          atomic.Bool
+	doneCh          chan struct{}
+	cancelDialFn    context.CancelFunc // Cancel function for dial context (client only)
 	// h2Transport is the per-dial *http2.Transport (client only). Without an
 	// explicit CloseIdleConnections in Close, the TCP socket lingers in its
 	// pool until GC + finalizer -- a real leak under reconnect churn.
@@ -489,9 +496,10 @@ type H2PeerConn struct {
 func (c *H2PeerConn) OpenStream(ctx context.Context) (Stream, error) {
 	c.streamOnce.Do(func() {
 		c.stream = &H2Stream{
-			reader: c.reader,
-			writer: c.writer,
-			id:     1,
+			reader:          c.reader,
+			writer:          c.writer,
+			writePipeReader: c.writePipeReader,
+			id:              1,
 		}
 	})
 	return c.stream, nil
@@ -501,9 +509,10 @@ func (c *H2PeerConn) OpenStream(ctx context.Context) (Stream, error) {
 func (c *H2PeerConn) AcceptStream(ctx context.Context) (Stream, error) {
 	c.streamOnce.Do(func() {
 		c.stream = &H2Stream{
-			reader: c.reader,
-			writer: c.writer,
-			id:     1,
+			reader:          c.reader,
+			writer:          c.writer,
+			writePipeReader: c.writePipeReader,
+			id:              1,
 		}
 	})
 	return c.stream, nil
@@ -563,11 +572,21 @@ func (c *H2PeerConn) TransportType() TransportType {
 
 // H2Stream implements Stream for HTTP/2.
 type H2Stream struct {
-	reader  io.ReadCloser
-	writer  io.WriteCloser
-	id      uint64
-	writeMu sync.Mutex // Protects concurrent writes
-	closed  atomic.Bool
+	reader          io.ReadCloser
+	writer          io.WriteCloser
+	writePipeReader *io.PipeReader // read end backing writer; used by the write-deadline watchdog
+	id              uint64
+	writeMu         sync.Mutex // Protects concurrent writes
+	closed          atomic.Bool
+
+	// writeDeadline bounds a single Write. The io.Pipe that backs writer on
+	// both the dial and accept side has no deadline support of its own, so the
+	// deadline is enforced by a per-write watchdog (see Write). A zero
+	// deadline means no timeout, matching net.Conn. Read deadlines are not
+	// supported: the read side bottoms out in the HTTP/2 response body, which
+	// offers no per-read timeout short of tearing down the whole request.
+	deadlineMu    sync.Mutex
+	writeDeadline time.Time
 }
 
 // StreamID returns the stream ID.
@@ -580,6 +599,10 @@ func (s *H2Stream) Read(p []byte) (int, error) {
 	return s.reader.Read(p)
 }
 
+// errH2StreamWriteTimeout fails a blocked pipe write when its deadline
+// expires. It wraps os.ErrDeadlineExceeded so callers can use errors.Is.
+var errH2StreamWriteTimeout = fmt.Errorf("h2 stream write: %w", os.ErrDeadlineExceeded)
+
 // Write writes data to the HTTP/2 stream.
 func (s *H2Stream) Write(p []byte) (int, error) {
 	if s.closed.Load() {
@@ -587,6 +610,34 @@ func (s *H2Stream) Write(p []byte) (int, error) {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+
+	s.deadlineMu.Lock()
+	deadline := s.writeDeadline
+	s.deadlineMu.Unlock()
+
+	if !deadline.IsZero() {
+		// The pipe is unbuffered: if the pump goroutine is stuck writing to a
+		// peer that stopped reading, this Write blocks until the pump reads
+		// again. Arm a watchdog that poisons the pipe when the deadline passes.
+		// Closing the read end delivers errH2StreamWriteTimeout to the blocked
+		// Write (closing the write end would only yield io.ErrClosedPipe). A
+		// timed-out write leaves the pipe broken; that is intentional, a
+		// stalled peer connection is not expected to recover and the write
+		// error triggers the disconnect path.
+		timer := time.AfterFunc(time.Until(deadline), func() {
+			if s.writePipeReader != nil {
+				s.writePipeReader.CloseWithError(errH2StreamWriteTimeout)
+				return
+			}
+			if pw, ok := s.writer.(interface{ CloseWithError(error) error }); ok {
+				pw.CloseWithError(errH2StreamWriteTimeout)
+			} else {
+				s.writer.Close()
+			}
+		})
+		defer timer.Stop()
+	}
+
 	return s.writer.Write(p)
 }
 
@@ -614,18 +665,25 @@ func (s *H2Stream) Close() error {
 	return err
 }
 
-// SetDeadline sets read and write deadlines.
+// SetDeadline sets the write deadline. Read deadlines are not supported on
+// HTTP/2 streams (see H2Stream); the read side is left unchanged.
 func (s *H2Stream) SetDeadline(t time.Time) error {
-	return nil
+	return s.SetWriteDeadline(t)
 }
 
-// SetReadDeadline sets the read deadline.
+// SetReadDeadline is a no-op: the read side of an HTTP/2 streaming request
+// has no per-read timeout mechanism short of cancelling the whole request.
+// Liveness is the peer keepalive's job, not a read deadline's.
 func (s *H2Stream) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-// SetWriteDeadline sets the write deadline.
+// SetWriteDeadline sets the write deadline applied to subsequent Write calls.
+// The zero time disables it.
 func (s *H2Stream) SetWriteDeadline(t time.Time) error {
+	s.deadlineMu.Lock()
+	s.writeDeadline = t
+	s.deadlineMu.Unlock()
 	return nil
 }
 

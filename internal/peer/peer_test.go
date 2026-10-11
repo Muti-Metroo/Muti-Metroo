@@ -2282,3 +2282,84 @@ func TestManager_AcceptedConnections_DisjointFromGetPeerInfos(t *testing.T) {
 		t.Errorf("GetPeerInfos unexpectedly keyed on inbound RemoteAddr %q", accepted[0].RemoteAddr)
 	}
 }
+
+// ============================================================================
+// Write Deadline Tests
+// ============================================================================
+
+// deadlineTrackingStream records SetWriteDeadline calls so tests can verify
+// WriteFrame arms and disarms a per-write deadline on the control stream.
+type deadlineTrackingStream struct {
+	mockStream
+	writeDeadline time.Time
+	deadlineCalls int
+}
+
+func (s *deadlineTrackingStream) SetWriteDeadline(t time.Time) error {
+	s.writeDeadline = t
+	s.deadlineCalls++
+	return nil
+}
+
+func TestConnection_WriteFrame_SetsWriteDeadline(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	cfg := DefaultConnectionConfig(localID)
+	if cfg.WriteTimeout != 30*time.Second {
+		t.Fatalf("default WriteTimeout = %v, want 30s", cfg.WriteTimeout)
+	}
+	conn := NewConnection(&mockPeerConn{}, cfg)
+	defer conn.Close()
+
+	ms := &deadlineTrackingStream{}
+	conn.controlStream = ms
+	conn.writer = protocol.NewFrameWriter(ms)
+
+	err := conn.WriteFrame(&protocol.Frame{
+		Type:     protocol.FrameStreamData,
+		StreamID: 1,
+		Payload:  []byte("test"),
+	})
+	if err != nil {
+		t.Fatalf("WriteFrame() error = %v", err)
+	}
+
+	// Deadline armed before the write and disarmed after it.
+	if ms.deadlineCalls != 2 {
+		t.Errorf("SetWriteDeadline calls = %d, want 2 (arm + clear)", ms.deadlineCalls)
+	}
+	if !ms.writeDeadline.IsZero() {
+		t.Errorf("write deadline left set after WriteFrame: %v", ms.writeDeadline)
+	}
+}
+
+func TestConnection_WriteFrame_WriteTimeoutDisabled(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	cfg := DefaultConnectionConfig(localID)
+	cfg.WriteTimeout = 0
+	conn := NewConnection(&mockPeerConn{}, cfg)
+	defer conn.Close()
+
+	ms := &deadlineTrackingStream{}
+	conn.controlStream = ms
+	conn.writer = protocol.NewFrameWriter(ms)
+
+	if err := conn.WriteFrame(&protocol.Frame{Type: protocol.FrameStreamData, StreamID: 1, Payload: []byte("x")}); err != nil {
+		t.Fatalf("WriteFrame() error = %v", err)
+	}
+	if ms.deadlineCalls != 0 {
+		t.Errorf("SetWriteDeadline calls = %d, want 0 with WriteTimeout disabled", ms.deadlineCalls)
+	}
+}
+
+func TestConnection_WriteFrame_NoControlStream(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	cfg := DefaultConnectionConfig(localID)
+	conn := NewConnection(&mockPeerConn{}, cfg)
+	defer conn.Close()
+
+	// Writer without a control stream (unit-test wiring): no deadline, no panic.
+	conn.writer = protocol.NewFrameWriter(&mockStream{})
+	if err := conn.WriteFrame(&protocol.Frame{Type: protocol.FrameStreamData, StreamID: 1, Payload: []byte("x")}); err != nil {
+		t.Fatalf("WriteFrame() error = %v", err)
+	}
+}

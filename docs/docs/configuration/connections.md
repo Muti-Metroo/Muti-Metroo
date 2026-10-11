@@ -16,6 +16,7 @@ connections:
   timeout: 90s            # Dial timeout and dead-peer grace period
   keepalive_jitter: 0.2   # +/- 20% on each keepalive interval
   tcp_keepalive: 30s      # SO_KEEPALIVE period for h2 and ws connections
+  write_timeout: 30s      # Per-frame write deadline on peer connections
   reconnect:
     initial_delay: 1s
     max_delay: 60s
@@ -32,6 +33,7 @@ connections:
 | `timeout`                 | duration | `90s`   | Timeout for dialing a peer. A peer with no traffic for `idle_threshold` plus `timeout` is disconnected.                                              |
 | `keepalive_jitter`        | float    | `0.2`   | Random variation applied to each keepalive interval, as a fraction (0.2 = plus or minus 20%). `0` disables jitter.                                  |
 | `tcp_keepalive`           | duration | `30s`   | Operating system TCP keepalive period on `h2` and `ws` connections, which keeps NAT mappings alive and detects dead TCP links. `0` disables it. QUIC is not affected. Must not be negative. |
+| `write_timeout`           | duration | `30s`   | Deadline applied to each frame write on a peer connection. A peer that stops reading fails the write and the connection is torn down, instead of blocking all later frames behind the stalled one. `0` disables it. Must not be negative. |
 | `reconnect.initial_delay` | duration | `1s`    | Delay before the first redial.                                                                                                                      |
 | `reconnect.max_delay`     | duration | `60s`   | Upper bound for the redial delay.                                                                                                                   |
 | `reconnect.multiplier`    | float    | `2.0`   | Factor applied to the delay after each attempt.                                                                                                     |
