@@ -435,7 +435,6 @@ func (a *Agent) IsUDPEnabled() bool {
 	return a.cfg.SOCKS5.Enabled
 }
 
-
 // handleUDPOpen processes a UDP_OPEN frame.
 func (a *Agent) handleUDPOpen(peerID identity.AgentID, frame *protocol.Frame) {
 	open, err := protocol.DecodeUDPOpen(frame.Payload)

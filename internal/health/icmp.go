@@ -36,7 +36,6 @@ type ICMPSession struct {
 
 	// Cleanup function
 	Close func()
-
 }
 
 // ICMPEchoRequest represents an echo request to send.

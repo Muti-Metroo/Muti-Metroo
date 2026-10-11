@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestNewLogger_LevelFiltering(t *testing.T) {
 			var buf bytes.Buffer
 			logger := NewLoggerWithWriter(tc.configLevel, "text", &buf)
 
-			logger.Log(nil, tc.logLevel, "test message")
+			logger.Log(context.Background(), tc.logLevel, "test message")
 
 			hasOutput := buf.Len() > 0
 			if hasOutput != tc.shouldAppear {

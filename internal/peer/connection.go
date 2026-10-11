@@ -66,8 +66,7 @@ type Connection struct {
 	writeMu       sync.Mutex
 
 	// Streams
-	streamAlloc  *transport.StreamIDAllocator
-	nextStreamID atomic.Uint64
+	streamAlloc *transport.StreamIDAllocator
 
 	// Activity tracking
 	lastActivity atomic.Int64

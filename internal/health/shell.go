@@ -39,7 +39,6 @@ type ShellSession struct {
 
 	// Cleanup function
 	Close func()
-
 }
 
 // handleShellWebSocket handles WebSocket connections for shell sessions.
