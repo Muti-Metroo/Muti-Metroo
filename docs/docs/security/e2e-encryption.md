@@ -97,7 +97,7 @@ Session encryption is negotiated per session by both endpoints. If sessions fail
 
 ### Agent identity files are missing
 
-The persistent agent key pair and agent ID are created by `muti-metroo init`. If `agent_key` was deleted, the agent creates a new key pair on the next start. See [init](/cli/init) and [Agent Configuration](/configuration/agent).
+`muti-metroo init` creates the agent ID; the persistent key pair (`agent_key`, `agent_key.pub`) is created the first time the agent runs. If `agent_key` was deleted, the agent creates a new key pair on the next start. See [init](/cli/init) and [Agent Configuration](/configuration/agent).
 
 ## See Also
 

@@ -51,6 +51,7 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 | Active interception of unverified links | With the default TLS settings, an attacker who intercepts a peer connection can act as a malicious transit agent. |
 | Compromised ingress or exit agents | They are session endpoints and see plaintext. |
 | Operator agents' HTTP API | An operator agent signs every privileged request that reaches its API. Access to that API grants control of the mesh. |
+| File browse on operator agents | An agent that holds the signing private key accepts unsigned file browse requests (including `chmod` and `delete`) from other agents. See [Authentication](/security/authentication#how-a-request-is-signed). |
 | Unrouted SOCKS destinations | The ingress agent dials them directly from its own host. |
 | UDP and ICMP destinations | Exit routes do not restrict them. Disable `udp` and `icmp` where they are not needed. |
 | Certificate revocation | There is no CRL or OCSP support; replacing the CA is the only way to revoke a certificate. |
@@ -75,6 +76,7 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 
 - [ ] Signing key pair generated; public key on every agent, private key only on operator agents
 - [ ] Operator agents' HTTP API local-only and token-protected
+- [ ] File transfer disabled on operator agents
 - [ ] Narrow `shell.whitelist` without interpreters or shells
 - [ ] `file_transfer.allowed_paths` limited to specific directories
 - [ ] `udp.enabled: false` and `icmp.enabled: false` where they are not needed

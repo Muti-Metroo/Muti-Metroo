@@ -31,6 +31,7 @@ Anyone with the CA key can issue certificates that every agent accepts, which wi
 
 - Put the private key only on operator agents, and keep the number of operator agents small.
 - Bind operator agents' HTTP API to `127.0.0.1` and set `http.token_hash`.
+- Keep file transfer disabled on operator agents; an agent with the private key accepts unsigned file browse requests from other agents (see [Authentication](/security/authentication#how-a-request-is-signed)).
 - Keep `management.signing_public_key` on every agent. It is safe to distribute and can live in version control.
 - Keep agent clocks synchronized with NTP; signatures are only accepted within five minutes of the verifier's clock.
 
@@ -154,7 +155,7 @@ Agents log peer connections and disconnections, certificate errors, file transfe
 
 ### An agent host is compromised
 
-1. Remove the agent's peer entries on its neighbors (`muti-metroo peer remove`) and block its address at the network level.
+1. Remove the agent's peer entries on its neighbors (from their configuration files, or with `muti-metroo peer remove` for peers added at runtime) and block its address at the network level.
 2. If the host held `signing_private_key`, rotate the signing key on every agent.
 3. Because certificates cannot be revoked, replace the CA and reissue certificates to the remaining agents if the agent had a CA-issued certificate and mutual TLS is your admission control.
 4. Rebuild the host and initialize a new agent identity (`muti-metroo init`) before reconnecting it.
