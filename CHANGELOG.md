@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.9](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.8...muti-metroo-v4.10.9) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* update repository references to Muti-Metroo org ([996e3e1](https://github.com/Muti-Metroo/Muti-Metroo/commit/996e3e1e38cb6239cf8f19fa29a5f6e9dc2df98e))
+
 ## [4.10.8](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.7...muti-metroo-v4.10.8) (2026-10-11)
 
 
