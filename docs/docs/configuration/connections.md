@@ -44,7 +44,7 @@ connections:
 
 Each peer connection sends a keepalive every `idle_threshold`, varied by `keepalive_jitter` (never less than one second). A peer is declared dead when either:
 
-- nothing has been **received** on the connection for `idle_threshold` plus `timeout` (6.5 minutes with the defaults) — outbound traffic, including the keepalive itself, never refreshes this clock, or
+- nothing has been **received** on the connection for `idle_threshold` plus `timeout` (6.5 minutes with the defaults); outbound traffic, including the keepalive itself, does not reset this timer, or
 - a keepalive goes unanswered: the peer must return a `KEEPALIVE_ACK` within `timeout` of each probe.
 
 Lower values detect dead peers sooner and produce more background traffic:
