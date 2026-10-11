@@ -1,5 +1,7 @@
 ---
 title: ICMP Ping WebSocket API
+description: WebSocket endpoint and JSON messages for sending ICMP echo requests from a remote agent.
+sidebar_position: 12
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,177 +10,102 @@ title: ICMP Ping WebSocket API
 
 # ICMP Ping WebSocket API
 
-Send ICMP echo requests through agents to test connectivity and measure latency. The CLI handles this automatically - this reference is for building custom integrations.
+The ICMP endpoint sends ICMP echo requests from a remote agent to a destination and streams the replies over a WebSocket. The [`muti-metroo ping`](/cli/ping) command is a client of this endpoint; this page is for building other clients.
 
-**Using the CLI (recommended):**
-```bash
-muti-metroo ping abc123 8.8.8.8
-muti-metroo ping -c 10 abc123 192.168.1.1
+## `GET /agents/{id}/icmp`
+
+```text
+ws://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/icmp
 ```
 
-**WebSocket endpoint for custom clients:**
-```
-ws://localhost:8080/agents/{agent-id}/icmp
-```
+| Item | Value |
+| ---- | ----- |
+| Group | Remote API (`http.remote_api`) |
+| Subprotocol | `muti-metroo-icmp` |
+| Query parameter `token` | Bearer token, for clients that cannot send an `Authorization` header |
+| Target | A remote agent with `icmp.enabled: true` (the default); the local agent's own ID is not reachable |
 
-## WebSocket Endpoint
+No management signing key is needed. Session limits and timeouts come from the target's [`icmp` settings](/configuration/icmp).
 
-```
-GET /agents/{agent-id}/icmp
-```
+## Messages
 
-### Subprotocol
+All messages are JSON text messages with a `type` field.
 
-The WebSocket uses the `muti-metroo-icmp` subprotocol.
+| `type` | Direction | Fields |
+| ------ | --------- | ------ |
+| `init` | client to server | `dest_ip`: destination IP address. Must be the first message. |
+| `init_ack` | server to client | `success`; `error` when `success` is `false` |
+| `echo` | client to server | `sequence`: number from 0 to 65535; `payload`: optional string |
+| `reply` | server to client | `sequence`; `src_ip`: address that answered, when known |
+| `error` | server to client | `sequence`; `error`: reason, for example a timeout |
 
-## Message Protocol
+## Session flow
 
-All messages use JSON text format.
+1. Open the WebSocket and send `init`:
 
-### Message Types
+   ```json
+   {"type": "init", "dest_ip": "192.0.2.10"}
+   ```
 
-| Type | Direction | Description |
-|------|-----------|-------------|
-| `init` | Client -> Server | Initialize session with destination IP |
-| `init_ack` | Server -> Client | Acknowledge session start |
-| `echo` | Client -> Server | Send echo request |
-| `reply` | Server -> Client | Echo reply received |
-| `error` | Server -> Client | Error response |
+2. Read `init_ack`:
 
-## Session Flow
+   ```json
+   {"type": "init_ack", "success": true}
+   ```
 
-### 1. Connect
+   On failure the server sends `init_ack` with `success: false` and closes the WebSocket:
 
-```
-WebSocket: ws://localhost:8080/agents/abc123/icmp
-Subprotocol: muti-metroo-icmp
-```
+   ```json
+   {"type": "init_ack", "success": false, "error": "invalid destination IP"}
+   ```
 
-### 2. Initialize Session
+3. Send one `echo` per request and read a `reply` or `error` for each:
 
-Send init message with destination IP:
+   ```json
+   {"type": "echo", "sequence": 1}
+   ```
 
-```json
-{
-  "type": "init",
-  "dest_ip": "8.8.8.8"
-}
-```
+   ```json
+   {"type": "reply", "sequence": 1, "src_ip": "192.0.2.10"}
+   ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Must be "init" |
-| `dest_ip` | string | Destination IP address (IPv4) |
+Close the WebSocket to end the session. The target also ends idle sessions after `icmp.idle_timeout`.
 
-### 3. Receive Acknowledgment
-
-**Success:**
-```json
-{
-  "type": "init_ack",
-  "success": true
-}
-```
-
-**Failure:**
-```json
-{
-  "type": "init_ack",
-  "success": false,
-  "error": "ICMP session failed: icmp not enabled"
-}
-```
-
-### 4. Send Echo Requests
-
-```json
-{
-  "type": "echo",
-  "sequence": 1,
-  "payload": "optional payload data"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Must be "echo" |
-| `sequence` | number | Sequence number for tracking |
-| `payload` | string | Optional payload data |
-
-### 5. Receive Replies
-
-**Success:**
-```json
-{
-  "type": "reply",
-  "sequence": 1
-}
-```
-
-**Timeout or error:**
-```json
-{
-  "type": "error",
-  "sequence": 1,
-  "error": "timeout"
-}
-```
-
-## Error Handling
-
-Common init errors:
-
-| Error | Cause |
-|-------|-------|
-| `invalid destination IP` | dest_ip is not a valid IP address |
-| `ICMP session failed: icmp not enabled` | Target agent has ICMP disabled |
-| `failed to open ICMP session` | Network or routing error |
-
-## Custom Client Example
+## Example client
 
 ```javascript
 const ws = new WebSocket(
-  'ws://localhost:8080/agents/abc123/icmp',
-  'muti-metroo-icmp'
+  "ws://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/icmp",
+  "muti-metroo-icmp"
 );
 
-ws.onopen = () => {
-  // Initialize session
-  ws.send(JSON.stringify({
-    type: 'init',
-    dest_ip: '8.8.8.8'
-  }));
-};
+ws.onopen = () => ws.send(JSON.stringify({ type: "init", dest_ip: "192.0.2.10" }));
 
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-
-  if (msg.type === 'init_ack' && msg.success) {
-    // Send echo request
-    ws.send(JSON.stringify({
-      type: 'echo',
-      sequence: 1,
-      payload: ''
-    }));
-  } else if (msg.type === 'reply') {
-    console.log(`Reply seq=${msg.sequence}`);
-  } else if (msg.type === 'error') {
-    console.log(`Error seq=${msg.sequence}: ${msg.error}`);
+  if (msg.type === "init_ack" && msg.success) {
+    ws.send(JSON.stringify({ type: "echo", sequence: 1 }));
+  } else if (msg.type === "reply") {
+    console.log(`reply seq=${msg.sequence} from ${msg.src_ip}`);
+    ws.close();
+  } else {
+    console.log(msg);
+    ws.close();
   }
 };
 ```
 
-## Requirements
+## Errors
 
-The target agent must have ICMP enabled:
-
-```yaml
-icmp:
-  enabled: true
-```
+| Situation | Result |
+| --------- | ------ |
+| First message is not valid JSON or not `init` | WebSocket closed with code 1002 |
+| `dest_ip` is not an IP address | `init_ack` with `error: "invalid destination IP"` |
+| Target unreachable, ICMP disabled on the target, or session limit reached | `init_ack` with the error |
+| Agent has no ICMP support | HTTP `503 ICMP not available` before the upgrade |
 
 ## See Also
 
-- [CLI - Ping](/cli/ping) - CLI reference
-- [ICMP Configuration](/configuration/icmp) - Configure ICMP on agents
-- [ICMP Relay Feature](/features/icmp-relay) - Feature overview
+- [CLI - ping](/cli/ping) - Command-line client
+- [ICMP Configuration](/configuration/icmp) - Enable ICMP and set limits
+- [ICMP Relay](/features/icmp-relay) - Feature overview

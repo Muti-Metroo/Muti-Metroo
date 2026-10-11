@@ -1,6 +1,7 @@
 ---
 title: UDP Relay
-sidebar_position: 6
+description: Send UDP traffic such as DNS and NTP through the mesh with SOCKS5 UDP ASSOCIATE.
+sidebar_position: 2
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,19 +10,7 @@ sidebar_position: 6
 
 # UDP Relay
 
-Tunnel UDP traffic through your mesh - DNS queries, NTP, and other UDP protocols. Resolve DNS through a remote network or route UDP-based applications through your tunnel.
-
-```bash
-# DNS query through the mesh
-proxychains4 dig @8.8.8.8 example.com
-
-# Any UDP-capable SOCKS5 client works
-socksify nslookup internal.corp 10.0.0.53
-```
-
-## How It Works
-
-UDP datagrams flow through your mesh just like TCP - encrypted end-to-end from ingress to exit.
+The SOCKS5 listener also relays UDP datagrams with the standard UDP ASSOCIATE command. A client opens a TCP control connection to the ingress agent, receives a local UDP relay address, and sends datagrams there. The ingress agent forwards each datagram through the mesh to the exit agent that has a route for its destination, and the exit sends it from its own host.
 
 ```mermaid
 flowchart LR
@@ -31,135 +20,96 @@ flowchart LR
     D -->|UDP| E[Destination]
 ```
 
-All UDP datagrams are encrypted end-to-end between ingress and exit using ChaCha20-Poly1305.
+Datagram payloads are end-to-end encrypted between the ingress and the exit. Destination addresses are visible to transit agents; see [End-to-End Encryption](/security/e2e-encryption#what-transit-agents-can-see).
 
 ## Requirements
 
-UDP relay requires:
+- The ingress agent has the SOCKS5 listener enabled. See [SOCKS5 Configuration](/configuration/socks5).
+- The exit agent has UDP relay enabled. It is enabled by default; see [UDP Configuration](/configuration/udp).
+- The ingress agent has a CIDR route for each destination. Unlike TCP, UDP is never sent directly from the ingress host when no route matches.
+- The ingress agent has a route that covers `0.0.0.0` (in practice, a `0.0.0.0/0` default route somewhere in the mesh). UDP ASSOCIATE is refused without one, even if every destination you plan to use has a more specific route.
 
-1. **Ingress agent** with SOCKS5 enabled
-2. **Exit agent** with UDP relay enabled
-3. A route from ingress to exit
+The relay socket listens on the same IP address as the SOCKS5 TCP listener, so a listener on `127.0.0.1:1080` only accepts datagrams from the local host. The relay is IPv4.
 
-:::tip Configuration
-See [UDP Configuration](/configuration/udp) for exit node options and [SOCKS5 Configuration](/configuration/socks5) for ingress setup.
-:::
+## Use the relay
 
-:::info UDP Relay Binding
-The UDP relay socket binds to the same IP address as the SOCKS5 TCP listener. If SOCKS5 listens on `127.0.0.1:1080`, UDP relay sockets will bind to `127.0.0.1`. If SOCKS5 listens on `0.0.0.0:1080`, UDP relay sockets will bind to `0.0.0.0` (all interfaces).
-:::
+The client must implement SOCKS5 UDP ASSOCIATE. Many SOCKS tools, including proxychains and curl, only proxy TCP. [Mutiauk](/mutiauk) relays UDP for all programs on a host through its TUN interface.
 
-## Usage
-
-### DNS Queries
-
-Use standard DNS tools through the SOCKS5 proxy:
-
-```bash
-# Using proxychains
-proxychains4 dig @8.8.8.8 example.com
-
-# Using socksify
-socksify dig @8.8.8.8 example.com
-```
-
-### Python Example
+The following Python script, which needs only the standard library, sends a DNS query for `example.com` to `1.1.1.1` through the relay:
 
 ```python
 import socket
 import struct
 
-# Connect to SOCKS5 proxy
-proxy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-proxy.connect(('127.0.0.1', 1080))
+PROXY = ("127.0.0.1", 1080)
+DNS_SERVER = "1.1.1.1"
+NAME = "example.com"
 
-# SOCKS5 greeting (no auth)
-proxy.send(b'\x05\x01\x00')
-proxy.recv(2)  # Method selection
+# 1. Open the TCP control connection and negotiate "no authentication".
+ctrl = socket.create_connection(PROXY)
+ctrl.sendall(b"\x05\x01\x00")
+assert ctrl.recv(2) == b"\x05\x00"
 
-# UDP ASSOCIATE request
-proxy.send(b'\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00')
-reply = proxy.recv(10)
+# 2. UDP ASSOCIATE. The reply contains the relay address to send datagrams to.
+ctrl.sendall(b"\x05\x03\x00\x01" + b"\x00" * 6)
+reply = ctrl.recv(10)
+assert reply[1] == 0, f"UDP ASSOCIATE failed, reply code {reply[1]}"
+relay = (socket.inet_ntoa(reply[4:8]), struct.unpack(">H", reply[8:10])[0])
 
-# Parse relay address
-relay_ip = socket.inet_ntoa(reply[4:8])
-relay_port = struct.unpack('>H', reply[8:10])[0]
+# 3. Build a DNS query for the A record of NAME.
+qname = b"".join(bytes([len(p)]) + p.encode() for p in NAME.split(".")) + b"\x00"
+query = struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + qname + struct.pack(">HH", 1, 1)
 
-# Create UDP socket
+# 4. Wrap it in a SOCKS5 UDP header (RSV, FRAG=0, ATYP=IPv4, address, port).
+header = b"\x00\x00\x00\x01" + socket.inet_aton(DNS_SERVER) + struct.pack(">H", 53)
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp.settimeout(5)
+udp.sendto(header + query, relay)
 
-# Build SOCKS5 UDP header + DNS query
-# RSV(2) + FRAG(1) + ATYP(1) + ADDR + PORT(2) + DATA
-header = b'\x00\x00\x00\x01'  # RSV, FRAG=0, ATYP=IPv4
-header += socket.inet_aton('8.8.8.8')  # Destination IP
-header += struct.pack('>H', 53)  # Destination port
-header += dns_query  # Your DNS query bytes
+# 5. The reply carries the same 10-byte header before the DNS response.
+data, _ = udp.recvfrom(4096)
+answer = data[10:]
+print(f"{len(answer)}-byte DNS response, answer count {struct.unpack('>H', answer[6:8])[0]}")
 
-# Send through relay
-udp.sendto(header, (relay_ip, relay_port))
-
-# Receive response
-response, _ = udp.recvfrom(4096)
-dns_response = response[10:]  # Skip SOCKS5 header
+# The association lives as long as the TCP control connection.
+ctrl.close()
 ```
 
-## Limitations
+```text
+61-byte DNS response, answer count 2
+```
 
-| Limitation | Value | Description |
-|------------|-------|-------------|
-| Max datagram size | 1472 bytes | MTU minus IP/UDP headers |
-| Fragmentation | Not supported | Fragmented datagrams are rejected |
-| Association lifetime | Tied to TCP | Ends when TCP control connection closes |
+## Limits
 
-### No Fragmentation Support
-
-UDP datagrams with `FRAG > 0` are rejected. Most applications do not use SOCKS5-level fragmentation. If you encounter issues, check if your application is fragmenting at the SOCKS5 layer.
-
-## End-to-End Encryption
-
-UDP traffic is encrypted between ingress and exit:
-
-1. Ingress generates ephemeral X25519 keypair
-2. Exit generates ephemeral X25519 keypair
-3. Both derive shared secret via ECDH
-4. Each datagram encrypted with ChaCha20-Poly1305
-
-Transit nodes cannot decrypt UDP payloads.
+| Limit | Default | Notes |
+| ----- | ------- | ----- |
+| Datagram payload size | 1472 bytes | Set by `udp.max_datagram_size` on the exit. Larger datagrams are dropped. |
+| SOCKS5 fragmentation | Not supported | Datagrams with a non-zero `FRAG` field are dropped. |
+| Concurrent associations per exit | 1000 | `udp.max_associations` |
+| Idle timeout | 5m | `udp.idle_timeout`; any datagram resets it |
+| Association lifetime | TCP control connection | Closing the control connection ends the association |
 
 ## Troubleshooting
 
-### UDP ASSOCIATE Fails
+### UDP ASSOCIATE fails with reply code 1
 
-```
-Error: UDP relay is disabled
-```
+The ingress agent has no route that covers `0.0.0.0`. Run `muti-metroo route trace 0.0.0.0`. Add a default route on an exit (`muti-metroo route add 0.0.0.0/0`) or ask the mesh operator for one.
 
-- Verify exit node has `udp.enabled: true`
-- Check that a route exists to the exit node
-- Ensure exit node is connected to the mesh
+### Datagrams get no reply
 
-### Datagram Too Large
+- Run `muti-metroo route trace <destination-ip>` on the ingress agent and confirm a route exists.
+- Confirm the exit agent has `udp.enabled: true` and has not reached `udp.max_associations`.
+- Keep the payload at or below `udp.max_datagram_size`.
+- Check that the application does not set the SOCKS5 `FRAG` field.
 
-```
-Error: datagram too large
-```
+### Association closes unexpectedly
 
-- Reduce payload size to under 1472 bytes
-- Check `udp.max_datagram_size` configuration
+The association ends when the TCP control connection closes or after `udp.idle_timeout` without traffic. Keep the control connection open for the lifetime of the session.
 
-### Association Timeout
+## See Also
 
-UDP associations expire after `idle_timeout` (default 5 minutes) of inactivity. Send keepalive datagrams if needed.
-
-## Security Considerations
-
-1. **Authentication**: Use SOCKS5 authentication to control access
-2. **Monitor associations**: Check `max_associations` limit
-3. **Timeouts**: Use appropriate `idle_timeout` values
-
-## Related
-
-- [Configuration - UDP](/configuration/udp) - Full configuration reference
-- [Features - SOCKS5 Proxy](/features/socks5-proxy) - SOCKS5 ingress setup
-- [Features - Exit Routing](/features/exit-routing) - Route configuration
-- [Configuration - Exit](/configuration/exit) - Exit node setup
+- [UDP Configuration](/configuration/udp): relay limits and timeouts
+- [SOCKS Proxy](/features/socks5-proxy): the TCP side of the SOCKS listener
+- [Exit Routing](/features/exit-routing): make destinations reachable through an exit
+- [ICMP Relay](/features/icmp-relay): ping through the mesh
+- [Mutiauk](/mutiauk): relay UDP for every program on a host

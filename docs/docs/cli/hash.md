@@ -1,5 +1,8 @@
 ---
-title: hash
+title: muti-metroo hash
+sidebar_label: hash
+sidebar_position: 8
+description: Generate a bcrypt hash of a password or token for the HTTP API and SOCKS5 authentication settings.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,17 +11,9 @@ title: hash
 
 # muti-metroo hash
 
-Turn a password into a secure hash you can safely put in config files. The hash can't be reversed back to the password, but it can verify when someone enters the correct password.
+Generates a bcrypt hash of a password or bearer token so the configuration file stores the hash instead of the secret. No running agent is needed.
 
-**Quick usage:**
-
-```bash
-# Interactive (recommended - hides your typing)
-muti-metroo hash
-
-# The output goes in your config file
-# password_hash: "$2a$10$N9qo8uLOickgx2ZMRZoMye..."
-```
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
 ## Synopsis
 
@@ -28,198 +23,91 @@ muti-metroo hash [password] [flags]
 
 ## Description
 
-The `hash` command generates bcrypt password hashes that can be used in Muti Metroo configuration files for authentication. Bcrypt is a secure, one-way hashing algorithm specifically designed for passwords.
+The hash is accepted by these configuration keys:
 
-The generated hash can be used in:
+| Config key | Purpose |
+| --- | --- |
+| `http.token_hash` | Bearer token for the HTTP API. |
+| `socks5.auth.users[].password_hash` | Password of a SOCKS5 proxy user. |
 
-| Config Field                        | Purpose                              |
-| ----------------------------------- | ------------------------------------ |
-| `http.token_hash`                   | HTTP API bearer token authentication |
-| `socks5.auth.users[].password_hash` | SOCKS5 proxy authentication          |
+Shell, file transfer, sleep and wake, and dynamic configuration changes are not authorized with passwords. They require the Ed25519 signing key; see [muti-metroo signing-key](signing-key.md).
 
-Management commands, file transfer, sleep/wake, and dynamic config mutations are authorized by the mesh management Ed25519 signing keypair, not bcrypt passwords. See [Authentication](/security/authentication).
+Without a `password` argument, the command prompts for the password twice with input hidden, and fails if the two entries differ. The prompt reads from the terminal, so it does not accept a password piped on stdin. With a `password` argument, the command prints a warning to stderr that the value is recorded in shell history.
 
-## Usage
+The hash is printed to stdout on its own line. An empty password is rejected.
 
-### Interactive Mode (Recommended)
+## Flags
 
-For security, use interactive mode which hides your password input:
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--cost` | `12` | bcrypt cost factor, from 4 to 31. |
+
+Each increase of the cost by one doubles the time needed to compute and to verify the hash. The agent verifies the hash on every authenticated request, so very high values slow down the HTTP API and SOCKS5 logins.
+
+## Examples
+
+Interactive prompt:
 
 ```bash
 muti-metroo hash
 ```
 
-You will be prompted to enter and confirm your password:
-
-```
+```text
 Enter password:
 Confirm password:
-$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+$2a$12$JXTEjlb300LqN.vto6gLS.eKGsr7CmDKJoGthCYyn8q5LBjuWsxUO
 ```
 
-### Command Line Argument
-
-You can also provide the password as an argument, but this is less secure as the password may be visible in shell history:
+Password as an argument (the warning goes to stderr):
 
 ```bash
-muti-metroo hash "mysecretpassword"
+muti-metroo hash "correct horse"
 ```
 
-Output:
-
+```text
+WARNING: password supplied on command line; this is recorded in shell history. Re-run without an argument for a hidden prompt.
+$2a$12$JXTEjlb300LqN.vto6gLS.eKGsr7CmDKJoGthCYyn8q5LBjuWsxUO
 ```
-$2a$10$eXaMpLeHaShThAtIsUnIqUeAnDlOnGeNoUgHtObE
-```
 
-## Flags
-
-| Flag         | Default | Description                                           |
-| ------------ | ------- | ----------------------------------------------------- |
-| `--cost`     | 12      | bcrypt cost factor (4-31; default follows OWASP 2024) |
-| `-h, --help` |         | Show help                                             |
-
-## Cost Factor
-
-The cost factor determines how computationally expensive the hash is to generate and verify. Higher cost = more secure but slower.
-
-| Cost | Time (approx) | Recommendation             |
-| ---- | ------------- | -------------------------- |
-| 10   | ~100ms        | Development/testing        |
-| 12   | ~400ms        | Production (recommended)   |
-| 14   | ~1.5s         | High security environments |
-
-Cost 12 is the default, so a plain `muti-metroo hash` already produces a
-production-strength hash. Override only to go higher (or lower for testing):
+Higher cost:
 
 ```bash
 muti-metroo hash --cost 14
 ```
 
-## Examples
+Paste the hash into the configuration:
 
-### Generate Hash for SOCKS5 User
+```yaml
+http:
+  token_hash: "$2a$12$JXTEjlb300LqN.vto6gLS.eKGsr7CmDKJoGthCYyn8q5LBjuWsxUO"
+
+socks5:
+  auth:
+    enabled: true
+    users:
+      - username: "admin"
+        password_hash: "$2a$12$JXTEjlb300LqN.vto6gLS.eKGsr7CmDKJoGthCYyn8q5LBjuWsxUO"
+```
+
+In scripts, pass the secret as an argument from a file or variable and capture stdout. The interactive prompt writes to stdout, so capture only works with the argument form:
 
 ```bash
-# Generate hash
-muti-metroo hash --cost 12
-Enter password:
-Confirm password:
-$2a$12$xYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhI
-
-# Use in config.yaml
-# socks5:
-#   auth:
-#     enabled: true
-#     users:
-#       - username: "admin"
-#         password_hash: "$2a$12$xYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhI"
+export SOCKS5_PASSWORD_HASH="$(muti-metroo hash "$(cat /run/secrets/socks-password)")"
 ```
 
-### Generate Hash for the HTTP API Bearer Token
+The configuration can then reference `${SOCKS5_PASSWORD_HASH}`; see [Environment variables](../configuration/environment-variables.md).
+
+## Other bcrypt tools
+
+Any standard bcrypt hash works, so other tools can produce it, for example:
 
 ```bash
-muti-metroo hash --cost 12
-
-# Use in config.yaml
-# http:
-#   enabled: true
-#   token_hash: "$2a$12$..."
+htpasswd -bnBC 12 "" 'correct horse' | tr -d ':\n'
 ```
 
-### Using Environment Variables
+## See Also
 
-You can store the hash in an environment variable and reference it in config:
-
-```bash
-# Generate and export
-export SOCKS5_PASSWORD_HASH=$(muti-metroo hash "mypassword")
-
-# In config.yaml
-# socks5:
-#   auth:
-#     users:
-#       - username: "admin"
-#         password_hash: "${SOCKS5_PASSWORD_HASH}"
-```
-
-### Scripting
-
-For automation, pass the password as an argument:
-
-```bash
-# From a file (avoids shell history)
-muti-metroo hash "$(cat /path/to/password/file)"
-
-# From an environment variable
-muti-metroo hash "$MY_PASSWORD"
-```
-
-:::note
-Piping via stdin (e.g., `echo "pw" | muti-metroo hash`) does not work -- the interactive prompt requires a terminal. Pass the password as a command-line argument instead.
-:::
-
-## Hash Format
-
-The generated hash follows the bcrypt format:
-
-```
-$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
-|  |  |                                                      |
-|  |  +-- 22-character salt + 31-character hash              |
-|  +-- cost factor (10 = 2^10 iterations)                    |
-+-- bcrypt algorithm identifier                               |
-```
-
-- `$2a$` - bcrypt algorithm version
-- `10$` - cost factor (10 means 2^10 = 1024 iterations)
-- Remaining characters - salt (22 chars) + hash (31 chars)
-
-## Security Considerations
-
-1. **Use interactive mode**: Avoid putting passwords in command line arguments when possible, as they may be logged in shell history.
-
-2. **Use appropriate cost**: Balance security with performance. Cost 12 is recommended for production.
-
-3. **Unique passwords**: Use different passwords for the SOCKS5 user list and the HTTP API bearer token.
-
-4. **Store hashes safely**: Even though hashes are one-way, treat configuration files with hashes as sensitive.
-
-5. **Rotate passwords**: Periodically generate new hashes and update configurations.
-
-## Alternative Methods
-
-If you cannot use the Muti Metroo CLI, you can generate bcrypt hashes using:
-
-### htpasswd (Apache)
-
-```bash
-htpasswd -bnBC 10 "" yourpassword | tr -d ':\n'
-```
-
-### Python
-
-```python
-import bcrypt
-print(bcrypt.hashpw(b"yourpassword", bcrypt.gensalt(10)).decode())
-```
-
-### Node.js
-
-```javascript
-const bcrypt = require("bcrypt");
-console.log(bcrypt.hashSync("yourpassword", 10));
-```
-
-### Go
-
-```go
-import "golang.org/x/crypto/bcrypt"
-hash, _ := bcrypt.GenerateFromPassword([]byte("yourpassword"), 10)
-fmt.Println(string(hash))
-```
-
-## Related
-
-- [Authentication](/security/authentication) - Complete authentication guide
-- [SOCKS5 Configuration](/configuration/socks5) - SOCKS5 proxy settings
-- [HTTP API](/configuration/http) - HTTP API bearer token configuration
+- [HTTP API configuration](../configuration/http.md): enable bearer token authentication with `token_hash`
+- [SOCKS5 configuration](../configuration/socks5.md): configure proxy users with `password_hash`
+- [Authentication](../security/authentication.md): how the different credentials fit together
+- [muti-metroo signing-key](signing-key.md): keys that authorize management operations

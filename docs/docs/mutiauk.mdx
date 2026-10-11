@@ -1,7 +1,7 @@
 ---
 sidebar_position: 8
 title: Mutiauk TUN Interface
-description: TUN interface for transparent traffic routing through Muti Metroo
+description: Install, configure, and operate Mutiauk, the TUN interface that sends IP traffic for selected networks through a Muti Metroo SOCKS5 proxy without per-application proxy settings.
 ---
 
 export const DownloadButton = ({ href, children, primary }) => (
@@ -19,7 +19,7 @@ export const DownloadButtonGroup = ({ children }) => (
   <div className="download-button-group">{children}</div>
 );
 
-# Mutiauk - TUN Interface for Muti Metroo
+# Mutiauk TUN Interface
 
 <div style={{ textAlign: "center", marginBottom: "2rem" }}>
   <img
@@ -29,52 +29,44 @@ export const DownloadButtonGroup = ({ children }) => (
   />
 </div>
 
-**Mutiauk** is a companion tool that provides transparent Layer 3 traffic interception using a TUN interface, forwarding traffic through Muti Metroo's SOCKS5 proxy.
-
-:::info Elevated privileges required
-Mutiauk runs on Linux, macOS, and Windows. Unlike Muti Metroo agents which run unprivileged, Mutiauk requires elevated privileges to create and manage the TUN interface: root (CAP_NET_ADMIN) on Linux and macOS, or Administrator on Windows. On Windows it bundles the signed Wintun driver, so the single `.exe` is self-contained.
-:::
-
-## Overview
-
-While Muti Metroo's SOCKS5 proxy requires applications to be SOCKS-aware, Mutiauk provides transparent proxying by:
-
-1. Creating a TUN network interface
-2. Intercepting L3 (IP) traffic destined for configured routes
-3. Forwarding TCP and UDP connections through Muti Metroo's SOCKS5 proxy
-4. Returning responses back through the TUN interface
-
-This enables any application to use the mesh network without modification.
+Mutiauk creates a TUN network interface, captures IP traffic for the networks you route to it, and forwards each TCP connection, UDP flow, and ICMP echo through the SOCKS5 proxy of a Muti Metroo agent. Applications on the host reach mesh destinations without any SOCKS configuration of their own.
 
 ```mermaid
 flowchart LR
     subgraph Host
-        App[Application] -->|IP Traffic| TUN[TUN Interface]
-        TUN -->|TCP/UDP| ME[Mutiauk]
-        ME -->|SOCKS5| MM[Muti Metroo]
+        App[Application] -->|IP traffic| TUN[TUN interface]
+        TUN -->|TCP/UDP/ICMP| ME[Mutiauk]
+        ME -->|SOCKS5| MM[Muti Metroo agent]
     end
-    MM -->|Mesh| Exit[Exit Agent]
+    MM -->|Mesh| Exit[Exit agent]
     Exit -->|Direct| Dest[Destination]
 ```
 
-## Features
+Mutiauk is a separate binary. A Muti Metroo agent does not need it, and Mutiauk talks to the agent only through the agent's SOCKS5 listener.
 
-| Feature                  | Description                                                                                                 |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| **Transparent Proxying** | No application changes required                                                                             |
-| **TCP Support**          | Full TCP connection forwarding                                                                              |
-| **UDP Support**          | UDP datagram forwarding via SOCKS5 UDP ASSOCIATE                                                            |
-| **ICMP Support**         | Ping forwarding via Muti Metroo ICMP relay (requires an ICMP-capable exit)                                        |
-| **WebSocket Transport**  | Connect via WebSocket when TCP/SOCKS5 is blocked                                                            |
-| **Route-Based**          | Only intercept traffic for configured destinations                                                          |
-| **Autoroutes**           | Automatically fetch routes from Muti Metroo API                                                                   |
-| **Mesh DNS Resolver**    | In-process resolver for mesh hostnames; pluggable host integration (`resolvectl`, NetworkManager `dnsmasq`) |
-| **Expose**               | Publish local folders or TCP targets to the mesh over a single outbound SOCKS5 stream                       |
-| **Route Persistence**    | Save routes to config with `--persist` flag                                                                 |
-| **CLI-Daemon IPC**       | Unix socket API for real-time daemon communication                                                          |
-| **Userspace**            | No kernel modules required (uses TUN)                                                                       |
+| Traffic          | How Mutiauk forwards it                                                            |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| TCP              | One SOCKS5 CONNECT per connection                                                  |
+| UDP              | SOCKS5 UDP ASSOCIATE (see [UDP Relay](/features/udp-relay))                        |
+| ICMP echo (ping) | Muti Metroo SOCKS5 extension; needs an ICMP-capable exit (see [ICMP echo](#icmp-echo)) |
+
+Besides traffic forwarding, Mutiauk can receive routes and mesh hostnames from the agent ([autoroutes](#autoroutes)), answer DNS queries for mesh hostnames ([mesh DNS](#mesh-dns)), and publish local folders or TCP services to the mesh ([expose](#expose-publishing-local-services)).
+
+## Platform support
+
+Mutiauk runs on Linux, macOS, and Windows. Unlike a Muti Metroo agent, it needs elevated privileges to create the TUN interface and change the routing table.
+
+| Platform | TUN device                             | Privilege                     | Service manager           | Default config path                   | Control endpoint       |
+| -------- | -------------------------------------- | ----------------------------- | ------------------------- | ------------------------------------- | ---------------------- |
+| Linux    | `/dev/net/tun`                         | root (`CAP_NET_ADMIN`)        | systemd                   | `/etc/mutiauk/config.yaml`            | `/var/run/mutiauk.sock` |
+| macOS    | `utun` (kernel assigns `utunN`)        | root                          | launchd                   | `/etc/mutiauk/config.yaml`            | `/var/run/mutiauk.sock` |
+| Windows  | Wintun adapter (driver embedded in the `.exe`) | Administrator         | Service Control Manager   | `C:\ProgramData\Mutiauk\config.yaml`  | `\\.\pipe\mutiauk`     |
+
+On macOS, `tun.name` values `tun0` and `utun` let the kernel pick the next free `utunN`; `utunN` requests a specific unit. On Windows, `tun.name` is the name of the Wintun adapter.
 
 ## Download
+
+Release builds are published for Linux:
 
 <DownloadButtonGroup>
   <DownloadButton
@@ -91,543 +83,74 @@ flowchart LR
   </DownloadButton>
 </DownloadButtonGroup>
 
-## Quick Start
+Each release also carries `checksums.txt` with SHA-256 sums of the binaries.
 
 ```bash
-# Download and install
 curl -L -o mutiauk https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64
 chmod +x mutiauk
 sudo mv mutiauk /usr/local/bin/
-
-# Run the interactive setup wizard (recommended)
-sudo mutiauk setup
 ```
 
-The setup wizard will guide you through configuring:
-
-- TUN interface settings (name, MTU, IP address)
-- SOCKS5 proxy connection
-- Routes to forward through the proxy
-- Optional systemd service installation
-
-:::note Root Required
-Mutiauk requires root privileges to create and manage the TUN interface.
-:::
-
-#### Non-interactive setup
-
-`mutiauk setup` is interactive and requires a TTY. For unattended deploys (cloud-init, Ansible, configuration-management tooling) use `mutiauk config generate`, which assembles a config file non-interactively. It accepts `--from <answers.yaml>`, `--output`/`-o`, `--force`, `--json`, and per-field overrides (`--tun-name`, `--tun-address`, `--tun-address6`, `--socks5-server`, `--socks5-username`, `--autoroutes-enabled`). Per-field flags override values from the answers file, which in turn overrides the built-in defaults.
-
-The SOCKS5 password comes from the `MUTI_METROO_SOCKS5_PASSWORD` env var; it is never read from the answers file or the command line.
+The releases do not include macOS or Windows binaries. Build them from source with Go and `make`:
 
 ```bash
-# Render a config with answers and emit a JSON report on stdout.
-sudo MUTI_METROO_SOCKS5_PASSWORD=$(cat /etc/mutiauk/socks-pass) \
-  mutiauk config generate \
-    --from /etc/mutiauk/answers.yaml \
-    --autoroutes-enabled \
-    -o /etc/mutiauk/config.yaml --force --json
+git clone https://github.com/postalsys/Mutiauk.git
+cd Mutiauk
+make build-darwin          # bin/mutiauk-darwin-arm64
+make build-darwin-amd64    # bin/mutiauk-darwin-amd64
+make build-windows         # bin/mutiauk-windows-amd64.exe
+make build-windows-arm64   # bin/mutiauk-windows-arm64.exe
 ```
 
-Install the daemon as a service separately with `mutiauk service install`. Config files written by `config generate` (and by `cfg.Save`) are mode `0600` since they carry `socks5.password`. `mutiauk config check` warns when a hand-rolled file is group- or world-readable.
+## Quick start
 
-### Manual Configuration
+1. Make sure the Muti Metroo agent on this host (or one reachable from it) has its SOCKS5 listener enabled. See [SOCKS5 Configuration](/configuration/socks5).
+2. Run the setup wizard and accept or change the defaults:
 
-If you prefer manual configuration instead of the wizard:
+   ```bash
+   sudo mutiauk setup
+   ```
 
-```bash
-# Create config directory and file
-sudo mkdir -p /etc/mutiauk
-sudo tee /etc/mutiauk/config.yaml > /dev/null << 'EOF'
-tun:
-  name: tun0
-  mtu: 1400
-  address: 10.200.200.1/24
+3. If you did not install the service in the wizard, start the daemon in the foreground:
 
-socks5:
-  server: 127.0.0.1:1080
+   ```bash
+   sudo mutiauk daemon start
+   ```
 
-routes:
-  - destination: 10.0.0.0/8
-    enabled: true
-  - destination: 192.168.0.0/16
-    enabled: true
-EOF
+4. Check that every component is healthy:
 
-# Start the daemon
-sudo mutiauk daemon start
-```
+   ```bash
+   sudo mutiauk status
+   ```
 
-## Configuration
+On Windows, run the same commands from an elevated prompt without `sudo`.
 
-Mutiauk uses a YAML configuration file (default: `/etc/mutiauk/config.yaml`).
+### Setup wizard
 
-### Configuration File Structure
+`mutiauk setup` asks a series of questions and writes a config file. It requires a terminal. Point it at an existing config to edit it: the current values become the defaults, and sections the wizard does not ask about (`expose`, `nat`, `dns_integration`, `logging`, and others) are kept as they are.
 
-```yaml
-daemon:
-  pid_file: /var/run/mutiauk.pid
-  socket_path: /var/run/mutiauk.sock
-  status_probe_target: example.com:80 # host:port the `status` TCP probe dials (set to an in-mesh address for air-gapped deployments)
+The wizard covers, in order:
 
-tun:
-  name: tun0
-  mtu: 1400
-  address: 10.200.200.1/24
-  address6: fd00:200::1/64 # Optional IPv6
+1. **Configuration file**: the path to write (default per [platform](#platform-support)). It offers to create the directory and asks before overwriting an existing file.
+2. **TUN interface**: name (`tun0`), MTU (`1400`), IPv4 address (`10.200.200.1/24`), optional IPv6 address.
+3. **SOCKS5 proxy**: server address (`127.0.0.1:1080`) and optional username and password.
+4. **Automatic routes**: whether to enable [autoroutes](#autoroutes) (default yes).
+5. **Routes**: asked only when autoroutes is off. Offers `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, then custom routes with comments.
+6. **Service installation**: installs and starts the system service when run as root or Administrator; otherwise prints the `service install` command to run later.
+7. **Connectivity check**: optionally runs the same checks as `mutiauk status`. Failures are reported but do not undo the setup.
 
-socks5:
-  server: 127.0.0.1:1080 # TCP address, or wss:// URL for WebSocket
-  username: "" # Optional auth
-  password: ""
-  timeout: 30s
-  keepalive: 60s
-  transport: tcp # "tcp" (default) or "websocket"
-  ws_path: /socks5 # WebSocket path (only for WebSocket transport)
+Example session (non-root, defaults accepted):
 
-routes:
-  - destination: 10.0.0.0/8
-    comment: "Internal network"
-    enabled: true # defaults to true when omitted; legacy configs see a per-route WARN at startup
-  - destination: 192.168.0.0/16
-    comment: "Private network"
-    enabled: true
-
-admin:
-  # Local admin HTTP interface (browser dashboard + JSON API).
-  # Enabled by default; loopback-only and unauthenticated.
-  enabled: true
-  listen: 127.0.0.1:48088 # must be a loopback address
-
-nat:
-  table_size: 65536
-  tcp_timeout: 1h
-  udp_timeout: 5m
-  gc_interval: 1m
-
-logging:
-  level: info # debug, info, warn, error
-  format: json # json or console
-  output: stdout # stdout, stderr, or file path
-  max_size: 100 # Max file size in MB (for file output)
-  max_backups: 3 # Max backup files (for file output)
-  max_age: 30 # Max age in days (for file output)
-```
-
-### Automatic Routes (Autoroutes)
-
-Mutiauk can automatically fetch CIDR routes from Muti Metroo's API and apply them to the local routing table. This enables dynamic route discovery without manual configuration.
-
-:::note CIDR Routes Only
-Autoroutes only fetches **CIDR routes** (IP-based), not domain routes. Domain-based routing requires the destination hostname, which is only available to SOCKS5 clients. Mutiauk operates at Layer 3 (IP) and only sees IP addresses after DNS resolution has already occurred on the host.
-:::
-
-```yaml
-autoroutes:
-  # Receive routes/hosts/DNS suffixes over the SOCKS5 endpoint (socks5.server).
-  # No separate URL or token; the only knob is enabled.
-  enabled: true
-```
-
-Route and mesh-host state arrives over the same SOCKS5 endpoint Mutiauk already uses for traffic (`socks5.server`), so a typical deploy needs only that one endpoint -- the agent pushes a fresh snapshot whenever routes, mesh hosts, or suffixes change. Because this data rides the SOCKS5 connection, it inherits the SOCKS5 authentication (none or username/password); there is no separate URL or bearer token. If the agent does not support route-watch, autoroutes simply does not start.
-
-When enabled, Mutiauk:
-
-1. Receives the route-watch snapshot from the Muti Metroo agent (pushed over SOCKS5)
-2. Extracts CIDR routes advertised by all connected agents
-3. Filters out unsafe routes (default routes, loopback, link-local, multicast)
-4. Applies valid routes to the TUN interface
-
-**Filtered Routes (not added automatically):**
-
-| Route                         | Reason                                     |
-| ----------------------------- | ------------------------------------------ |
-| `0.0.0.0/0`, `::/0`           | Default routes - would capture all traffic |
-| `127.0.0.0/8`, `::1/128`      | Loopback - localhost traffic               |
-| `169.254.0.0/16`, `fe80::/10` | Link-local - breaks DHCP/ARP               |
-| `224.0.0.0/4`, `ff00::/8`     | Multicast - not SOCKS-routable             |
-| Domain routes                 | Domain-based routing handled by Muti Metroo      |
-
-:::tip Ephemeral Routes
-Autoroutes are ephemeral - they are not saved to the config file and are re-fetched when Mutiauk restarts. Static routes in the `routes` section always take precedence over autoroutes.
-:::
-
-### DNS Resolver
-
-When `autoroutes.enabled` is true, Mutiauk also runs an in-process DNS resolver bound to the TUN IPv4 address on port 53. The resolver answers A/AAAA queries for mesh hostnames using the registry received from the Muti Metroo agent on each route-watch update; the active suffix list (`mesh_hosts_suffixes`) is also received from the agent so the operator does not configure suffixes locally. Names outside the active suffixes return NXDOMAIN. Cleanup runs on graceful shutdown and can be re-run after a crash with `sudo mutiauk cleanup`.
-
-There is no separate `dns:` block -- the resolver lifecycle is tied to `autoroutes.enabled`. The only DNS-related knob is how the host resolver is wired to forward mesh-suffix queries to the in-process resolver:
-
-```yaml
-# Top-level option (default: auto)
-dns_integration: auto # auto | resolvectl | nm-dnsmasq | none
-```
-
-| Value            | Behavior                                                                                                                                                                                                                                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto` (default) | Select a platform-appropriate backend automatically. On Linux: prefer `resolvectl` (systemd-resolved), fall back to NetworkManager's `dnsmasq` plugin. On macOS: `/etc/resolver` entries. On Windows: the Name Resolution Policy Table (NRPT). If none is available, log a warning and skip host-side wiring. |
-| `resolvectl`     | Require systemd-resolved. Per-link DNS config; suffix changes propagate live.                                                                                                                                                                                                                                 |
-| `nm-dnsmasq`     | Require NetworkManager with `dns=dnsmasq`. Mutiauk writes `/etc/NetworkManager/dnsmasq.d/mutiauk.conf` and reloads NM whenever the TLD set changes.                                                                                                                                                   |
-| `none`           | Run the resolver but leave host DNS alone; useful when wiring DNS yourself. The resolver is still reachable directly at the TUN address.                                                                                                                                                                      |
-
-Use `sudo mutiauk dns status` (or `--json`) to inspect the active backend, the current TLD set, host-side resolver state, and live probes. The `OK` markers on `NXDOMAIN` probes are correct -- the probes use a sentinel name that is deliberately unregistered, so `NXDOMAIN` proves the resolver is reachable; `SERVFAIL` or timeout would indicate broken wiring.
-
-### Mesh Hostnames
-
-The Muti Metroo agent can publish a registry of symbolic names that resolve to in-mesh IPs (for example `target-11.mesh -> 10.8.0.11`). The same route-watch snapshot that powers autoroutes also carries this map under `mesh_hosts` and the active suffixes under `mesh_hosts_suffixes`. Mutiauk's local DNS resolver picks the entries up automatically and serves them when the operator queries `<name>.<suffix>`; the host integration (above) forwards only matching queries, so the operator's normal upstream DNS stays untouched.
-
-The agent itself also consults the registry for SOCKS5 dial (TCP and UDP ASSOCIATE) and `POST /route/trace`, so registered names work even when no Mutiauk is running on the agent's host -- a SOCKS5 client can dial `gateway.mesh:443` directly through the agent without any local DNS forwarding.
-
-No extra Mutiauk configuration is required beyond `autoroutes.enabled: true` (and a reachable `socks5.server`).
-
-**Prerequisite:** the IP that a name resolves to must already be reachable through Mutiauk. That means a static route in the `routes` block or an autoroute fetched from the agent for the underlying CIDR. Mesh hostnames do not by themselves install any routing -- they only translate names to IPs.
-
-:::note Bare single-label TLDs
-`systemd-resolved` does not forward bare single-label queries (e.g. `dig mesh` for a bare host registered as `mesh`) by default. The resolver itself answers them correctly when queried directly at the TUN address. To forward them through the stub, set `ResolveUnicastSingleLabel=yes` in `/etc/systemd/resolved.conf` and restart resolved.
-:::
-
-#### Registering hostnames on the agent
-
-Hostnames live on the Muti Metroo agent and are managed via the `muti-metroo host` CLI or the `POST /hosts/manage` HTTP endpoint. Static seed entries can also be put in the agent's `mesh_hosts:` config block.
-
-CLI:
-
-```bash
-# Add IPv4 entry with an optional comment
-muti-metroo host add target-11.mesh --ipv4 10.8.0.11 --comment "edge worker"
-
-# Dual-stack entry
-muti-metroo host add gateway.mesh --ipv4 10.0.0.1 --ipv6 fd00::1
-
-# List
-muti-metroo host list
-muti-metroo host list --json
-
-# Remove a runtime entry
-muti-metroo host remove target-11.mesh
-```
-
-HTTP (replace `$MUTI_METROO_TOKEN` with the bearer token if the agent has `http.token_hash` set):
-
-```bash
-curl -X POST -H "Authorization: Bearer $MUTI_METROO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"add","name":"target-11.mesh","ipv4":"10.8.0.11"}' \
-  http://localhost:8080/hosts/manage
-
-curl -X POST -H "Authorization: Bearer $MUTI_METROO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"list"}' \
-  http://localhost:8080/hosts/manage
-
-curl -X POST -H "Authorization: Bearer $MUTI_METROO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"remove","name":"target-11.mesh"}' \
-  http://localhost:8080/hosts/manage
-```
-
-Every response returns the merged `{"hosts": [...]}` list (config + dynamic), so the just-added entry is visible without a follow-up call.
-
-Static seed via the agent's `config.yaml`:
-
-```yaml
-mesh_hosts_suffixes: ["mesh"] # optional, defaults to ["mesh"]
-mesh_hosts:
-  - name: gateway.mesh
-    ipv4: 10.0.1.5
-    comment: "edge gateway"
-```
-
-Config-seeded entries cannot be removed via `/hosts/manage` (the API returns 403); edit the config and restart instead. Runtime entries are persisted to the agent's dynamic-config journal so they survive restarts.
-
-### Expose: Publishing Local Services
-
-The `expose` block lets the operator publish local services to the mesh without standing up a full Muti Metroo agent. Mutiauk opens a single outbound expose stream to the upstream agent over the same SOCKS5 endpoint it uses for traffic (`socks5.server`, via the SOCKS5 `CmdExpose` extension) and registers each forward by routing key. When the agent receives a forward stream for that key, it pipes the connection back over that stream and Mutiauk handles it locally.
-
-Two forward types are supported:
-
-- **`folder`** -- strict static file server. Returns an empty 404 (Apache-style body, no `Server` header) for any path that does not exactly resolve to a regular file under `path`. No directory listings, no `index.html` fallback, no welcome page.
-- **`tcp`** -- dial `target` and pipe bytes bidirectionally.
-
-```yaml
-expose:
-  enabled: true
-  max_streams_per_key: 256 # default 256; caps concurrent inbound streams per routing key
-  max_buffered_bytes: 16777216 # default 16 MiB; per-stream receive buffer cap (overflow closes the stream)
-  reconnect_min: 1s # default 1s; initial backoff when the expose stream drops
-  reconnect_max: 30s # default 30s; maximum reconnect backoff
-  keepalive_period: 25s # default 25s; expose-stream keepalive interval
-  forwards:
-    - key: op-docs
-      type: folder
-      path: /srv/docs
-      comment: "operator runbook"
-    - key: op-ssh
-      type: tcp
-      target: 127.0.0.1:22
-```
-
-The DoS caps are intentional: the wire protocol has no flow control, so a misbehaving (or malicious) peer that opens many streams or never reads back-pressure could otherwise exhaust file descriptors and memory on Mutiauk's host. The 256-streams / 16 MiB defaults suit a workstation; raise them only when you know the upstream agent is trusted and the host has the headroom.
-
-Forwards declared in YAML are loaded at startup and reload on `SIGHUP`. `mutiauk expose add|remove` mutates them at runtime (lost when the daemon restarts; runtime entries cannot collide with config-defined keys). Multiple concurrent inbound connections per key are multiplexed over the same expose connection.
-
-**Requirements:**
-
-- `socks5.server` must be set -- the expose session runs over the SOCKS5 endpoint and authenticates with the SOCKS5 credentials (none, or `socks5.username`/`socks5.password`). Expose does **not** depend on `autoroutes` or any HTTP bearer token.
-- Folder paths must be absolute and exist at startup.
-- Routing keys must match `[a-zA-Z0-9._-]+`.
-
-**Runtime control via the daemon's Unix socket:**
-
-```bash
-mutiauk expose status
-mutiauk expose list [--json]                # forwards only, no connection summary
-mutiauk expose add folder shared-docs /srv/share --comment "team share"
-mutiauk expose add tcp local-ssh 127.0.0.1:22
-mutiauk expose remove shared-docs
-```
-
-Registrations advertise on the mesh as forward routes labelled `expose:<key>`; other agents see them alongside ordinary forward endpoints. They are bound to the upstream connection and disappear when it drops. See [Port Forwarding](/features/port-forwarding) for the conceptual overview.
-
-### Admin HTTP Interface
-
-The daemon serves a local admin interface: a single-page browser dashboard plus JSON endpoints for inspecting the running setup and managing local exposing. It is **enabled by default** and bound to **loopback only** (`127.0.0.1` and, best-effort, `::1`), so it is never reachable from the network. There is no authentication: the loopback binding is the trust boundary.
-
-```yaml
-admin:
-  enabled: true # default; set false to disable
-  listen: 127.0.0.1:48088 # must be a loopback address (rejected otherwise)
-```
-
-Open `http://127.0.0.1:48088/` in a browser on the host. The dashboard shows:
-
-- **Daemon** - run state, PID, uptime, TUN interface, config path, and route counts by source.
-- **Muti Metroo agent connection** - SOCKS5 endpoint and status, the autoroutes route-watch state, and the expose control-stream connection.
-- **Applied routes** - every active route with its source (`config`, `auto`, or `manual`).
-- **Exposing** - the live folder and TCP forwards with per-key registration and active-stream counts, an "Add forward" form, and a remove button per forward.
-
-The same data and mutations are available as JSON for scripting:
-
-```bash
-curl http://127.0.0.1:48088/api/status
-curl http://127.0.0.1:48088/api/agent
-curl http://127.0.0.1:48088/api/routes
-curl http://127.0.0.1:48088/api/hosts          # mesh-host registry
-curl http://127.0.0.1:48088/api/route-events    # recent route-change events
-curl http://127.0.0.1:48088/api/expose
-# add a folder forward
-curl -X POST http://127.0.0.1:48088/api/expose \
-  -H 'Content-Type: application/json' \
-  -d '{"key":"shared-docs","type":"folder","path":"/srv/share","comment":"team share"}'
-# stop exposing
-curl -X DELETE http://127.0.0.1:48088/api/expose/shared-docs
-```
-
-The interface shares state with the daemon's control plane, so forwards added or removed here behave identically to `mutiauk expose add|remove` (runtime-only; lost on restart). Changing `listen` requires a daemon restart; all displayed data is read live, so config reloads are reflected automatically.
-
-### Route Persistence
-
-By default, routes added via CLI are runtime-only and will be lost when the daemon restarts. Use the `--persist` flag to save routes to the configuration file:
-
-```bash
-# Add route and save to config file
-mutiauk route add 10.50.0.0/16 --persist
-# Output:
-# Added route: 10.50.0.0/16
-# Saved to config: /etc/mutiauk/config.yaml
-
-# Remove route and update config file
-mutiauk route remove 10.50.0.0/16 --persist
-```
-
-:::note CLI-Daemon Communication
-When the daemon is running, CLI commands communicate via a Unix socket (configured in `daemon.socket_path`). This enables the CLI to query daemon state, verify configuration, and make changes that take effect immediately. If the daemon is not running, CLI commands fall back to direct kernel manipulation for route changes.
-:::
-
-### CLI Commands
-
-```bash
-# Daemon management
-mutiauk daemon start                        # Start the daemon (foreground; use service install to background)
-mutiauk daemon stop                         # Stop the daemon (default --wait, --timeout 30s)
-mutiauk daemon stop --wait=false            # Fire-and-forget SIGTERM; returns immediately
-mutiauk daemon stop --timeout 5s --force    # Escalate to SIGKILL after 5s if not exited
-mutiauk daemon reload                       # Reload configuration (SIGHUP)
-mutiauk daemon status                       # Lightweight pid/uptime/config_path; suitable for k8s readiness
-
-# Route management
-mutiauk route list                          # List active routes (shows SOURCE: config/auto/manual)
-mutiauk route add <cidr>                    # Add a route (runtime only)
-mutiauk route add <cidr> --persist          # Add route and save to config
-mutiauk route remove <cidr>                 # Remove a route
-mutiauk route remove <cidr> --persist       # Remove route and update config
-mutiauk route plan                          # Show pending route changes
-mutiauk route apply                         # Apply routes from config file
-mutiauk route check                         # Check for route conflicts
-mutiauk route trace <ip|domain>             # Analyze routing for a destination
-
-# Mesh-host inspector (read-only; reads daemon's local DNS cache)
-mutiauk host list                           # Tabular: NAME, IPV4, IPV6, COMMENT
-mutiauk host list --json                    # JSON output
-
-# DNS resolver inspection (backend, active TLDs, host-side state, probes)
-sudo mutiauk dns status
-sudo mutiauk dns status --json
-
-# Expose: publish local services to the mesh (over the SOCKS5 endpoint; set expose.enabled)
-mutiauk expose status
-mutiauk expose list [--json]                # forwards only, no connection summary
-mutiauk expose add folder shared-docs /srv/share --comment "team share"
-mutiauk expose add tcp local-ssh 127.0.0.1:22
-mutiauk expose remove shared-docs
-
-# System status (queries running daemon via Unix socket)
-mutiauk status                              # Per-component table + connectivity tests
-mutiauk status --json                       # JSON output (for fleet tooling)
-mutiauk status --skip-tests                 # Skip connectivity tests (faster)
-mutiauk status --exit-code                  # Non-zero if any component is unhealthy
-mutiauk status -q | --quiet                 # Suppress output (implies --exit-code)
-mutiauk status --check socks5 --check tcp   # Repeatable; scopes --exit-code to specific
-                                                # components: tun, socks5, tcp, udp, expose, daemon
-
-# Config inspection / generation
-mutiauk config check                        # Validate config; warns if mode is not 0600 (--strict, --json)
-mutiauk config generate --from answers.yaml -o /etc/mutiauk/config.yaml
-                                                # Assemble a config non-interactively (per-field flags, --force, --json)
-
-# Cleanup after an unclean shutdown
-sudo mutiauk cleanup                        # Remove stale TUN, PID file, socket; revert host DNS
-sudo mutiauk cleanup --dry-run              # Print what would change, touch nothing
-sudo mutiauk cleanup --purge                # Also remove the persisted route state file
-
-# Setup wizard
-sudo mutiauk setup                          # Interactive (TTY) wizard
-sudo mutiauk setup --from answers.yaml --json --install-service   # Non-interactive
-
-# Service management (Linux systemd)
-sudo mutiauk service install -c /etc/mutiauk/config.yaml
-sudo mutiauk service uninstall
-mutiauk service status                      # Tabular
-mutiauk service status --json               # {installed, active, enabled, sub_state} for fleet tooling
-
-# Other
-mutiauk version                             # Show version information
-```
-
-### Route Tracing
-
-The `mutiauk route trace` command analyzes routing for a destination IP or domain, showing which interface handles the traffic and the mesh path if routed through Mutiauk.
-
-```bash
-# Trace route for an IP address
-$ mutiauk route trace 10.10.5.100
-Destination:  10.10.5.100
-Match:        10.10.0.0/16
-Interface:    tun0 (Mutiauk)
-Mesh Path:    Agent-A (Host) -> Agent-B (Docker) -> Agent-C (Ubuntu)
-Origin:       Agent-C (Ubuntu) [76e822ad]
-Hop Count:    2
-
-# Trace route for a domain name
-$ mutiauk route trace internal.corp.local
-Destination:  internal.corp.local
-Resolved:     192.168.50.10
-Match:        192.168.0.0/16
-Interface:    tun0 (Mutiauk)
-Mesh Path:    Agent-A -> Agent-D
-Origin:       Agent-D [3a26f525]
-Hop Count:    1
-
-# Non-Mutiauk route
-$ mutiauk route trace 8.8.8.8
-Destination:  8.8.8.8
-Match:        0.0.0.0/0 via 192.168.1.1
-Interface:    eth0
-Note:         Not routed through Mutiauk
-
-# JSON output for scripting
-$ mutiauk route trace 10.10.5.100 --json
-{
-  "destination": "10.10.5.100",
-  "resolved_ip": "10.10.5.100",
-  "matched_route": "10.10.0.0/16",
-  "interface": "tun0",
-  "is_mutiauk": true,
-  "mesh_path": ["Agent-A (Host)", "Agent-B (Docker)", "Agent-C (Ubuntu)"],
-  "origin": "Agent-C (Ubuntu)",
-  "origin_id": "76e822ad",
-  "hop_count": 2
-}
-```
-
-This command is useful for debugging routing issues and understanding how traffic flows through the mesh network.
-
-#### Resolution Sources
-
-When the trace argument is a hostname, the `Resolved:` line is suffixed with the source the daemon used:
-
-- **`(via mesh DNS)`** - resolved from the daemon's mesh-host registry (the same map that populates the in-process resolver). Implies the name ends with one of the active mesh suffixes (the `mesh_hosts_suffixes` set fetched from the agent).
-- **`(via system DNS)`** - resolved through the host's normal resolver. Used for any name outside the mesh suffix.
-- **`(literal IP)`** - the argument was already an IPv4 or IPv6 address; no DNS lookup happened.
-
-The JSON output reports the same information in the `resolution` field (`"mesh"`, `"system"`, or `"ip"`).
-
-#### Mesh Path Status
-
-When the resolved IP would otherwise route through Mutiauk, the trace also reports a `mesh_path_status`:
-
-| Status        | Meaning                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------- |
-| `ok`          | Path found through the mesh; `mesh_path` and `origin` are populated.                            |
-| `unreachable` | The SOCKS5 snapshot fetch failed; the IP may still be in the mesh but the trace cannot confirm. |
-| `not_in_mesh` | No advertised route covers this IP; traffic would fall back to the kernel-selected interface.   |
-
-Use these statuses in scripts to distinguish "bypass intended" from "mesh outage" from "configuration gap".
-
-## Setup Wizard
-
-The setup wizard (`mutiauk setup`) provides an interactive guided configuration experience. It walks you through each configuration step with sensible defaults and input validation.
-
-### Wizard Steps
-
-1. **Configuration File Location**
-   - Default: `/etc/mutiauk/config.yaml`
-   - Creates parent directories if needed
-   - Warns before overwriting existing files
-
-2. **TUN Interface Configuration**
-   - Interface name (default: `tun0`)
-   - MTU size (default: `1400`)
-   - IPv4 address in CIDR notation (default: `10.200.200.1/24`)
-   - Optional IPv6 address
-
-3. **SOCKS5 Proxy Configuration**
-   - Server address and port (e.g., `127.0.0.1:1080`)
-   - Optional username/password authentication
-
-4. **Route Configuration**
-   - Option to add common private network routes (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-   - Add custom routes with optional comments
-
-5. **Service Installation** (Linux only)
-   - Optionally install as a systemd service
-   - Automatically starts and enables the service
-
-6. **Post-Setup Connectivity Check**
-   - Wizard prompts `Run a connectivity check now? [Y/n]`
-   - Runs the same probes as `mutiauk status` (daemon, TUN, SOCKS5 reachability) against the freshly written config and prints the result
-   - Failures are informational only - they do not roll back the setup or fail the wizard exit code
-
-### Example Session
-
-```
+```text
 ======================================================================
-                       Mutiauk Setup Wizard
+                         Mutiauk Setup Wizard
 ======================================================================
-                   TUN-based SOCKS5 Proxy Agent
+                     TUN-based SOCKS5 Proxy Agent
 
 This wizard will help you configure Mutiauk.
 Press Enter to accept default values shown in [brackets].
+Tip: point it at an existing config to edit it; current values become the defaults.
+
 
 ----------------------------------------------------------------------
 Configuration File
@@ -635,7 +158,6 @@ Configuration File
 Where should the configuration file be saved?
 
 Config file path [/etc/mutiauk/config.yaml]:
-[OK] Created directory /etc/mutiauk
 
 ----------------------------------------------------------------------
 TUN Interface
@@ -656,12 +178,16 @@ SOCKS5 server address [127.0.0.1:1080]:
 Does the SOCKS5 server require authentication? [y/N]:
 
 ----------------------------------------------------------------------
-Routes
+Automatic Routes
 ----------------------------------------------------------------------
-Configure which traffic to route through the SOCKS5 proxy.
+Receive routes from the Muti Metroo agent over SOCKS5.
 
-Use common private network routes? [Y/n]:
-[OK] Added standard private network routes
+Autoroutes receives and maintains routes, mesh hosts, and DNS suffixes
+from the Muti Metroo agent over the same SOCKS5 endpoint used for traffic.
+This eliminates the need to manually manage routes.
+
+Enable automatic routes from the Muti Metroo agent? [Y/n]:
+[OK] Configuration saved to /etc/mutiauk/config.yaml
 
 ----------------------------------------------------------------------
 Configuration Summary
@@ -671,35 +197,64 @@ Configuration Summary
   TUN address:     10.200.200.1/24
   MTU:             1400
   SOCKS5 server:   127.0.0.1:1080
-  Routes:          3 configured
-                   - 10.0.0.0/8 (Private class A)
-                   - 172.16.0.0/12 (Private class B)
-                   - 192.168.0.0/16 (Private class C)
+  Autoroutes:      enabled (routes received over the SOCKS5 endpoint)
+  Mesh DNS:        follows autoroutes; suffixes come from the agent.
+                   systemd-resolved is configured automatically on each poll.
+
+To start Mutiauk manually:
+  sudo mutiauk daemon start -c /etc/mutiauk/config.yaml
+
 
 ----------------------------------------------------------------------
 Service Installation
 ----------------------------------------------------------------------
-Install Mutiauk as a systemd service? [Y/n]:
-[OK] Service installed and started!
+Install Mutiauk as a system service.
+
+[WARNING] Not running as root. Service installation requires root privileges.
+
+To install as a service later, run:
+  sudo mutiauk service install -c /etc/mutiauk/config.yaml
+
+Setup complete! Configuration saved to: /etc/mutiauk/config.yaml
+
+Run a connectivity check now? [Y/n]:
 ```
 
-### Global CLI Options
+### Non-interactive setup
 
-| Option          | Default                        | Description                |
-| --------------- | ------------------------------ | -------------------------- |
-| `-c, --config`  | `/etc/mutiauk/config.yaml` | Path to configuration file |
-| `-v, --verbose` | `false`                        | Enable verbose logging     |
+For cloud-init, Ansible, and similar tooling, `mutiauk config generate` assembles a config without prompts. Values are layered in increasing precedence: built-in defaults, the `--from` answers file (a partial or complete config; unknown keys are rejected), then per-field flags. The result is validated and written with mode `0600`. See [`config generate`](#config-generate) for the flags.
 
-## Use Cases
+Supply the SOCKS5 password through the `MUTIAUK_SOCKS5_PASSWORD` environment variable rather than the answers file or the command line:
 
-### Transparent Corporate Access
-
-Route traffic to corporate networks without configuring each application:
-
-```yaml
-# /etc/mutiauk/config.yaml
+```bash
+cat > /tmp/answers.yaml <<'EOF'
 tun:
   name: tun0
+  address: 10.200.200.1/24
+socks5:
+  server: 127.0.0.1:1080
+  username: ops
+EOF
+
+sudo MUTIAUK_SOCKS5_PASSWORD="$(cat /etc/mutiauk/socks-pass)" \
+  mutiauk config generate \
+    --from /tmp/answers.yaml \
+    --autoroutes-enabled \
+    -o /etc/mutiauk/config.yaml --force --json
+
+sudo mutiauk service install -c /etc/mutiauk/config.yaml
+```
+
+### Manual configuration
+
+You can also write the config file yourself:
+
+```bash
+sudo mkdir -p /etc/mutiauk
+sudo tee /etc/mutiauk/config.yaml > /dev/null <<'EOF'
+tun:
+  name: tun0
+  mtu: 1400
   address: 10.200.200.1/24
 
 socks5:
@@ -707,87 +262,564 @@ socks5:
 
 routes:
   - destination: 10.0.0.0/8
-    comment: "Corporate network"
-    enabled: true
-```
+  - destination: 192.168.0.0/16
+EOF
+sudo chmod 600 /etc/mutiauk/config.yaml
 
-```bash
+sudo mutiauk config check
 sudo mutiauk daemon start
 ```
 
-### Development Environment
+## Configuration
 
-Test applications against remote environments transparently:
+Mutiauk reads a single YAML file, set with `-c`/`--config` (default per [platform](#platform-support)). Every key is optional except where noted; omitted keys take the defaults below. `mutiauk daemon reload` (or `SIGHUP` on Linux and macOS) re-reads the file without restarting the daemon.
 
 ```yaml
-# /etc/mutiauk/config.yaml
+daemon:
+  pid_file: /var/run/mutiauk.pid
+  socket_path: /var/run/mutiauk.sock
+  status_probe_target: example.com:80   # host:port that `mutiauk status` dials through SOCKS5
+
+tun:
+  name: tun0
+  mtu: 1400
+  address: 10.200.200.1/24
+  address6: fd00:200::1/64              # optional IPv6 address
+
+socks5:
+  server: 127.0.0.1:1080                # host:port, or a ws:// or wss:// URL
+  username: ""
+  password: ""                          # MUTIAUK_SOCKS5_PASSWORD overrides this
+  timeout: 30s
+  keepalive: 60s
+  transport: tcp                        # tcp or websocket
+  ws_path: /socks5                      # used when transport is websocket and server is host:port
+
 routes:
-  - destination: 192.168.100.0/24
-    comment: "Staging environment"
+  - destination: 10.0.0.0/8
+    comment: "Internal network"
     enabled: true
+
+autoroutes:
+  enabled: false
+
+dns_integration: auto                   # auto, resolvectl, nm-dnsmasq, etc-resolver, nrpt, none
+
+expose:
+  enabled: false
+  max_streams_per_key: 256
+  max_buffered_bytes: 16777216
+  reconnect_min: 1s
+  reconnect_max: 30s
+  keepalive_period: 25s
+  forwards: []
+
+admin:
+  enabled: true
+  listen: 127.0.0.1:48088
+
+icmp:
+  unreachable_replies: true
+
+nat:
+  table_size: 65536
+  tcp_timeout: 1h
+  udp_timeout: 5m
+  gc_interval: 1m
 ```
 
-### Container/VM Traffic
+### `daemon` \{#config-daemon\}
 
-Route traffic from containers or VMs through the mesh by configuring their default gateway to the TUN interface.
+| Key                   | Type   | Default                                        | Description                                                                                                       |
+| --------------------- | ------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `pid_file`            | string | `/var/run/mutiauk.pid` (Windows: `C:\ProgramData\Mutiauk\mutiauk.pid`) | PID file of the running daemon                                                          |
+| `socket_path`         | string | `/var/run/mutiauk.sock` (Windows: `\\.\pipe\mutiauk`) | Control endpoint the CLI uses to talk to the daemon                                                       |
+| `status_probe_target` | string | `example.com:80`                               | `host:port` that `mutiauk status` connects to through SOCKS5 to test TCP routing. Set it to an in-mesh address in networks without internet access. |
 
-### WebSocket Transport (Firewall Bypass)
+### `tun` \{#config-tun\}
 
-When raw TCP/SOCKS5 traffic is blocked but HTTPS is permitted, use WebSocket transport to tunnel through:
+| Key        | Type   | Default           | Description                                                     |
+| ---------- | ------ | ----------------- | --------------------------------------------------------------- |
+| `name`     | string | `tun0`            | Interface name (see [platform notes](#platform-support))        |
+| `mtu`      | int    | `1400`            | Interface MTU, 576 to 65535                                     |
+| `address`  | string | `10.200.200.1/24` | IPv4 address in CIDR notation. The mesh DNS resolver listens here. |
+| `address6` | string | empty             | Optional IPv6 address in CIDR notation                          |
+
+### `socks5` \{#config-socks5\}
+
+| Key         | Type     | Default          | Description                                                                                         |
+| ----------- | -------- | ---------------- | --------------------------------------------------------------------------------------------------- |
+| `server`    | string   | `127.0.0.1:1080` | SOCKS5 endpoint as `host:port`, or a `ws://` / `wss://` URL for [WebSocket transport](#websocket-transport) |
+| `username`  | string   | empty            | Username for SOCKS5 username/password authentication                                                |
+| `password`  | string   | empty            | Password. The `MUTIAUK_SOCKS5_PASSWORD` environment variable overrides it.                          |
+| `timeout`   | duration | `30s`            | Connection timeout                                                                                  |
+| `keepalive` | duration | `60s`            | TCP keepalive period for connections to the SOCKS5 server                                           |
+| `transport` | string   | `tcp`            | `tcp` or `websocket`. A `ws://` or `wss://` URL in `server` selects WebSocket regardless.           |
+| `ws_path`   | string   | `/socks5`        | WebSocket path, used when `server` is `host:port` and `transport` is `websocket`. Must start with `/`. |
+
+### `routes` \{#config-routes\}
+
+Static routes sent through the TUN interface.
+
+| Key           | Type   | Default  | Description                                   |
+| ------------- | ------ | -------- | --------------------------------------------- |
+| `destination` | string | required | IPv4 or IPv6 CIDR                             |
+| `comment`     | string | empty    | Free-text label shown in `route list`         |
+| `enabled`     | bool   | `true`   | Set `false` to keep the entry without applying it |
+
+When `enabled` is omitted the route is enabled, and the daemon logs a one-time warning per such route so older configs can be audited. `mutiauk config check` reports the same.
+
+### `autoroutes` \{#config-autoroutes\}
+
+| Key       | Type | Default | Description                                                                                  |
+| --------- | ---- | ------- | -------------------------------------------------------------------------------------------- |
+| `enabled` | bool | `false` | Receive routes, mesh hostnames, and DNS suffixes from the agent, and run the [mesh DNS](#mesh-dns) resolver |
+
+The setup wizard and `config generate --autoroutes-enabled` turn it on. See [Autoroutes](#autoroutes).
+
+### `dns_integration` \{#config-dns-integration\}
+
+A top-level string that selects how the host resolver forwards mesh-suffix queries to the mesh DNS resolver. Default `auto`. See [Host DNS integration](#host-dns-integration).
+
+### `expose` \{#config-expose\}
+
+| Key                   | Type     | Default    | Description                                                                                   |
+| --------------------- | -------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `enabled`             | bool     | `false`    | Open the expose session to the agent                                                          |
+| `max_streams_per_key` | int      | `256`      | Concurrent inbound streams accepted per routing key; further opens are refused               |
+| `max_buffered_bytes`  | int      | `16777216` | Per-stream receive buffer cap in bytes (minimum 65536). A stream that exceeds it is closed.   |
+| `reconnect_min`       | duration | `1s`       | Initial reconnect backoff (minimum 100ms)                                                     |
+| `reconnect_max`       | duration | `30s`      | Maximum reconnect backoff                                                                     |
+| `keepalive_period`    | duration | `25s`      | Keepalive interval on the expose session (minimum 1s)                                         |
+| `forwards`            | list     | empty      | Forwards to publish; see [Expose](#expose-publishing-local-services)                                                    |
+
+Each entry in `forwards`:
+
+| Key       | Type   | Description                                                            |
+| --------- | ------ | ---------------------------------------------------------------------- |
+| `key`     | string | Routing key, matching `[a-zA-Z0-9._-]+`; unique                        |
+| `type`    | string | `folder` or `tcp`                                                      |
+| `path`    | string | `folder` only: absolute path of an existing directory                  |
+| `target`  | string | `tcp` only: `host:port` to dial                                        |
+| `comment` | string | Optional label                                                         |
+
+### `admin` \{#config-admin\}
+
+| Key       | Type   | Default           | Description                                                                 |
+| --------- | ------ | ----------------- | --------------------------------------------------------------------------- |
+| `enabled` | bool   | `true`            | Serve the [admin interface](#admin-interface)                               |
+| `listen`  | string | `127.0.0.1:48088` | Listen address. The host must be a loopback IP; other values fail validation. |
+
+### `icmp` \{#config-icmp\}
+
+| Key                   | Type | Default | Description                                                                                         |
+| --------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------- |
+| `unreachable_replies` | bool | `true`  | Answer a ping that cannot be forwarded with ICMP Destination Unreachable instead of letting it time out |
+
+### `nat` \{#config-nat\}
+
+| Key           | Type     | Default | Description                                    |
+| ------------- | -------- | ------- | ---------------------------------------------- |
+| `table_size`  | int      | `65536` | Maximum tracked connections                    |
+| `tcp_timeout` | duration | `1h`    | Idle timeout for tracked TCP connections       |
+| `udp_timeout` | duration | `5m`    | Idle timeout for tracked UDP flows             |
+| `gc_interval` | duration | `1m`    | How often expired entries are removed          |
+
+### Secrets and file permissions
+
+The config file can hold `socks5.password`. Files written by `mutiauk setup` and `mutiauk config generate` have mode `0600`, and `mutiauk config check` warns when a file is readable by group or others. To keep the password out of the file entirely, set `MUTIAUK_SOCKS5_PASSWORD` in the daemon's environment (for example with systemd `Environment=` or `LoadCredential=`); it takes precedence over the YAML value.
+
+### Logging
+
+The daemon logs JSON lines at `info` level to standard error, which the service manager collects (journald on Linux, `/var/log/mutiauk.log` and `/var/log/mutiauk.err.log` with launchd on macOS). Pass `-v` for human-readable debug output.
+
+## Routes
+
+A route sends traffic for a CIDR into the TUN interface. Mutiauk applies three kinds of routes, shown in the `SOURCE` column of `mutiauk route list`:
+
+| Source   | Origin                                              | Survives restart                        |
+| -------- | --------------------------------------------------- | --------------------------------------- |
+| `config` | The `routes` list in the config file                | Yes                                     |
+| `auto`   | Received from the agent through [autoroutes](#autoroutes) | Re-received after restart          |
+| `manual` | `mutiauk route add` without `--persist`             | No                                      |
+
+`mutiauk route add --persist` and `route remove --persist` also edit the `routes` list in the config file, so the change becomes a `config` route:
+
+```bash
+sudo mutiauk route add 10.50.0.0/16 --comment "lab" --persist
+sudo mutiauk route remove 10.50.0.0/16 --persist
+```
+
+`route add` and `route remove` go through the running daemon so its state and the kernel routing table stay in sync. When the daemon is not running they refuse; `--force` edits the kernel and the config file directly, but the daemon re-applies its own state when it next starts.
+
+:::warning Routes that cover the SOCKS5 server are refused
+The daemon never installs a route (static or automatic) whose CIDR contains the IP address of `socks5.server`. Such a route would send Mutiauk's own connection to the agent into the tunnel and break all forwarding. Refused routes are logged once, listed in `mutiauk route list`, and shown on the Routes tab of the [admin interface](#admin-interface). Fix the route at its source.
+:::
+
+## Autoroutes
+
+With `autoroutes.enabled: true`, Mutiauk keeps a watch stream open to the agent over the same SOCKS5 endpoint it uses for traffic (`socks5.server`). The agent pushes a new snapshot whenever routes, mesh hostnames, or hostname suffixes change. The stream uses the SOCKS5 credentials; there is no separate URL or token. If the agent does not support the watch stream, autoroutes does not start.
+
+From each snapshot Mutiauk installs the CIDR routes advertised anywhere in the mesh, except:
+
+| Route                                                          | Reason                                  |
+| -------------------------------------------------------------- | --------------------------------------- |
+| `0.0.0.0/0`, `::/0`                                            | Default routes would capture all traffic |
+| `127.0.0.0/8`, `::1/128`                                       | Loopback                                |
+| `169.254.0.0/16`, `fe80::/10`                                  | Link-local; breaks DHCP and neighbor discovery |
+| `224.0.0.0/4`, `ff00::/8`, `255.255.255.255/32`                | Multicast and broadcast                 |
+| Domain routes                                                  | Mutiauk sees IP packets only            |
+
+The filter matches these prefixes exactly. You can still add any of them as a static route.
+
+Automatic routes are not written to the config file. When a static route has the same CIDR as an automatic one, the static route is used.
+
+:::note CIDR routes only
+Domain routes need the destination hostname, which only a SOCKS5 client sends. Mutiauk works at the IP layer after the host has already resolved the name, so it uses CIDR routes only.
+:::
+
+## Mesh DNS
+
+When autoroutes is enabled, Mutiauk also runs a DNS resolver on the TUN IPv4 address, port 53. It answers A and AAAA queries for the mesh hostnames received from the agent and returns NXDOMAIN for any other name under the active suffixes. The suffixes (`.mesh` by default) also come from the agent, so nothing is configured on the Mutiauk side. There is no separate DNS section in the config; a legacy `dns:` block is ignored and reported by `mutiauk config check`.
+
+### Host DNS integration
+
+`dns_integration` decides how the host resolver forwards queries for the mesh suffixes to the Mutiauk resolver. Queries for other names are not affected.
+
+| Value          | Behavior                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto`         | Use the first available backend: `resolvectl`, `nm-dnsmasq`, `etc-resolver`, `nrpt`. If none is available, run the resolver without host wiring. |
+| `resolvectl`   | Linux with systemd-resolved. Per-link DNS settings on the TUN interface; suffix changes apply live.                                       |
+| `nm-dnsmasq`   | Linux with NetworkManager `dns=dnsmasq`. Writes `/etc/NetworkManager/dnsmasq.d/mutiauk.conf` and reloads NetworkManager when the suffix set changes. |
+| `etc-resolver` | macOS. Writes one file per suffix under `/etc/resolver/`.                                                                                  |
+| `nrpt`         | Windows. Adds Name Resolution Policy Table rules for the suffixes.                                                                         |
+| `none`         | Leave host DNS alone. The resolver still answers at the TUN address.                                                                      |
+
+Naming a backend that is not available on the host is an error at daemon start. On graceful shutdown the daemon reverts its host DNS changes; after a crash, `sudo mutiauk cleanup` does the same.
+
+Inspect the active backend, the suffixes, host-side state, and live probes with `mutiauk dns status`:
+
+```text
+Backend:    resolvectl (auto-detected)
+Listen:     10.200.200.1:53
+Active TLDs: .mesh .mesh.alt    applied 2026-05-05T14:22:01Z (18s ago)
+Hosts:      2 registered
+
+Host state (resolvectl):
+  DNS Servers: 10.200.200.1
+  DNS Domain:  ~mesh ~mesh.alt
+
+Probes:
+  [OK] resolver direct -- 10.200.200.1:53 -> NXDOMAIN
+  [OK] system stub -- 127.0.0.53:53 -> NXDOMAIN
+```
+
+The probes query a name that is deliberately not registered, so `NXDOMAIN` means the resolver is reachable. `SERVFAIL` or a timeout means the wiring is broken.
+
+### Mesh hostnames
+
+Mesh hostnames are names such as `gateway.mesh` that the agent maps to in-mesh IP addresses. They are registered on the agent, not in Mutiauk: in the agent's `mesh_hosts` config, with `muti-metroo host add`, or through the hosts management API. See [Mesh Hostnames](/features/mesh-hostnames) for the agent side.
+
+```bash
+muti-metroo host add gateway.mesh --ipv4 10.0.0.1 --ipv6 fd00::1 --comment "edge gateway"
+```
+
+Mutiauk picks up the change on the next snapshot. Check what the daemon serves, and resolve a name:
+
+```bash
+mutiauk host list
+dig +short gateway.mesh
+```
+
+A hostname does not install a route. The address it resolves to must already be covered by a static route or an automatic route, or the traffic will not enter the TUN interface.
+
+:::note Single-label names on systemd-resolved
+systemd-resolved does not forward single-label queries (for example a host registered as plain `mesh`) by default. The Mutiauk resolver answers them when queried directly at the TUN address. To forward them through the stub resolver, set `ResolveUnicastSingleLabel=yes` in `/etc/systemd/resolved.conf` and restart systemd-resolved.
+:::
+
+## Expose \{#expose-publishing-local-services\}
+
+Expose publishes local services to the mesh without running a Muti Metroo agent on this host. Mutiauk opens one outbound session to the agent over `socks5.server` and registers each forward by routing key. When another agent opens a forward stream for that key, the agent sends it back over the session and Mutiauk serves it locally. No inbound port is opened on this host.
+
+Two forward types exist:
+
+- **`folder`**: a static file server for an existing directory. It answers `GET` and `HEAD` for paths that resolve to a regular file inside the directory, and returns 404 with an Apache-style body for anything else (missing files, directories, symlinks that leave the directory). There are no directory listings and no index files.
+- **`tcp`**: dials `target` and copies bytes in both directions.
 
 ```yaml
-# /etc/mutiauk/config.yaml
-socks5:
-  # Option 1: Use wss:// URL (auto-detects WebSocket)
-  server: wss://relay.example.com:8443/socks5
+expose:
+  enabled: true
+  forwards:
+    - key: op-docs
+      type: folder
+      path: /srv/docs
+      comment: "operator runbook"
+    - key: op-ssh
+      type: tcp
+      target: 127.0.0.1:22
+```
 
-  # Option 2: Explicit transport setting
+Requirements:
+
+- `socks5.server` must be set. The session authenticates with the SOCKS5 credentials and does not depend on autoroutes.
+- `folder` paths must be absolute and exist when the config is loaded.
+- Routing keys must be unique and match `[a-zA-Z0-9._-]+`.
+
+Forwards in the config file load at startup and on reload. `mutiauk expose add` and `expose remove` change forwards at runtime; runtime forwards are lost when the daemon restarts, cannot reuse a key from the config file, and config-defined keys cannot be removed at runtime.
+
+```bash
+mutiauk expose status
+mutiauk expose add folder shared-docs /srv/share --comment "team share"
+mutiauk expose add tcp local-ssh 127.0.0.1:22
+mutiauk expose list --json
+mutiauk expose remove shared-docs
+```
+
+Registered keys appear in the mesh as forward routes, alongside ordinary forward endpoints, and disappear when the session drops. To reach them, add a forward listener with the same key on an ingress agent. See [Port Forwarding](/features/port-forwarding).
+
+The `max_streams_per_key` and `max_buffered_bytes` limits protect the host from a peer that opens many streams or stops reading. Raise them only when the upstream agent is trusted and the host has the capacity.
+
+## WebSocket transport
+
+When raw TCP to the SOCKS5 port is blocked but HTTPS is allowed, Mutiauk can carry SOCKS5 over a WebSocket connection. Either give a URL:
+
+```yaml
+socks5:
+  server: wss://relay.example.com:8443/socks5
+  username: user1
+  password: yourpassword
+```
+
+or a host and port with an explicit transport (the URL is then built as `wss://<server><ws_path>`):
+
+```yaml
+socks5:
   server: relay.example.com:8443
   transport: websocket
   ws_path: /socks5
-
-  # Authentication (if server requires it)
-  username: "user1"
-  password: "yourpassword"
 ```
 
-This tunnels the SOCKS5 protocol over WebSocket, appearing as standard HTTPS traffic to network filters. The Muti Metroo server must have WebSocket SOCKS5 enabled:
+The server certificate is verified against the system trust store. The agent must have its WebSocket SOCKS5 listener enabled; see [SOCKS5 Configuration](/configuration/socks5):
 
 ```yaml
-# Muti Metroo config
 socks5:
   enabled: true
   auth:
     enabled: true
     users:
       - username: "user1"
-        password_hash: "$2a$10$..."
+        password_hash: "$2a$12$..."   # from: muti-metroo hash
   websocket:
     enabled: true
     address: "0.0.0.0:8443"
     path: "/socks5"
 ```
 
-#### Authentication
+When the agent requires authentication, Mutiauk sends `socks5.username` and `socks5.password` twice: as HTTP Basic credentials on the WebSocket upgrade, and again in the SOCKS5 username/password handshake.
 
-When `socks5.auth.enabled` is true on the Muti Metroo server:
+## ICMP echo
 
-1. **HTTP Basic Auth** is required for the WebSocket upgrade request
-2. **SOCKS5 Username/Password** authentication is required after connection
+Mutiauk forwards ping (ICMP echo) to mesh destinations on all platforms. The agent that serves the route to the target must have ICMP relay enabled; see [ICMP Configuration](/configuration/icmp). If the target is reached through an exit without ICMP, pings fail while TCP and UDP to the same target work. When several routes could match, make sure the most specific one points at an ICMP-capable exit (a `/32` host route overrides a broader one).
 
-Mutiauk handles both automatically using the same credentials:
+When an echo cannot be forwarded (for example ICMP is disabled on the exit), Mutiauk answers the local sender with ICMP Destination Unreachable so `ping` fails immediately. A reachable destination that does not answer still times out. Set `icmp.unreachable_replies: false` to drop such echoes silently instead.
 
-- The `username` and `password` from your config are sent as HTTP Basic Auth headers during the WebSocket handshake
-- The same credentials are then used for SOCKS5 authentication after the connection is established
+## Admin interface
 
-This dual-authentication provides defense in depth - the WebSocket endpoint is protected before any SOCKS5 traffic is accepted.
+The daemon serves a local web page and JSON API for inspecting the running setup and managing expose forwards. It is enabled by default and listens on loopback only (`127.0.0.1:48088`, plus the matching `::1` address when available). There is no authentication: the loopback binding is the access boundary. Changing `admin.listen` requires a daemon restart.
 
-### Transparent Application Routing
+Open `http://127.0.0.1:48088/` on the host. The page has four tabs:
 
-Once a route matches, any application on the host uses the tunnel automatically - no per-application proxy configuration:
+- **Overview**: daemon state, PID, uptime, TUN interface, config path, route counts by source, and the connection to the Muti Metroo agent (SOCKS5 endpoint, autoroutes stream, expose session).
+- **Routes**: applied routes with destination, source, interface, state, and comment, plus any [refused routes](#routes).
+- **Route log**: route additions and removals as they happen.
+- **Exposing**: forwards with type, target, persistence (config or runtime), registration state, and active streams; a form to add a forward and a button to remove a runtime one.
+
+The same data is available as JSON:
+
+| Method   | Path                  | Returns or does                                  |
+| -------- | --------------------- | ------------------------------------------------ |
+| `GET`    | `/api/status`         | Daemon and TUN state                             |
+| `GET`    | `/api/agent`          | Agent connection state                           |
+| `GET`    | `/api/routes`         | Applied and refused routes                       |
+| `GET`    | `/api/route-events`   | Recent route changes                             |
+| `GET`    | `/api/hosts`          | Mesh hostnames served by the resolver            |
+| `GET`    | `/api/expose`         | Expose forwards                                  |
+| `POST`   | `/api/expose`         | Add a runtime forward                            |
+| `DELETE` | `/api/expose/{key}`   | Remove a runtime forward                         |
+
+```bash
+curl http://127.0.0.1:48088/api/routes
+
+curl -X POST http://127.0.0.1:48088/api/expose \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"shared-docs","type":"folder","path":"/srv/share","comment":"team share"}'
+
+curl -X DELETE http://127.0.0.1:48088/api/expose/shared-docs
+```
+
+Forwards added here behave like `mutiauk expose add`: they last until the daemon restarts.
+
+## Running as a service
+
+`mutiauk service install` registers the daemon with the platform service manager, enables it at boot, and starts it. It must run as root or Administrator, and uses the config path from `-c`.
+
+| Platform | Installed as                                               |
+| -------- | ---------------------------------------------------------- |
+| Linux    | systemd unit `/etc/systemd/system/mutiauk.service`         |
+| macOS    | LaunchDaemon `/Library/LaunchDaemons/com.postalsys.mutiauk.plist` |
+| Windows  | Windows service `mutiauk`                                  |
+
+```bash
+sudo mutiauk service install -c /etc/mutiauk/config.yaml
+mutiauk service status
+sudo mutiauk service uninstall
+```
+
+The daemon does not detach by itself; `mutiauk daemon start` runs in the foreground, and backgrounding is left to the service manager.
+
+## Command reference
+
+When the daemon is running, CLI commands talk to it over the control endpoint (`daemon.socket_path`).
+
+### Global options
+
+| Option          | Default                                         | Description             |
+| --------------- | ----------------------------------------------- | ----------------------- |
+| `-c, --config`  | `/etc/mutiauk/config.yaml` (Windows: `C:\ProgramData\Mutiauk\config.yaml`) | Config file path |
+| `-v, --verbose` | `false`                                         | Debug logging           |
+
+### `daemon` \{#command-daemon\}
+
+| Command          | Flags                                                                   | Description                                                                                         |
+| ---------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `daemon start`   |                                                                         | Run the daemon in the foreground                                                                    |
+| `daemon stop`    | `--wait` (default `true`), `--timeout` (default `30s`), `--force`       | Ask the daemon to shut down and wait for it to exit. `--force` kills the process if it is still running after `--timeout`. |
+| `daemon reload`  |                                                                         | Re-read and apply the config file                                                                   |
+| `daemon status`  | `--json`                                                                | PID, uptime, and config path. No network checks; suitable for frequent readiness probes.            |
+
+### `status`
+
+Shows the daemon, TUN interface, routes, and connectivity checks (SOCKS5 connection, TCP routing to `daemon.status_probe_target`, UDP routing, expose session).
+
+| Flag            | Description                                                                                         |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `--json`        | JSON output                                                                                         |
+| `--skip-tests`  | Skip the connectivity checks                                                                        |
+| `--exit-code`   | Exit non-zero when a component is unhealthy                                                         |
+| `-q, --quiet`   | No output; implies `--exit-code`                                                                    |
+| `--check`       | Repeatable. Limit the exit code to `daemon`, `tun`, `socks5`, `tcp`, `udp`, or `expose`             |
+
+```bash
+mutiauk status --check socks5 --check tcp --quiet || echo "mesh path down"
+```
+
+### `route`
+
+| Command               | Flags                                      | Description                                                              |
+| --------------------- | ------------------------------------------ | ------------------------------------------------------------------------ |
+| `route list`          | `--json`                                   | Routes with their source (`config`, `auto`, `manual`) and refused routes |
+| `route add <cidr>`    | `--comment`, `--persist`, `--force`        | Add a route; see [Routes](#routes)                                       |
+| `route remove <cidr>` | `--persist`, `--force`                     | Remove a route                                                           |
+| `route plan`          |                                            | Compare the config file's routes with the kernel routing table           |
+| `route apply`         | `--dry-run`                                | Apply the config file's routes to the kernel routing table               |
+| `route check`         |                                            | Report duplicate or overlapping config routes, and overlaps with existing kernel routes           |
+| `route trace <ip\|domain>` | `--json`                              | Explain how the host would route a destination; see below                |
+
+#### `route trace`
+
+`route trace` resolves the argument, asks the kernel which route and interface it would use, and, when the traffic goes through Mutiauk, looks up the mesh path in a one-time snapshot from the agent.
+
+```text
+$ mutiauk route trace 10.10.5.100
+Destination:  10.10.5.100
+Resolved:     (literal IP)
+Match:        10.10.0.0/16
+Interface:    tun0 (Mutiauk)
+Mesh Path:    gateway -> transit -> exit-dc
+Origin:       exit-dc [76e822ad]
+Hop Count:    2
+```
+
+For a destination outside Mutiauk's routes:
+
+```text
+$ mutiauk route trace 192.0.2.10
+Destination:  192.0.2.10
+Resolved:     (literal IP)
+Match:        192.0.2.10/32 via 192.168.1.1
+Interface:    en0
+Note:         Resolved IP is not in any mutiauk route; kernel will send it via en0. Add a static route or autoroute to forward it through the mesh.
+```
+
+For a hostname, the `Resolved:` line names the source: `(via mesh DNS)` for a mesh hostname, `(via system DNS)` for any other name. With `--json`, the same information appears in these fields:
+
+| Field              | Description                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `resolution`       | `ip`, `mesh`, or `system`                                                                                           |
+| `is_mutiauk`       | Whether the traffic enters the Mutiauk interface                                                                    |
+| `mesh_path_status` | `ok` (path found; `mesh_path`, `origin`, `origin_id`, `hop_count` set), `unreachable` (the snapshot request failed; `mesh_path_error` set), or `not_in_mesh` (no advertised route covers the address) |
+
+### `host`, `dns`
+
+| Command       | Flags    | Description                                                         |
+| ------------- | -------- | ------------------------------------------------------------------- |
+| `host list`   | `--json` | Mesh hostnames the daemon currently serves (name, IPv4, IPv6, comment) |
+| `dns status`  | `--json` | Host DNS backend, active suffixes, host-side state, and live probes |
+
+### `expose` \{#command-expose\}
+
+| Command                                   | Flags                 | Description                                         |
+| ----------------------------------------- | --------------------- | --------------------------------------------------- |
+| `expose status`                           | `--json`              | Session state and registered forwards               |
+| `expose list`                             | `--json`              | Registered forwards only                            |
+| `expose add folder <key> <path>`          | `--comment`           | Add a runtime folder forward                        |
+| `expose add tcp <key> <host:port>`        | `--comment`           | Add a runtime TCP forward                           |
+| `expose remove <key>`                     |                       | Remove a runtime forward                            |
+
+### `config`
+
+| Command           | Description                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| `config check`    | Validate the file given with `-c`. Exits 1 on errors. Warnings (file mode, legacy `dns:` block, omitted `enabled:` keys) fail only with `--strict`. `--json` prints a report. |
+| `config generate` | Write a config without prompts; see below                                                                   |
+
+#### `config generate`
+
+| Flag                   | Default                    | Description                                              |
+| ---------------------- | -------------------------- | -------------------------------------------------------- |
+| `--from`               |                            | Answers file: a partial or complete config               |
+| `-o, --output`         | `/etc/mutiauk/config.yaml` | Output path                                              |
+| `--force`              | `false`                    | Overwrite an existing file                               |
+| `--json`               | `false`                    | Print a `{path, mode, validated}` report                 |
+| `--tun-name`           |                            | Override `tun.name`                                      |
+| `--tun-address`        |                            | Override `tun.address`                                   |
+| `--tun-address6`       |                            | Override `tun.address6`                                  |
+| `--socks5-server`      |                            | Override `socks5.server`                                 |
+| `--socks5-username`    |                            | Override `socks5.username`                               |
+| `--autoroutes-enabled` | `false`                    | Enable autoroutes                                        |
+
+### `service`
+
+| Command             | Flags    | Description                                                                 |
+| ------------------- | -------- | --------------------------------------------------------------------------- |
+| `service install`   |          | Install, enable, and start the service; see [Running as a service](#running-as-a-service) |
+| `service uninstall` |          | Stop and remove the service                                                 |
+| `service status`    | `--json` | Installed, active, and enabled state                                        |
+
+### Other commands
+
+| Command                                         | Description                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `setup`                                         | Interactive [setup wizard](#setup-wizard)                                                                            |
+| `cleanup [--dry-run] [--purge]`                 | After a crash: remove the TUN interface, stale PID file and control socket, and revert host DNS changes. `--purge` also deletes the saved route state (`/var/lib/mutiauk/routes.json`, Windows `C:\ProgramData\Mutiauk\routes.json`). Refuses while the daemon runs. |
+| `completion <bash\|zsh\|fish\|powershell>`      | Print a shell completion script                                                                                      |
+| `version`                                       | Version, commit, build date, Go version, and platform                                                               |
+
+## Examples
+
+### Reach a remote office network
 
 ```yaml
-# /etc/mutiauk/config.yaml
 tun:
   name: tun0
   address: 10.200.200.1/24
@@ -798,79 +830,78 @@ socks5:
 routes:
   - destination: 192.168.50.0/24
     comment: "Remote office network"
-    enabled: true
 ```
 
 ```bash
-# Start Mutiauk
 sudo mutiauk daemon start
 
-# Everything below flows through the mesh transparently
-curl https://192.168.50.10/
+# In another terminal, unmodified tools reach the remote network:
+curl http://192.168.50.10/
 ssh admin@192.168.50.20
-psql postgresql://192.168.50.30:5432/inventory
 ```
 
-## Architecture
+### Follow the mesh automatically
 
-Mutiauk operates as a userspace network stack:
-
-1. **TUN Interface**: Receives raw IP packets from the kernel
-2. **L3 Processing**: Parses IP headers to determine protocol and destination
-3. **L4 Proxy**:
-   - TCP: Establishes SOCKS5 CONNECT for each connection
-   - UDP: Uses SOCKS5 UDP ASSOCIATE for datagram forwarding
-4. **Response Handling**: Wraps responses back into IP packets for the TUN interface
-
-## Limitations
-
-- **Cross-platform**: Runs on Linux (`/dev/net/tun`), macOS (utun), and Windows (bundled Wintun driver)
-- **Requires elevated privileges**: TUN interface creation needs root (Linux/macOS) or Administrator (Windows)
-
-:::tip ICMP Support
-Mutiauk supports ICMP echo (ping) forwarding through the Muti Metroo mesh. ICMP echo requests are intercepted and forwarded using a custom SOCKS5 extension.
-
-**ICMP requires an ICMP-capable exit.** The agent that actually serves the route to your ping target must have ICMP relay enabled - see [ICMP Configuration](/configuration/icmp). If the target is reached through an exit without working ICMP relay, pings fail even though TCP and UDP to the same target work. When a target could match several routes, make sure the most-specific route points at an ICMP-capable exit (a `/32` host route to that exit overrides a broader default exit). This applies on every platform (Linux, macOS, Windows) - the forwarder itself is identical.
-
-When an echo cannot be forwarded (for example the exit agent has no unprivileged ICMP socket, or ICMP is disabled there), Mutiauk replies to the local sender with an ICMP **Destination Unreachable** so `ping` fails fast with a clear message instead of timing out. This only fires on forwarding-setup failures; a destination that is reachable but does not answer still times out normally. Disable it with:
+Let the agent decide which networks are reachable, and resolve mesh hostnames:
 
 ```yaml
-icmp:
-  unreachable_replies: false # default: true
+socks5:
+  server: 127.0.0.1:1080
+
+autoroutes:
+  enabled: true
 ```
 
-:::
+```bash
+sudo mutiauk daemon start
+mutiauk route list
+mutiauk host list
+```
+
+### Route containers or VMs
+
+Traffic from containers or virtual machines on the host follows the host routing table, so destinations covered by Mutiauk routes go through the mesh as long as the guest traffic is routed (not bridged) by the host.
 
 ## Troubleshooting
 
-### TUN Creation Failed
+### TUN interface cannot be created
 
+```text
+failed to create TUN device: operation not permitted
 ```
-Error: failed to create TUN interface: operation not permitted
+
+Run the daemon as root (Linux, macOS) or from an elevated prompt (Windows). On Linux, also check that the TUN module is loaded:
+
+```bash
+lsmod | grep tun
+sudo modprobe tun
 ```
 
-- Run with `sudo` or as root
-- Check if TUN module is loaded: `lsmod | grep tun`
-- Load TUN module: `sudo modprobe tun`
+### No connectivity through the tunnel
 
-The `lsmod` / `modprobe` steps are Linux-specific; on macOS and Windows the usual cause is missing privilege -- run elevated (as root on macOS, as Administrator on Windows).
+1. Run `sudo mutiauk status` and look for the failing component.
+2. Confirm that the agent's SOCKS5 listener works on its own:
 
-### No Connectivity
+   ```bash
+   curl -x socks5h://localhost:1080 http://example.com/
+   ```
 
-- Verify Muti Metroo SOCKS5 is running: `curl -x socks5://127.0.0.1:1080 https://example.com`
-- Check routes are correctly specified
-- Verify TUN interface is up: `ip addr show tun0`
+3. Confirm that the destination is covered by a route: `mutiauk route trace <ip>`.
+4. Check `mutiauk route list` for refused routes.
 
-### DNS Not Working
+### Mesh hostnames do not resolve
 
-- Use a DNS server reachable through the mesh
-- Or configure system DNS to use a server in the routed network
+1. Make sure `autoroutes.enabled` is `true`; the resolver runs only with autoroutes.
+2. Run `sudo mutiauk dns status`. If the direct probe works but the system stub fails, the host DNS integration is not wired; set `dns_integration` to a backend available on the host, or configure DNS yourself.
+3. Check that the name is registered on the agent: `mutiauk host list`.
 
-## Related
+Names that are not mesh hostnames are resolved by the host's normal DNS. If those names point to addresses that only exist inside the mesh, use a DNS server that is reachable through the mesh.
 
-- [Suite Overview](/suite-overview) - How Muti Metroo, Mutiauk, and Muti Metroo Manager work together
-- [Muti Metroo Manager](/muti-metroo-manager) - Web dashboard for mesh monitoring and management
-- [Mutiauk source](https://github.com/postalsys/Mutiauk) - Source code and releases
-- [Muti Metroo Download](/download) - Main Muti Metroo binary
-- [SOCKS5 Configuration](/configuration/socks5) - Configure SOCKS5 ingress
-- [UDP Relay](/features/udp-relay) - UDP support through SOCKS5
+## See Also
+
+- [Suite Overview](/suite-overview): how Muti Metroo, Mutiauk, and Muti Metroo Manager fit together
+- [SOCKS5 Configuration](/configuration/socks5): the agent listener Mutiauk connects to, including WebSocket and authentication
+- [Mesh Hostnames](/features/mesh-hostnames): register the names that Mutiauk's resolver serves
+- [Port Forwarding](/features/port-forwarding): reach services published with expose
+- [ICMP Configuration](/configuration/icmp): enable ping relay on exit agents
+- [Muti Metroo Manager](/muti-metroo-manager): generate Mutiauk configs from the web UI

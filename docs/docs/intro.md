@@ -1,5 +1,6 @@
 ---
 title: Introduction
+description: Muti Metroo is a userspace mesh networking agent that tunnels TCP, UDP, and ICMP traffic through encrypted multi-hop relay chains.
 sidebar_position: 1
 ---
 
@@ -7,11 +8,9 @@ sidebar_position: 1
   <img src="/img/mole-surfacing.png" alt="Muti Metroo" style={{maxWidth: '200px'}} />
 </div>
 
-# Muti Metroo
+# Introduction
 
-**Your private mesh network for tunneled traffic** - connect distributed infrastructure with encrypted relay chains.
-
-Muti Metroo creates encrypted tunnels through multiple relay points, letting you reach resources behind firewalls without VPN infrastructure. Deploy a single binary, connect your agents, and route traffic through any network topology.
+Muti Metroo is a mesh networking agent that runs entirely in userspace. Agents connect to each other over QUIC, HTTP/2, or WebSocket, propagate routes across the mesh, and carry traffic end-to-end encrypted from the agent where it enters the mesh to the agent where it leaves. It needs no root privileges, kernel modules, or TUN driver, and ships as a single binary.
 
 <div className="tunnel-diagram">
 
@@ -26,38 +25,38 @@ flowchart LR
 </div>
 
 <div className="text--center margin-vert--lg">
-  <a className="button button--primary button--lg" href="/getting-started/overview">Get Started in 2 Minutes</a>
+  <a className="button button--primary button--lg" href="/getting-started/overview">Get Started</a>
 </div>
 
-## Why Muti Metroo?
+## Features
 
-| Challenge                           | Solution                                                                    |
-| ----------------------------------- | --------------------------------------------------------------------------- |
-| **Firewalls block your traffic**    | HTTP/2 and WebSocket transports run over standard HTTPS ports and protocols |
-| **Complex network paths**           | Multi-hop routing selects optimal paths through the mesh                    |
-| **Hard to deploy**                  | Single binary, no root, no kernel modules                                   |
-| **Per-app proxy config is tedious** | TUN interface routes all traffic transparently                              |
-| **Transit nodes see your data**     | End-to-end encryption - transit cannot decrypt                              |
+| Feature                  | Description                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| **Multi-hop routing**    | Agents form chains, trees, or a full mesh. Routes propagate between agents automatically.                         |
+| **End-to-end encryption** | X25519 key exchange and ChaCha20-Poly1305. Transit agents relay payloads without holding the session keys. See [limits](/security/e2e-encryption#limits-of-the-protection). |
+| **Multiple transports**  | QUIC over UDP, HTTP/2 and WebSocket over TCP. Both TCP transports work behind reverse proxies, and WebSocket peers can dial through an HTTP proxy. |
+| **SOCKS proxy ingress**  | SOCKS4, SOCKS4a, and SOCKS5 with optional username/password authentication. SOCKS5 UDP ASSOCIATE is supported.     |
+| **Exit routing**         | CIDR routes (DNS resolved at the ingress) and domain routes (DNS resolved at the exit).                           |
+| **Port forwarding**      | Expose a service behind one agent as a listening port on another.                                                 |
+| **Management**           | Remote shell, file transfer, and ICMP ping through the mesh, authorized by a signing key.                          |
+| **HTTP API**             | Health checks, topology and dashboard data, and runtime changes to routes, peers, and listeners.                  |
 
-## Key Features
+See the [Configuration Overview](/configuration/overview) for every option.
 
-| Feature                | Description                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| **Multi-Hop Routing**  | Traffic flows through chains, trees, or full mesh - routes propagate automatically |
-| **E2E Encryption**     | X25519 + ChaCha20-Poly1305 - transit nodes cannot read your traffic                |
-| **Firewall Traversal** | QUIC, HTTP/2, and WebSocket transports for restrictive networks                    |
-| **SOCKS5 Proxy**       | TCP and UDP support with optional authentication                                   |
-| **TUN Interface**      | Transparent routing with [Mutiauk](/mutiauk) - no per-app configuration    |
-| **Web Management**     | Visual mesh monitoring and control with [Muti Metroo Manager](/muti-metroo-manager)                    |
-| **Dashboard API**      | JSON endpoints for topology, node details, and mesh connectivity testing           |
+## Companion tools
 
-[See all features](/configuration/overview)
+Two separate binaries extend the agent. Both are optional.
 
-## Use Cases
+- [Mutiauk](/mutiauk) creates a TUN interface and forwards IP traffic into the agent's SOCKS5 proxy, so applications need no proxy settings. It requires root or Administrator.
+- [Muti Metroo Manager](/muti-metroo-manager) is a web dashboard that connects to an agent's HTTP API to show the topology and run management actions.
 
-### Reach Internal Resources
+The [Suite Overview](/suite-overview) explains how the three fit together.
 
-Access servers behind NAT or firewalls through multi-hop relay chains. No VPN infrastructure needed.
+## Use cases
+
+### Reach internal resources
+
+Reach servers behind NAT or a firewall through a chain of agents.
 
 ```mermaid
 flowchart LR
@@ -66,9 +65,9 @@ flowchart LR
     Office --> Internal[Internal Server<br/>192.168.1.50]
 ```
 
-### Connect Multiple Sites
+### Connect multiple sites
 
-Link office locations through a mesh. Each site accesses resources at other sites seamlessly.
+Link several sites through a relay. Each site's agent advertises its local networks, and every other site can reach them.
 
 ```mermaid
 flowchart LR
@@ -84,33 +83,34 @@ flowchart LR
     Relay <-->|WebSocket| SingaporeAgent
 ```
 
-### Resilient Connectivity
+### Redundant exits
 
-Deploy redundant paths with automatic failover. Agents reconnect with exponential backoff if connections drop.
+When several exit agents advertise the same network, the ingress uses the route with the lowest metric (the exit's configured metric plus one per hop). If a peer disconnects, the routes learned through it are withdrawn and the next-best route takes over. Agents reconnect to their peers with exponential backoff.
 
 ```mermaid
 flowchart LR
     Client[Client] --> A[Agent A]
-    A --> B1[Path 1]
-    A --> B2[Path 2]
-    B1 --> Exit[Exit Agent]
-    B2 --> Exit
+    A --> B1[Exit 1]
+    A --> B2[Exit 2]
+    B1 --> Net[10.0.0.0/8]
+    B2 --> Net
 ```
 
-## How It Works
+## How it works
 
-1. **Deploy agents** on available hosts and configure peer connections
-2. **Routes propagate** through flood-based advertising once peers connect
-3. **Connect via SOCKS5** on any ingress agent
-4. **Traffic flows** through the mesh to the exit with the matching route
-5. **Exit agents** open real connections to destinations
+1. You deploy agents on hosts you control and configure which agents dial which.
+2. Once peers connect, each exit agent advertises its routes, and the advertisements flood through the mesh.
+3. Applications connect to the SOCKS proxy on an ingress agent.
+4. The ingress looks up the destination in its route table and opens an encrypted stream through the mesh to the exit that advertises it.
+5. The exit agent opens the real connection to the destination.
 
-## Next Steps
+The [Architecture](/concepts/architecture) page describes each step in detail.
 
-| Goal                            | Start Here                                                          |
-| ------------------------------- | ------------------------------------------------------------------- |
-| **Try it now**                  | [Getting Started](/getting-started/overview) - 2-minute Docker demo |
-| **Understand the architecture** | [Core Concepts](/concepts/architecture)                             |
-| **Compare alternatives**        | [Comparisons](/comparisons/vs-ssh-jump)                             |
-| **Deploy to production**        | [Deployment Guide](/deployment/scenarios)                           |
-| **Troubleshoot issues**         | [Troubleshooting](/troubleshooting/common-issues)                   |
+## See Also
+
+- [Getting Started](/getting-started/overview): run a demo mesh in Docker, or set up your first agent
+- [Download](/download): binaries for Linux, macOS, and Windows
+- [Architecture](/concepts/architecture): agent roles, routing, and encryption in depth
+- [Muti Metroo vs SSH Jump Hosts](/comparisons/vs-ssh-jump): how the mesh compares to SSH-based tunneling
+- [Deployment Scenarios](/deployment/scenarios): example topologies for real deployments
+- [Troubleshooting](/troubleshooting/common-issues): fixes for common problems

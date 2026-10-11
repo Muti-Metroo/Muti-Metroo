@@ -1,5 +1,6 @@
 ---
 title: Agent Roles
+description: The ingress, transit, and exit roles a Muti Metroo agent can take, how each is enabled, and how to combine them.
 sidebar_position: 2
 ---
 
@@ -9,15 +10,15 @@ sidebar_position: 2
 
 # Agent Roles
 
-Each agent in your mesh has a job: accept connections from users, relay traffic between networks, or open connections to destinations. One agent can do all three, or you can specialize agents for different purposes.
+Each agent in a mesh plays one or more roles: it accepts client connections (ingress), relays traffic between other agents (transit), or opens connections to destinations (exit). One agent can do all three, or you can give agents separate jobs.
 
-## The Three Roles
+## Roles at a glance
 
-| Role | What It Does | You Need This When... |
-|------|--------------|----------------------|
-| **Ingress** | Accepts your SOCKS4/4a/5 connections | You want to connect through this agent |
-| **Transit** | Relays traffic to other agents | You need to bridge network segments |
-| **Exit** | Opens connections to destinations | You want traffic to exit from this network |
+| Role | What it does | Enabled by |
+| ---- | ------------ | ---------- |
+| **Ingress** | Accepts SOCKS4, SOCKS4a, and SOCKS5 client connections and sends them into the mesh | `socks5.enabled: true` |
+| **Transit** | Relays streams and route advertisements between its peers | Always on; any agent with more than one peer relays between them |
+| **Exit** | Advertises routes and opens the real connections to destinations | `exit.enabled: true` with `exit.routes` or `exit.domain_routes` |
 
 ```mermaid
 flowchart LR
@@ -27,116 +28,105 @@ flowchart LR
     Exit -->|TCP| Server[Destination]
 ```
 
-## Ingress Role
+Port forwarding adds two related roles: an agent with `forward.listeners` accepts connections on a local port (forward ingress), and an agent with `forward.endpoints` connects them to a target service (forward exit). See [Port Forwarding](/features/port-forwarding).
 
-An **ingress agent** is where you connect. Point your browser, curl, or SSH at the SOCKS5 proxy and your traffic enters the mesh.
+## Ingress
 
-**What it does:**
-- Runs a SOCKS proxy (SOCKS4/4a/5) that you connect to
-- Looks up which exit can reach your destination
-- Opens a tunnel through the mesh to that exit
-- Relays your traffic through the tunnel
+An ingress agent is where client traffic enters the mesh. Point curl, SSH, a browser, or [Mutiauk](/mutiauk) at its SOCKS listener.
 
-**Typical deployment:**
-- User workstations (local SOCKS5 proxy)
-- Edge servers (remote access gateway)
-- Cloud instances (entry point for distributed teams)
+The ingress agent:
 
-## Transit Role
+- Runs the SOCKS proxy (SOCKS4, SOCKS4a, and SOCKS5, detected automatically)
+- Picks the exit for each destination from its route table: domain routes first, then CIDR routes after resolving the name locally
+- Opens an end-to-end encrypted stream to that exit and relays the client's data over it
 
-A **transit agent** bridges networks. Put one in the cloud, the DMZ, or anywhere that can reach multiple network segments, and it relays traffic between them.
+Typical placements: an operator workstation (local proxy on `127.0.0.1:1080`), or a gateway host that a team connects to.
 
-**What it does:**
-- Connects to agents in different networks
-- Forwards traffic between them
-- Propagates route information through connected peers
-- Cannot see the traffic content (end-to-end encrypted)
+See [SOCKS5 Proxy](/features/socks5-proxy) and [SOCKS5 configuration](/configuration/socks5).
 
-**Typical deployment:**
-- Cloud relay (bridge between on-premise networks)
-- DMZ server (connect internal and external networks)
-- Geographic hop (reduce latency across regions)
+## Transit
 
-:::info Implicit Role
-Transit role is implicit - any agent that connects to multiple peers automatically becomes a transit node. No specific configuration is needed.
+Every agent relays traffic for its peers. An agent becomes a transit hop simply by being connected to two or more agents that need to reach each other through it. There is no transit setting.
+
+A transit agent:
+
+- Forwards streams between peers without being able to decrypt them
+- Passes route advertisements on to its other peers
+
+Typical placements: a cloud relay that office networks dial out to, a DMZ host that can reach both an external and an internal segment, or an intermediate hop between regions.
+
+## Exit
+
+An exit agent is where traffic leaves the mesh.
+
+The exit agent:
+
+- Advertises the CIDR ranges and domain patterns it serves
+- Accepts only destinations that match its own routes
+- Resolves domain names for domain routes using its own DNS settings
+- Opens the real TCP connections, and handles UDP and ICMP when those features are enabled
+
+Typical placements: inside a private network to reach internal hosts, or on an internet-facing host to give traffic a specific egress location.
+
+See [Exit Routing](/features/exit-routing) and [Exit configuration](/configuration/exit).
+
+:::info Agent reachability
+Every agent in the mesh is reachable by its agent ID for management operations (shell, file transfer, ping, and status queries), whether or not it has exit routes. Exit routes only control which destinations an agent opens connections to on behalf of clients.
 :::
 
-## Exit Role
+## Combining roles
 
-An **exit agent** is where traffic leaves the mesh. Put one inside a private network to reach internal resources, or in a cloud region to exit from that location.
-
-**What it does:**
-- Advertises which destinations it can reach (CIDR routes, domains)
-- Opens real TCP connections to those destinations
-- Resolves DNS for domain-based routing
-- Controls which destinations are allowed
-
-:::info Agent Reachability
-All agents are reachable by ID for management operations (shell, file transfer, ping, status queries) regardless of whether they have exit routes configured. Exit routes only control which network destinations an agent can reach on behalf of SOCKS5 clients.
-:::
-
-**Typical deployment:**
-- Internet gateway (default route for all traffic)
-- Private network access (routes to internal resources)
-- Service endpoint (access to specific services/CIDRs)
-
-## Combined Roles
-
-Agents can combine multiple roles. Common patterns:
-
-| Pattern | Description | Use Case |
-|---------|-------------|----------|
-| **Ingress + Exit** | Entry point that also exits traffic | Standalone proxy, simple setups |
-| **Ingress + Transit** | Entry point that relays to other exits | Gateway with multiple exit options |
-| **Transit + Exit** | Relay that also provides exit routes | Bridge between networks with local exit |
-| **All Three** | Does everything | Single-agent deployments |
+| Combination | Typical use |
+| ----------- | ----------- |
+| **Ingress + Exit** | A standalone proxy on a single host |
+| **Ingress only** | A workstation or laptop that sends all traffic to remote exits |
+| **Exit only** | An agent inside a target network that dials out to a relay |
+| **Ingress + Exit + listeners** | A single agent that other agents also connect to |
 
 ```mermaid
 flowchart TB
-    subgraph Standalone["Standalone (All Roles)"]
-        S_In[Ingress] --> S_Exit[Exit]
+    subgraph Standalone["Standalone"]
+        S_In[Ingress + Exit]
     end
 
-    subgraph Distributed["Distributed Deployment"]
-        D_In[Ingress Only] --> D_Trans[Transit Only]
-        D_Trans --> D_Exit[Exit Only]
+    subgraph Distributed["Distributed"]
+        D_In[Ingress] --> D_Trans[Transit]
+        D_Trans --> D_Exit[Exit]
     end
 ```
 
-## Role Selection Guide
+## Choosing a layout
 
-| What You Want | How To Set It Up |
-|---------------|------------------|
-| Tunnel from my laptop to the internet | Single agent with Ingress + Exit |
-| Reach a remote office network | Ingress on your laptop, Exit inside the office |
-| Connect multiple offices together | Transit in the cloud, Exit at each site |
-| Team access to internal resources | Ingress at each user location, Exit inside the network |
-| Exit from different geographic regions | Transit hub, regional Exit agents |
+| Goal | Layout |
+| ---- | ------ |
+| Proxy traffic from one host | One agent with ingress and exit |
+| Reach a remote office network | Ingress on your workstation, exit inside the office |
+| Connect several sites | A transit agent in the cloud that each site's agent dials, with an exit at each site |
+| Give a team access to internal resources | An ingress agent per user or per location, an exit inside the network |
+| Egress from several regions | Regional exit agents, each advertising its own routes |
 
-## Checking Agent Roles
+Connection direction (which agent dials which) is independent of roles. See [Architecture: Connection model](/concepts/architecture#connection-model).
 
-Query the dashboard API to see each agent's roles:
+## Checking agent roles
+
+The `/api/nodes` endpoint lists the roles of every known agent:
 
 ```bash
 curl http://localhost:8080/api/nodes | jq '.nodes[] | {display_name, roles}'
 ```
 
-The `roles` field in the response shows which roles each agent has: `ingress`, `transit`, `exit`, `forward_ingress`, or `forward_exit`.
+The `roles` array contains `ingress`, `exit`, `forward_ingress`, and `forward_exit` as they apply. An agent with none of these is listed as `transit`.
 
-## Best Practices
+## Recommendations
 
-1. **Minimize exit points**: Fewer exits are easier to monitor and secure
-2. **Place transit in DMZ**: Transit agents don't need to access sensitive resources
-3. **Use specific routes**: Avoid `0.0.0.0/0` on exits unless necessary
-4. **Separate concerns**: Don't combine ingress and exit on the same agent in production
-5. **Enable HTTP API**: Enable health checks and dashboard on every agent
+- **Keep exits few and specific.** Advertise only the ranges an exit needs to serve; reserve `0.0.0.0/0` for agents that should carry general internet traffic.
+- **Keep transit agents free of sensitive access.** A relay does not need routes into internal networks, and while it relays traffic as designed it never holds the session keys. A compromised relay is a different case; see [End-to-End Encryption](/security/e2e-encryption#limits-of-the-protection).
+- **Enable the HTTP API on each agent** you want to monitor or manage with the CLI.
 
-:::tip Connection Direction
-Transport connection direction (who dials whom) is independent of agent roles. See [Architecture - Connection Model](/concepts/architecture#connection-model) for details.
-:::
+## See Also
 
-## Next Steps
-
-- [Transports](/concepts/transports) - Choose the right transport for each role
-- [Routing](/concepts/routing) - How routes propagate between roles
-- [Configuration Reference](/configuration/overview) - Configure each role
+- [Architecture](/concepts/architecture): how agents connect and how connection direction relates to traffic
+- [Routing](/concepts/routing): how exit routes propagate to ingress agents
+- [Transports](/concepts/transports): choosing a transport for each link
+- [Exit Routing](/features/exit-routing): configuring what an exit serves
+- [Deployment Scenarios](/deployment/scenarios): complete layouts for common situations

@@ -1,5 +1,6 @@
 ---
 title: Deployment Scenarios
+description: Example Muti Metroo topologies with complete agent configurations for remote access, site-to-site links, internet egress, and firewall traversal.
 sidebar_position: 1
 ---
 
@@ -9,58 +10,45 @@ sidebar_position: 1
 
 # Deployment Scenarios
 
-Pick the pattern that matches your goal. Each scenario shows you exactly how to configure agents to solve a specific access problem.
+Each scenario on this page is a complete topology with the configuration for every agent. Adapt the addresses and routes, generate certificates as described in [TLS Certificates](/configuration/tls-certificates), and start the agents with `muti-metroo run -c <config>` or as a [system service](/deployment/system-service).
 
-**Quick Guide:**
+| Goal | Scenario |
+|------|----------|
+| Reach an internal network from anywhere | [Remote access to an office network](#remote-access-to-an-office-network) |
+| Connect several sites | [Site-to-site connectivity](#site-to-site-connectivity) |
+| Send internet traffic out through a remote host | [Internet egress through a remote exit](#internet-egress-through-a-remote-exit) |
+| Connect out of a network that only allows web traffic | [Firewall traversal through an HTTP proxy](#firewall-traversal-through-an-http-proxy) |
+| Survive the loss of an agent | [High Availability](/deployment/high-availability) |
 
-| I want to... | Use |
-|--------------|-----|
-| Access internal resources from anywhere | [Corporate Network Access](#scenario-1-corporate-network-access) |
-| Connect multiple office networks | [Multi-Site Connectivity](#scenario-2-multi-site-connectivity) |
-| Route all my traffic through a secure gateway | [Secure Internet Gateway](#scenario-3-secure-internet-gateway) |
-| Get through corporate firewalls that block everything | [Firewall Traversal](#scenario-4-firewall-traversal) |
-| Stay connected even when servers fail | [High Availability](#scenario-5-high-availability) |
+The examples use `id: "auto"` for peers so they work before the agent IDs are known. Replace each `auto` with the peer's real agent ID (printed at startup and stored in `agent_id` in its data directory) so that a connection to the wrong agent is rejected.
 
-## Scenario 1: Corporate Network Access
+## Remote access to an office network
 
-Provide remote access to internal resources without VPN infrastructure.
-
-### Architecture
+A relay with a public address accepts SOCKS clients and peer connections. An agent inside the office dials out to the relay and acts as the exit for the internal network, so the office needs no inbound firewall rules.
 
 ```mermaid
 flowchart LR
-    subgraph Internet
-        Cloud[Cloud Relay]
-    end
-
-    subgraph Office[Office Network]
-        Gateway[Office Gateway]
-        Internal[Internal Network]
-    end
-
-    Laptop[Remote Laptop] -->|SOCKS5| Cloud
-    Cloud -->|QUIC| Gateway
-    Gateway --> Internal
+    Laptop[Remote laptop] -->|SOCKS5| Relay[Relay<br/>relay.example.com]
+    Office[Office gateway] -->|QUIC, outbound| Relay
+    Office --> Internal[10.0.0.0/8<br/>*.corp.example.com]
 ```
 
-### Configuration
-
-**Cloud Relay (Transit):**
+**Relay** (public host):
 
 ```yaml
 agent:
-  display_name: "Cloud Relay"
+  display_name: "Relay"
+  data_dir: "/var/lib/muti-metroo"
 
 tls:
   ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
+  cert: "/etc/muti-metroo/certs/relay.crt"
+  key: "/etc/muti-metroo/certs/relay.key"
   mtls: true
 
 listeners:
   - transport: quic
     address: "0.0.0.0:4433"
-    # Uses global TLS settings
 
 socks5:
   enabled: true
@@ -73,115 +61,102 @@ socks5:
 
 http:
   enabled: true
-  address: ":8080"
+  address: "127.0.0.1:8080"
 ```
 
-**Office Gateway (Exit):**
+**Office gateway** (inside the office network):
 
 ```yaml
 agent:
   display_name: "Office Gateway"
+  data_dir: "/var/lib/muti-metroo"
 
 tls:
   ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
+  cert: "/etc/muti-metroo/certs/office.crt"
+  key: "/etc/muti-metroo/certs/office.key"
 
 peers:
-  - id: "${CLOUD_RELAY_ID}"
+  - id: "auto"
     transport: quic
-    address: "cloud-relay.example.com:4433"
-    # Uses global CA and cert/key
+    address: "relay.example.com:4433"
 
 exit:
   enabled: true
   routes:
-    - "10.0.0.0/8"           # Internal network
+    - "10.0.0.0/8"
+  domain_routes:
+    - "*.corp.example.com"
   dns:
     servers:
-      - "10.0.0.1:53"        # Internal DNS
+      - "10.0.0.1:53"
 
 http:
   enabled: true
-  address: ":8080"
+  address: "127.0.0.1:8080"
 ```
 
-### Usage
+The relay requires client certificates (`mtls: true`), so only agents with a certificate from the mesh CA can peer with it. Generate the password hash with `muti-metroo hash`.
+
+The domain route sends names under `corp.example.com` to the office gateway, which resolves them with the internal DNS server. Use `socks5h://` (or any client mode that passes host names to the proxy) so the name reaches the mesh unresolved:
 
 ```bash
-# Remote user connects via SOCKS5
-curl -x socks5://remote-team:password@cloud-relay.example.com:1080 \
-  http://internal-app.company.local
-
-# SSH to internal server
-ssh -o ProxyCommand='nc -x cloud-relay.example.com:1080 %h %p' user@server.internal
+curl -x socks5h://remote-team:password@relay.example.com:1080 http://intranet.corp.example.com/
 ```
 
----
+For SSH, use a SOCKS client that supports username and password authentication, such as `ncat`:
 
-## Scenario 2: Multi-Site Connectivity
+```bash
+ssh -o ProxyCommand='ncat --proxy relay.example.com:1080 --proxy-type socks5 --proxy-auth remote-team:password %h %p' admin@10.0.12.5
+```
 
-Connect multiple office locations through a cloud relay.
+Exposing SOCKS on a public address relies on SOCKS authentication alone. To avoid that, run an agent on each laptop with SOCKS on `127.0.0.1:1080` and let it peer with the relay, as in [Internet egress through a remote exit](#internet-egress-through-a-remote-exit).
 
-### Architecture
+## Site-to-site connectivity
+
+Each site runs a gateway that dials a central relay, exits for its own network, and offers a SOCKS listener to local clients.
 
 ```mermaid
 flowchart TB
-    subgraph SiteA[Site A - 10.1.0.0/16]
-        A[Site A Agent]
-    end
-
-    subgraph SiteB[Site B - 10.2.0.0/16]
-        B[Site B Agent]
-    end
-
-    subgraph SiteC[Site C - 10.3.0.0/16]
-        C[Site C Agent]
-    end
-
-    Cloud[Cloud Relay]
-
-    A <-->|QUIC| Cloud
-    B <-->|QUIC| Cloud
-    C <-->|QUIC| Cloud
+    A["Site A gateway<br/>10.1.0.0/16"] <-->|QUIC| R[Relay]
+    B["Site B gateway<br/>10.2.0.0/16"] <-->|QUIC| R
+    C["Site C gateway<br/>10.3.0.0/16"] <-->|QUIC| R
 ```
 
-### Configuration
-
-**Cloud Relay:**
+**Relay:**
 
 ```yaml
 agent:
-  display_name: "Cloud Relay"
+  display_name: "Relay"
+  data_dir: "/var/lib/muti-metroo"
 
 tls:
   ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
+  cert: "/etc/muti-metroo/certs/relay.crt"
+  key: "/etc/muti-metroo/certs/relay.key"
   mtls: true
 
 listeners:
   - transport: quic
     address: "0.0.0.0:4433"
-    # Uses global TLS settings
 ```
 
-**Site A Gateway:**
+**Site A gateway** (repeat for each site with its own CIDR, DNS server, and SOCKS address):
 
 ```yaml
 agent:
   display_name: "Site A Gateway"
+  data_dir: "/var/lib/muti-metroo"
 
 tls:
   ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
+  cert: "/etc/muti-metroo/certs/site-a.crt"
+  key: "/etc/muti-metroo/certs/site-a.key"
 
 peers:
-  - id: "${CLOUD_RELAY_ID}"
+  - id: "auto"
     transport: quic
-    address: "cloud-relay.example.com:4433"
-    # Uses global TLS settings
+    address: "relay.example.com:4433"
 
 socks5:
   enabled: true
@@ -191,161 +166,90 @@ exit:
   enabled: true
   routes:
     - "10.1.0.0/16"
-  dns:
-    servers:
-      - "10.1.0.1:53"
 ```
 
-**Site B Gateway:**
+A client at Site A uses its own gateway, `10.1.0.10:1080`, as the SOCKS proxy. A connection to `10.2.0.25` matches Site B's `10.2.0.0/16` route, travels through the relay, and Site B's gateway opens the TCP connection inside Site B.
 
-```yaml
-agent:
-  display_name: "Site B Gateway"
-
-tls:
-  ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
-
-peers:
-  - id: "${CLOUD_RELAY_ID}"
-    transport: quic
-    address: "cloud-relay.example.com:4433"
-    # Uses global TLS settings
-
-socks5:
-  enabled: true
-  address: "10.2.0.10:1080"
-
-exit:
-  enabled: true
-  routes:
-    - "10.2.0.0/16"
-  dns:
-    servers:
-      - "10.2.0.1:53"
+```bash
+curl -x socks5://10.1.0.10:1080 http://10.2.0.25/
 ```
 
-### Routing
+The SOCKS listener here has no authentication, so bind it only to an address that untrusted hosts cannot reach, or enable `socks5.auth`.
 
-From Site A, traffic to Site B:
-1. User configures `10.2.0.10:1080` as SOCKS5 proxy
-2. Traffic goes to Site A Gateway
-3. Route lookup: `10.2.x.x` matches Site B's `10.2.0.0/16`
-4. Traffic routes through Cloud Relay to Site B Gateway
-5. Site B Gateway opens connection to destination
+## Internet egress through a remote exit
 
----
-
-## Scenario 3: Secure Internet Gateway
-
-Route all internet traffic through a secure exit point.
-
-### Architecture
+An agent on the user's machine provides a local SOCKS proxy and sends all traffic to an exit agent on a remote server.
 
 ```mermaid
 flowchart LR
-    User[User Device] -->|SOCKS5<br/>localhost:1080| Gateway[Gateway Agent]
-    Gateway -->|Internet| Web[Internet]
+    Browser[Browser or app] -->|SOCKS5 127.0.0.1:1080| Local[Local agent]
+    Local -->|QUIC| Exit[Exit agent<br/>exit.example.com]
+    Exit --> Internet
 ```
 
-### Configuration
-
-**All-in-One Agent:**
+**Exit agent** (remote server):
 
 ```yaml
 agent:
-  display_name: "Secure Gateway"
+  display_name: "Exit"
+  data_dir: "/var/lib/muti-metroo"
 
 listeners:
   - transport: quic
     address: "0.0.0.0:4433"
-    tls:
-      cert: "./certs/agent.crt"
-      key: "./certs/agent.key"
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
-  auth:
-    enabled: true
-    users:
-      - username: "user"
-        password_hash: "${SOCKS5_PASSWORD_HASH}"
 
 exit:
   enabled: true
   routes:
     - "0.0.0.0/0"
-  dns:
-    servers:
-      - "1.1.1.1:53"
-      - "8.8.8.8:53"
-
-http:
-  enabled: true
-  address: ":8080"
+    - "::/0"
 ```
 
-### Usage
-
-```bash
-# Configure browser or system to use localhost:1080 as SOCKS5 proxy
-# All traffic will exit through the gateway
-```
-
----
-
-## Scenario 4: Firewall Traversal
-
-Connect agents through restrictive corporate firewalls.
-
-### Architecture
-
-```mermaid
-flowchart LR
-    subgraph Corp[Corporate Network]
-        Agent[Corporate Agent]
-        Proxy[HTTP Proxy]
-    end
-
-    subgraph Cloud[Cloud]
-        CloudAgent[Cloud Agent]
-    end
-
-    Agent -->|Via Proxy| Proxy
-    Proxy -->|WebSocket<br/>HTTPS:443| CloudAgent
-```
-
-### Configuration
-
-**Corporate Agent:**
+**Local agent** (user's machine):
 
 ```yaml
 agent:
-  display_name: "Corporate Agent"
+  display_name: "Laptop"
+  data_dir: "./data"
 
 peers:
-  - id: "${CLOUD_AGENT_ID}"
-    transport: ws
-    address: "wss://cloud.example.com:443/mesh"
-    proxy: "http://proxy.corp.local:8080"
-    proxy_auth:
-      username: "${PROXY_USER}"
-      password: "${PROXY_PASS}"
-    tls:
-      ca: "./certs/ca.crt"
+  - id: "auto"
+    transport: quic
+    address: "exit.example.com:4433"
 
 socks5:
   enabled: true
   address: "127.0.0.1:1080"
 ```
 
-**Cloud Agent:**
+Without `tls` settings, the exit generates a self-signed certificate at startup and the local agent does not verify it; the peer ID check and [end-to-end encryption](/security/e2e-encryption) protect the connection. Add a CA and mTLS as in the first scenario to restrict who can peer with the exit.
+
+Point the browser or application at `127.0.0.1:1080`, or test with:
+
+```bash
+curl -x socks5h://127.0.0.1:1080 https://example.com/
+```
+
+With `socks5h`, the local agent resolves host names with its own system resolver before choosing a route. To resolve names at the exit instead, add the domains to the exit's `domain_routes`.
+
+## Firewall traversal through an HTTP proxy
+
+The corporate network allows outbound traffic only through an HTTP proxy. The inside agent connects to a WebSocket listener on port 443 of a cloud agent, through the proxy.
+
+```mermaid
+flowchart LR
+    subgraph Corp[Corporate network]
+        Agent[Inside agent] --> Proxy[HTTP proxy]
+    end
+    Proxy -->|WebSocket over HTTPS, port 443| Cloud[Cloud agent<br/>cloud.example.com]
+```
+
+**Cloud agent:**
 
 ```yaml
 agent:
   display_name: "Cloud Agent"
+  data_dir: "/var/lib/muti-metroo"
 
 listeners:
   - transport: ws
@@ -359,93 +263,47 @@ exit:
   enabled: true
   routes:
     - "0.0.0.0/0"
-  dns:
-    servers:
-      - "8.8.8.8:53"
 ```
 
----
+Listener certificates must use ECDSA keys; with Certbot, request one with `--key-type ecdsa`. Binding port 443 requires root or the `cap_net_bind_service` capability. To share port 443 with a web server instead, see [Reverse Proxy Deployment](/deployment/reverse-proxy).
 
-## Scenario 5: High Availability
-
-Multiple paths for fault tolerance.
-
-### Architecture
-
-```mermaid
-flowchart LR
-    Ingress[Ingress Agent] <-->|Primary Path| Primary[Primary Relay]
-    Ingress <-->|Backup Path| Backup[Backup Relay]
-    Primary --> Exit[Exit Agent]
-    Backup --> Exit
-```
-
-### Configuration
-
-**Ingress Agent:**
+**Inside agent:**
 
 ```yaml
 agent:
-  display_name: "Ingress"
+  display_name: "Inside Agent"
+  data_dir: "./data"
 
 peers:
-  # Primary path
-  - id: "${PRIMARY_RELAY_ID}"
-    transport: quic
-    address: "primary-relay.example.com:4433"
-    tls:
-      ca: "./certs/ca.crt"
-
-  # Backup path
-  - id: "${BACKUP_RELAY_ID}"
-    transport: quic
-    address: "backup-relay.example.com:4433"
-    tls:
-      ca: "./certs/ca.crt"
+  - id: "auto"
+    transport: ws
+    address: "wss://cloud.example.com:443/mesh"
+    proxy: "http://proxy.corp.example.com:8080"
+    proxy_auth:
+      username: "${PROXY_USER}"
+      password: "${PROXY_PASS}"
 
 socks5:
   enabled: true
   address: "127.0.0.1:1080"
 ```
 
-Both relays connect to the same exit agent. Routes are learned from both, with the primary having lower metric (fewer hops).
+The proxy must allow `CONNECT` to `cloud.example.com:443`. Proxies that inspect TLS replace the server certificate, which works with the default (non-strict) certificate handling.
 
-### Failover Behavior
+## Rollout checklist
 
-1. Primary relay goes offline
-2. Route via primary expires (TTL)
-3. Traffic switches to backup route
-4. Primary recovers - traffic returns (lower metric)
+1. Generate a CA and one certificate per agent with [`muti-metroo cert`](/cli/cert), and the management keys if you use them.
+2. Validate every config with `muti-metroo config validate <file>`.
+3. Open the listener ports (UDP for QUIC, TCP for HTTP/2 and WebSocket) on the listening agents' firewalls.
+4. Start the agents. Order does not matter: dialing agents retry with exponential backoff until their peers are up.
+5. On the ingress agent, check peers and routes with `muti-metroo peer status` and `muti-metroo route status`.
+6. Send a test request through the SOCKS listener.
+7. Note certificate expiry dates. `muti-metroo run` warns at startup when a configured certificate expires within 60 days.
 
----
+## See Also
 
-## Deployment Checklist
-
-### Pre-Deployment
-
-- [ ] Generate CA certificate
-- [ ] Generate agent certificates for all nodes
-- [ ] Plan network topology and routes
-- [ ] Configure firewall rules
-
-### Deployment
-
-- [ ] Deploy exit agents first (routes must be available)
-- [ ] Deploy transit/relay agents
-- [ ] Deploy ingress agents last
-- [ ] Verify connectivity between all agents
-- [ ] Test SOCKS5 proxy end-to-end
-
-### Post-Deployment
-
-- [ ] Monitor logs
-- [ ] Set up alerting for certificate expiration
-- [ ] Document the topology
-- [ ] Plan certificate rotation
-
-## Next Steps
-
-- [Docker Deployment](/deployment/docker) - Containerized deployment
-- [System Service](/deployment/system-service) - Install as service
-- [PM2 Process Manager](/deployment/pm2) - Node.js-based process management
-- [High Availability](/deployment/high-availability) - Redundancy patterns
+- [High Availability](/deployment/high-availability) - Redundant paths, exits, and ingress agents
+- [Configuration Overview](/configuration/overview) - Every config section
+- [Exit Routing](/features/exit-routing) - CIDR and domain routes
+- [Agent Roles](/concepts/agent-roles) - Ingress, transit, and exit
+- [System Service](/deployment/system-service) - Running agents at boot

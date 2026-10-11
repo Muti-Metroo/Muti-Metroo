@@ -1,5 +1,6 @@
 ---
 title: Security Overview
+description: The security controls in Muti Metroo, what each protects against, what it does not, and a checklist for hardening a deployment.
 sidebar_position: 1
 ---
 
@@ -9,141 +10,86 @@ sidebar_position: 1
 
 # Security Overview
 
-Your traffic stays private even when it passes through transit nodes you don't control. Only the ingress and exit see your data - everything in between sees encrypted bytes they cannot decrypt.
+Muti Metroo layers several independent controls. Some are always on; most must be configured. This page summarizes them and links to the page that explains each one.
 
-**What this means for you:**
+## Controls
 
-- Compromise a transit node? They see nothing useful
-- Network tapped between agents? Traffic is encrypted
-- Unauthorized client tries to connect? Rejected by authentication
+| Layer | Mechanism | Default |
+| ----- | --------- | ------- |
+| [End-to-end encryption](/security/e2e-encryption) | Per-session X25519 key exchange, ChaCha20-Poly1305 | Always on |
+| [Peer link encryption](/security/tls-mtls) | TLS 1.3 | Always on, certificates not verified |
+| [Peer authentication](/security/tls-mtls#mutual-tls) | Certificates from your CA, mutual TLS | Off |
+| [SOCKS authentication](/security/authentication#socks-authentication) | Username and bcrypt-hashed password | Off |
+| [HTTP API authentication](/security/authentication#http-api-token) | Bearer token checked against a bcrypt hash | Off |
+| [Privileged operations](/security/authentication#management-signing-key) | Ed25519 signature with the mesh signing key | Disabled until keys are configured |
+| [Sleep and wake](/security/authentication#sleep-and-wake) | Ed25519 signature with the mesh signing key | Unsigned commands accepted until keys are configured |
+| [Exit routes](/security/access-control#exit-routes) | Exit agents only connect to TCP destinations in their routes | Exit role off |
+| [Command whitelist](/security/access-control#management-command-whitelist) | Only listed commands run | Management commands off |
+| [File paths](/security/access-control#file-transfer-paths) | Only listed paths are accessible | File transfer off |
+| [Topology encryption](/configuration/management) | Node information sealed to a management key | Off |
 
-## Security Model
+## What is protected
 
-### End-to-End Encryption
+| Threat | Protection | Condition |
+| ------ | ---------- | --------- |
+| Someone records traffic between agents | TLS on every link; end-to-end encryption of payloads | Always |
+| A transit agent's operator inspects relayed traffic | End-to-end encryption; transit agents never hold session keys | The transit agent relays as designed |
+| Someone modifies or replays encrypted frames | Authenticated encryption with per-frame counters | Always |
+| An unknown host connects as a peer | Listeners require a certificate from your CA | `mtls: true` |
+| An agent dials an impostor | Listener certificate checked against your CA | `strict: true` |
+| An unauthorized client uses the proxy | SOCKS username and password | `socks5.auth.enabled: true`, or a local-only bind address |
+| Someone calls the HTTP API | Bearer token | `http.token_hash` set, or a local-only bind address |
+| Someone runs commands or transfers files on an agent | Signature from the mesh signing key, whitelist, allowed paths | Feature enabled with keys configured |
+| Someone puts the mesh to sleep | Signature from the mesh signing key | `signing_public_key` on every agent, and every agent's HTTP API protected |
 
-Transit nodes relay your traffic without being able to read it:
+## What is not protected
 
-- Your data is encrypted before leaving the ingress
-- Only the exit node can decrypt it
-- Even if a transit is compromised, your data stays private
+| Exposure | Notes |
+| -------- | ----- |
+| Routing metadata | Transit agents see destination addresses and ports, hostnames for domain routes, the remaining path, the session type, and traffic timing and volume. |
+| A malicious transit agent | Session key exchange is not authenticated. An agent that rewrites session setup can read and alter the sessions it relays. |
+| Active interception of unverified links | With the default TLS settings, an attacker who intercepts a peer connection can act as a malicious transit agent. |
+| Compromised ingress or exit agents | They are session endpoints and see plaintext. |
+| Operator agents' HTTP API | An operator agent signs every privileged request that reaches its API. Access to that API grants control of the mesh. |
+| Unrouted SOCKS destinations | The ingress agent dials them directly from its own host. |
+| UDP and ICMP destinations | Exit routes do not restrict them. Disable `udp` and `icmp` where they are not needed. |
+| Certificate revocation | There is no CRL or OCSP support; replacing the CA is the only way to revoke a certificate. |
+| Audit trail | Agents do not keep an audit log of management commands, file transfers, or configuration changes. |
 
-See [End-to-End Encryption](/security/e2e-encryption) for details.
+## Hardening checklist
 
-### Transport Security
+### Every deployment
 
-All peer connections use TLS 1.3:
+- [ ] SOCKS listener bound to `127.0.0.1`, or authentication enabled
+- [ ] HTTP API bound to `127.0.0.1`, or `http.token_hash` set
+- [ ] Exit routes limited to the networks that are needed
+- [ ] Management commands and file transfer left disabled unless needed
 
-- **Encryption**: All traffic encrypted in transit
-- **Authentication**: Server certificates validated
-- **Mutual TLS**: Optional client certificate authentication
-- **Perfect Forward Secrecy**: Session keys derived per connection
+### Links across networks you do not control
 
-### Authentication Layers
+- [ ] Certificates issued from your own CA to every agent
+- [ ] `tls.strict: true` and `tls.mtls: true`
+- [ ] CA private key kept off the agents
 
-| Layer                    | Mechanism                         | Purpose                 |
-| ------------------------ | --------------------------------- | ----------------------- |
-| E2E                      | X25519 + ChaCha20-Poly1305        | Stream data encryption  |
-| TLS                      | Certificates                      | Peer authentication     |
-| mTLS                     | Client certs                      | Mutual authentication   |
-| HTTP API                 | Bearer token (bcrypt-hashed)      | Local/remote API access |
-| SOCKS5                   | Username/password (bcrypt-hashed) | Client authentication   |
-| Management commands      | Ed25519 management signature      | Command authorization   |
-| File Transfer            | Ed25519 management signature      | Transfer authorization  |
-| Dynamic config mutations | Ed25519 management signature      | Mutation authorization  |
-| Sleep/Wake               | Ed25519 management signature      | Command authentication  |
+### Management features in use
 
-### Authorization
+- [ ] Signing key pair generated; public key on every agent, private key only on operator agents
+- [ ] Operator agents' HTTP API local-only and token-protected
+- [ ] Narrow `shell.whitelist` without interpreters or shells
+- [ ] `file_transfer.allowed_paths` limited to specific directories
+- [ ] `udp.enabled: false` and `icmp.enabled: false` where they are not needed
+- [ ] Agent clocks synchronized
 
-- **Route-based ACL**: Exit only allows configured CIDRs
-- **Command whitelist**: Only whitelisted management commands allowed
-- **File path restrictions**: Only allowed paths accessible
+[Best Practices](/security/best-practices) covers certificate rotation, key handling, system hardening, and incident response.
 
-## What You're Protected Against
+## Reporting security issues
 
-| If This Happens...                         | You're Protected Because...                      |
-| ------------------------------------------ | ------------------------------------------------ |
-| Someone captures traffic between agents    | It's encrypted - they see random bytes           |
-| Transit node is compromised                | E2E encryption - transit can't decrypt your data |
-| Someone replays captured traffic           | Nonce-based encryption detects replays           |
-| Someone modifies traffic in transit        | Authenticated encryption detects tampering       |
-| Unauthorized peer tries to connect         | mTLS rejects unknown certificates                |
-| Unauthorized client tries to use proxy     | SOCKS5 authentication blocks them                |
-| Someone tries to run unauthorized commands | Command whitelist blocks unapproved commands     |
-| Someone tries to hibernate your mesh       | Signing keys verify sleep/wake commands          |
+Report vulnerabilities privately through [GitHub security advisories](https://github.com/postalsys/Muti-Metroo/security/advisories/new) rather than in a public issue. Include the affected version and reproduction steps.
 
-## What You Need to Protect Yourself
+## See Also
 
-| Risk                                   | Your Responsibility                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------- |
-| CA private key stolen                  | Store it securely (HSM, vault, encrypted disk)                            |
-| Ingress or exit host compromised       | Harden your endpoints - they see your data                                |
-| Local network sees connection metadata | Payloads are encrypted; timing and volume remain visible, as with any VPN |
-| Insider with valid credentials         | Monitor logs, rotate credentials                                          |
-
-## Security Checklist
-
-### Minimum Security
-
-- [ ] TLS certificates generated and deployed
-- [ ] Certificate CA key secured
-- [ ] SOCKS5 bound to localhost or authenticated
-- [ ] Exit routes restricted to needed CIDRs
-
-### Recommended Security
-
-- [ ] Mutual TLS enabled
-- [ ] SOCKS5 authentication enabled
-- [ ] Mesh management signing keypair generated and the public half deployed to every agent (private half kept on operator nodes only)
-- [ ] Management commands disabled or restricted with a strict whitelist
-- [ ] File transfer disabled or restricted
-- [ ] Monitoring and alerting configured
-- [ ] Regular certificate rotation
-
-### Production Security
-
-- [ ] All of the above
-- [ ] CA key in HSM or secure vault
-- [ ] Network segmentation
-- [ ] Intrusion detection
-- [ ] Audit logging
-- [ ] Incident response plan
-
-## Quick Hardening
-
-Apply these four changes for immediate security improvement:
-
-1. **Disable unused features** - Management commands and file transfer are disabled by default. Keep them disabled unless needed. See [Management Commands](/configuration/shell) and [File Transfer](/configuration/file-transfer) configuration.
-
-2. **Restrict SOCKS5 access** - Bind to localhost and enable authentication. See [SOCKS5 Configuration](/configuration/socks5).
-
-3. **Restrict exit routes** - Only advertise specific CIDRs, not `0.0.0.0/0`. See [Exit Configuration](/configuration/exit).
-
-4. **Enable mTLS** - Require valid client certificates for peer connections. See [TLS Configuration](/configuration/tls-certificates).
-
-For detailed hardening guidance, see [Best Practices](/security/best-practices).
-
-## Security Topics
-
-| Topic                                      | Description                     |
-| ------------------------------------------ | ------------------------------- |
-| [E2E Encryption](/security/e2e-encryption) | Stream payload encryption       |
-| [TLS/mTLS](/security/tls-mtls)             | Certificate-based security      |
-| [Authentication](/security/authentication) | Client and shell authentication |
-| [Access Control](/security/access-control) | Route and command restrictions  |
-| [Best Practices](/security/best-practices) | Production hardening guide      |
-
-## Reporting Security Issues
-
-If you discover a security vulnerability:
-
-1. Do NOT open a public issue
-2. Contact the maintainers privately
-3. Provide detailed reproduction steps
-4. Allow reasonable time for fix before disclosure
-
-## Next Steps
-
-- [End-to-End Encryption](/security/e2e-encryption)
-- [TLS/mTLS Configuration](/security/tls-mtls)
-- [Authentication](/security/authentication)
-- [Best Practices](/security/best-practices)
+- [End-to-End Encryption](/security/e2e-encryption): what payload encryption protects and its limits
+- [TLS and mTLS](/security/tls-mtls): verify peers and restrict who can join
+- [Authentication](/security/authentication): SOCKS, HTTP API, and signing key
+- [Access Control](/security/access-control): what authenticated users can reach
+- [Best Practices](/security/best-practices): production hardening

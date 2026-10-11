@@ -1,5 +1,6 @@
 ---
 title: Performance Troubleshooting
+description: Find the cause of slow connections, low throughput, and high CPU or memory use in a Muti Metroo mesh, and the settings that affect them.
 sidebar_position: 3
 ---
 
@@ -9,340 +10,104 @@ sidebar_position: 3
 
 # Performance Troubleshooting
 
-Things running slow? Use these diagnostics to find bottlenecks and tune your mesh for better speed.
+Traffic through the mesh is limited by the slowest link on its path and by the CPU of the ingress and exit agents, which encrypt and decrypt every stream. This page shows how to locate the bottleneck.
 
-**Quick diagnostics:**
-```bash
-# Check stream and connection counts
-curl http://localhost:8080/healthz | jq '{streams: .stream_count, peers: .peer_count}'
+## Measure first
 
-# CPU profile (30 seconds)
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-
-# Memory usage
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-```
-
-## High Latency
-
-### Symptoms
-
-- Slow page loads
-- SSH feels sluggish
-- Stream open timeouts
-
-### Diagnosis
+Measure a transfer through the SOCKS listener and compare it with the same transfer made directly from the exit host:
 
 ```bash
-# Count hops
-curl http://localhost:8080/healthz | jq '.route_count'
-# Look at metric values - each increment is one hop
+# Through the mesh, from the ingress side
+curl -x socks5h://127.0.0.1:1080 -o /dev/null -w 'time %{time_total}s, %{speed_download} bytes/s\n' \
+  https://example.com/large-file
 
-# Check logs for latency issues
-journalctl -u muti-metroo | grep -i "latency\|timeout"
+# Directly, on the exit host
+curl -o /dev/null -w 'time %{time_total}s, %{speed_download} bytes/s\n' https://example.com/large-file
 ```
 
-### Solutions
-
-**1. Reduce hop count**
-
-Fewer hops = lower latency.
-
-```
-Before: A → B → C → D → E (4 hops)
-After:  A → B → E (2 hops)
-```
-
-**2. Use faster transports**
-
-QUIC is generally faster than HTTP/2 or WebSocket.
-
-**3. Optimize network path**
-
-- Use geographically closer relays
-- Avoid high-latency links
-
-**4. Tune keepalive**
-
-```yaml
-connections:
-  idle_threshold: 60s    # Less frequent keepalives
-```
-
-## Low Throughput
-
-### Symptoms
-
-- Slow file transfers
-- Low throughput
-- Buffering on streams
-
-### Diagnosis
+Then measure each hop separately:
 
 ```bash
-# Check network speed between hops
-iperf3 -c peer-address -p 5201
-
-# Check logs for buffer issues
-journalctl -u muti-metroo | grep -i "buffer\|throttle"
+muti-metroo peer status
+iperf3 -c relay.example.com
 ```
 
-### Solutions
+`peer status` shows the round-trip time to each directly connected peer once it has been measured. `iperf3` needs an `iperf3 -s` server on the other host and the matching port open.
 
-**1. Increase buffer size**
+## Slow connection setup
 
-```yaml
-limits:
-  buffer_size: 524288    # 512 KB (default 256 KB)
+Every new connection through the mesh needs one round trip along the whole path before data flows, in addition to the TCP handshake at the exit. Interactive tools that open many short connections feel this most.
+
+- **Reduce the number of hops.** Check the path with `muti-metroo route trace <destination>`; the `hops` value is the number of agents between ingress and exit. Peer the ingress closer to the exit, or place relays where they shorten the path.
+- **Reduce per-hop latency.** Place relays in regions close to both neighbors.
+- **Check DNS.** With `socks5h://`, the ingress resolves host names (or the exit, for domain routes). A slow resolver adds its delay to every new connection.
+
+## Low throughput
+
+- **Find the slowest link.** A stream cannot be faster than the slowest hop on its path. Compare `iperf3` results between neighboring agents.
+- **Compare transports.** QUIC runs over UDP and avoids head-of-line blocking between streams sharing a peer connection. HTTP/2 and WebSocket run over a single TCP connection per peer, so packet loss on that link slows every stream on it. Where UDP is allowed and the link is lossy, QUIC usually performs better.
+- **Check the CPU on the ingress and exit.** Those agents encrypt and decrypt every byte. A core at 100% there caps throughput. Transit agents do not decrypt stream payloads, but every agent still handles TLS on each of its links.
+
+### QUIC UDP buffer warning
+
+On Linux, the QUIC library may log this at startup:
+
+```text
+failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB). See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes for details.
 ```
 
-Larger buffers = better throughput, but more memory.
-
-**2. Check for bottlenecks**
+The kernel limits UDP socket buffers to less than QUIC needs for high-bandwidth links. Raise the limits:
 
 ```bash
-# Test network speed between hops
-iperf3 -c peer-address -p 5201
-
-# Check if CPU-bound
-top -p $(pgrep muti-metroo)
+sudo sysctl -w net.core.rmem_max=7500000
+sudo sysctl -w net.core.wmem_max=7500000
 ```
 
-**3. Use QUIC**
+Add the same settings to `/etc/sysctl.d/` to keep them after a reboot. Set the environment variable `QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING=true` to silence the warning without changing the limits.
 
-QUIC handles packet loss better than TCP-based transports.
+## High CPU use
 
-**4. Use larger data transfers**
+- **Lower the log level.** `agent.log_level: "debug"` logs per-connection events and costs CPU under load. Use `info` or `warn` in production.
+- **Look at the traffic pattern.** CPU use scales with the bytes encrypted and the number of streams opened. Check `stream_count` in `/healthz` over time.
+- **Profile the agent** with pprof, as described below.
 
-Small frequent transfers have more overhead. Batch data when possible.
+## High memory use
 
-## High Memory Usage
-
-### Symptoms
-
-- Agent using excessive RAM
-- OOM kills
-- System slowdown
-
-### Diagnosis
+Memory grows with the number of open streams and peer connections. Check the current count:
 
 ```bash
-# Check memory usage
-ps aux | grep muti-metroo
-cat /proc/$(pgrep muti-metroo)/status | grep -i mem
-
-# Check stream count via health endpoint
-curl http://localhost:8080/healthz | jq '.stream_count'
+curl -s http://localhost:8080/healthz | jq '.stream_count'
 ```
 
-### Calculation
+- **Limit concurrent streams.** `limits.max_streams_total` (default 10000) caps the streams an agent holds at once. New streams beyond it are refused.
+- **Find streams that never close.** A steadily growing `stream_count` with constant traffic usually means clients hold connections open. Check the applications behind the SOCKS listener.
+- **Take a heap profile** to see where memory goes, as described below.
 
-Memory per stream = buffer_size x number_of_hops
+In containers, set a memory limit so a runaway agent is restarted instead of exhausting the host.
 
-```
-1000 streams x 256 KB buffer x 3 hops = 768 MB
-```
+## Profiling with pprof
 
-### Solutions
-
-**1. Reduce buffer size**
-
-```yaml
-limits:
-  buffer_size: 131072    # 128 KB
-```
-
-**2. Limit concurrent streams**
-
-```yaml
-limits:
-  max_streams_per_peer: 500
-  max_streams_total: 2000
-```
-
-**3. Reduce hop count**
-
-Fewer hops = less buffering per stream.
-
-**4. Add memory limits (container)**
-
-```yaml
-# docker-compose.yml
-services:
-  agent:
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-```
-
-## High CPU Usage
-
-### Symptoms
-
-- Agent using high CPU
-- Slow response times
-- System load high
-
-### Diagnosis
+The HTTP API serves Go's pprof endpoints under `/debug/pprof/` unless `http.pprof: false` or `http.minimal: true` is set. Expose the HTTP API only to trusted networks while they are enabled.
 
 ```bash
-# Check CPU usage
-top -p $(pgrep muti-metroo)
+# CPU profile over 30 seconds
+curl -o cpu.prof "http://localhost:8080/debug/pprof/profile?seconds=30"
+go tool pprof -top cpu.prof
 
-# CPU profiling
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-go tool pprof cpu.prof
+# Heap profile
+curl -o heap.prof http://localhost:8080/debug/pprof/heap
+go tool pprof -top heap.prof
+
+# Stack traces of all goroutines
+curl "http://localhost:8080/debug/pprof/goroutine?debug=2"
 ```
 
-### Solutions
-
-**1. Reduce logging**
-
-```yaml
-agent:
-  log_level: "warn"    # Not debug or info
-```
-
-**2. Limit stream count**
-
-More streams = more CPU.
-
-```yaml
-limits:
-  max_streams_total: 5000
-```
-
-**3. Use faster hardware**
-
-CPU-bound workloads benefit from faster cores.
-
-## Connection Issues
-
-### Too Many Connections
-
-```bash
-# Check connection count
-netstat -an | grep 4433 | wc -l
-curl http://localhost:8080/healthz | jq '.peer_count'
-```
-
-**Solutions:**
-
-```yaml
-limits:
-  max_streams_per_peer: 500    # Limit per peer
-```
-
-### Connection Churn
-
-Frequent connect/disconnect wastes resources.
-
-```bash
-# Check logs for reconnection patterns
-journalctl -u muti-metroo | grep -i "disconnect\|reconnect"
-```
-
-**Solutions:**
-
-1. Increase timeouts
-2. Improve network stability
-3. Check for misbehaving peers
-
-## pprof Debugging
-
-Muti Metroo exposes pprof for profiling:
-
-```bash
-# CPU profile
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-go tool pprof cpu.prof
-
-# Memory profile
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-go tool pprof heap.prof
-
-# Goroutine dump
-curl http://localhost:8080/debug/pprof/goroutine?debug=2
-
-# Block profile (where goroutines block)
-curl http://localhost:8080/debug/pprof/block > block.prof
-go tool pprof block.prof
-```
-
-## Optimization Checklist
-
-### For Latency
-
-- [ ] Minimize hop count
-- [ ] Use QUIC transport
-- [ ] Geographically optimize relay placement
-- [ ] Check network latency between hops
-
-### For Throughput
-
-- [ ] Increase buffer sizes
-- [ ] Use QUIC transport
-- [ ] Check for network bottlenecks
-- [ ] Monitor for packet loss
-
-### For Memory
-
-- [ ] Reduce buffer size if needed
-- [ ] Limit stream counts
-- [ ] Monitor active streams
-- [ ] Set memory limits
-
-### For CPU
-
-- [ ] Reduce logging verbosity
-- [ ] Limit stream counts
-- [ ] Profile with pprof
-- [ ] Check for excessive reconnections
-
-## Performance Tuning Guide
-
-### Low Latency Priority
-
-```yaml
-routing:
-  max_hops: 4              # Limit hops
-
-connections:
-  idle_threshold: 60s      # Less keepalive traffic
-
-limits:
-  buffer_size: 131072      # 128 KB - smaller buffers
-```
-
-### High Throughput Priority
-
-```yaml
-limits:
-  buffer_size: 524288      # 512 KB - larger buffers
-  max_streams_per_peer: 2000
-
-connections:
-  idle_threshold: 30s      # Detect issues quickly
-```
-
-### Memory Constrained
-
-```yaml
-limits:
-  buffer_size: 65536       # 64 KB
-  max_streams_total: 1000
-  max_streams_per_peer: 100
-```
+`go tool pprof` requires a Go installation on the machine where you analyze the profile; it does not need to run on the agent's host. Attach profiles to performance bug reports.
 
 ## See Also
 
-- [CLI - Status](/cli/status) - Check agent status
-- [API - Debugging (pprof)](/api/debugging) - Profiling endpoints
-- [API - Health](/api/health) - Health check endpoints
-
-## Next Steps
-
-- [Common Issues](/troubleshooting/common-issues) - Quick solutions
-- [Deployment](/deployment/scenarios) - Optimize deployment
-- [FAQ](/troubleshooting/faq) - Common questions
+- [API - Debugging](/api/debugging) - pprof endpoints and how to disable them
+- [Configuration - Limits](/configuration/limits) - Stream limits and their defaults
+- [Transports](/concepts/transports) - QUIC, HTTP/2, and WebSocket compared
+- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Path and route diagnosis
+- [High Availability](/deployment/high-availability) - Placing relays and exits

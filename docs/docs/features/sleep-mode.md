@@ -1,128 +1,77 @@
+---
+title: Sleep Mode
+description: Put a whole mesh to sleep so agents close their connections and only reconnect briefly to check for a wake command, then wake it again.
+sidebar_position: 10
+---
+
 # Sleep Mode
 
-Sleep mode enables mesh hibernation - agents can close all peer connections and enter an idle state, periodically polling for queued messages. This is useful for on-demand deployments that should remain idle until needed.
+Sleep mode lets an operator idle a mesh without stopping its agents. A sleep command spreads from agent to agent; each agent closes its peer connections, stops its SOCKS5 proxy and transport listeners, and then reconnects only briefly at intervals to check for a wake command. A wake command spreads the same way and returns every agent to normal operation.
 
-## Overview
+Use it for deployments that should stay in place but quiet until needed, or to reduce network activity and resource use during inactive periods.
 
-When sleep mode is enabled, agents can transition between three states:
+## Agent states
 
-- **AWAKE**: Normal operation with all connections active
-- **SLEEPING**: Idle state with all peer connections closed
-- **POLLING**: Briefly reconnected to receive queued messages
+| State | Meaning |
+| ----- | ------- |
+| `AWAKE` | Normal operation |
+| `SLEEPING` | Peer connections closed, SOCKS5 proxy and transport listeners stopped |
+| `POLLING` | Briefly reconnected to peers to receive queued updates and wake commands |
 
-Sleep and wake commands flood through the mesh, allowing you to hibernate or wake the entire network from any connected agent.
+## Enable sleep mode
 
-## Use Cases
-
-- **On-demand deployments**: Keep agents idle until explicitly needed
-- **Resource conservation**: Reduce network and memory footprint during inactive periods
-- **Traffic pattern reduction**: Minimize network connections when not in use
-- **Scheduled operations**: Sleep during off-hours, wake for maintenance windows
-
-## Basic Usage
-
-### Putting the Mesh to Sleep
-
-```bash
-# Put the mesh to sleep via local agent
-muti-metroo sleep
-
-# Via a specific agent
-muti-metroo sleep -a 192.168.1.10:8080
-```
-
-### Waking the Mesh
-
-```bash
-# Wake the mesh via local agent
-muti-metroo wake
-
-# Via a specific agent
-muti-metroo wake -a 192.168.1.10:8080
-```
-
-### Checking Sleep Status
-
-```bash
-# Check status
-muti-metroo sleep-status
-
-# JSON output
-muti-metroo sleep-status --json
-```
-
-Example output:
-
-```
-Sleep Mode Status
-=================
-State:          SLEEPING
-Enabled:        true
-Sleep Started:  2026-01-19T10:30:00Z
-Last Poll:      2026-01-19T10:35:00Z
-Next Poll:      2026-01-19T10:40:00Z
-Queued Peers:   2
-```
-
-## How It Works
-
-### Entering Sleep Mode
-
-When sleep is triggered:
-
-1. A SLEEP_COMMAND is flooded to all connected peers
-2. Each agent closes all peer connections
-3. SOCKS5 and listener services are stopped
-4. A poll timer is scheduled with jittered timing
-
-### Poll Cycles
-
-While sleeping, agents periodically wake briefly to:
-
-1. Reconnect to configured peers
-2. Receive queued route advertisements and node info
-3. Check for wake commands
-4. Disconnect and return to sleep
-
-The poll interval includes configurable jitter to prevent predictable connection patterns.
-
-### Waking Up
-
-When wake is triggered:
-
-1. The agent reconnects to all configured peers
-2. SOCKS5 and listener services restart
-3. A WAKE_COMMAND is flooded to the mesh
-4. Normal operation resumes
-
-## Configuration
-
-Enable sleep mode in your agent configuration:
+Sleep mode is off by default. Enable it on every agent that should take part:
 
 ```yaml
 sleep:
   enabled: true
-  poll_interval: 5m # How often to poll while sleeping
-  poll_interval_jitter: 0.3 # +/- 30% timing variation
-  poll_duration: 30s # How long to stay connected per poll
-  persist_state: true # Survive agent restarts
-  max_queued_messages: 1000 # Queue limit per sleeping peer
-  auto_sleep_on_start: false # Start in sleep mode
+  poll_interval: 5m
+  poll_interval_jitter: 0.3
+  poll_duration: 30s
 ```
 
-See [Sleep Configuration](/configuration/sleep) for details on each option.
+A sleeping agent polls every `poll_interval`, varied by up to `poll_interval_jitter` (30% here) so that many agents do not reconnect at the same moment, and stays connected for `poll_duration`. Instead of random jitter, agents can poll in deterministic windows derived from their agent ID. All options, including state persistence and deterministic windows, are in [Sleep Configuration](/configuration/sleep).
 
-## State Persistence
+## Put the mesh to sleep
 
-When `persist_state` is enabled, sleep state survives agent restarts. This means:
+Run `sleep` against any awake agent:
 
-- An agent sleeping when stopped will resume sleeping when restarted
-- Poll timing and command sequence are preserved
-- No manual intervention needed after system reboots
+```bash
+muti-metroo sleep
+```
 
-## Auto-Sleep on Start
+The command asks for confirmation; pass `--yes` in scripts. The agent forwards the sleep command to its peers, which forward it to theirs, and every agent that receives it goes to sleep. Agents that are disconnected at that moment do not receive it and stay awake.
 
-For on-demand deployments, enable `auto_sleep_on_start`:
+## Wake the mesh
+
+```bash
+muti-metroo wake
+```
+
+The agent you run it against wakes immediately, reconnects to its peers, and sends the wake command on. Sleeping agents receive it at their next poll, so the whole mesh can take up to one `poll_interval` (plus jitter) to wake.
+
+## Check the state
+
+```bash
+muti-metroo sleep-status
+```
+
+```text
+Sleep Mode Status
+=================
+State:          SLEEPING
+Enabled:        true
+Sleep Started:  2026-10-11T10:30:00Z
+Last Poll:      2026-10-11T10:35:12Z
+Next Poll:      2026-10-11T10:40:41Z
+Queued Peers:   2
+```
+
+`Queued Peers` counts sleeping peers for which this agent holds updates until their next poll. Use `--json` for machine-readable output, and `-a` to query another agent.
+
+## Start agents asleep
+
+With `auto_sleep_on_start: true`, an agent goes to sleep as soon as it starts and stays asleep until it receives a wake command:
 
 ```yaml
 sleep:
@@ -130,110 +79,60 @@ sleep:
   auto_sleep_on_start: true
 ```
 
-The agent will:
+When `persist_state` is enabled (the default), an agent that was sleeping when it stopped resumes sleeping when it restarts.
 
-1. Start and initialize normally
-2. Wait 5 seconds for connections to establish
-3. Automatically enter sleep mode
-4. Remain idle until explicitly woken
+## Restrict who can sleep and wake the mesh
 
-## Idle Behavior
+Sleep and wake commands carry a timestamp, and every agent ignores commands more than five minutes old or in the future, so agent clocks must be roughly synchronized.
 
-Sleep mode keeps idle agents quiet and resource-friendly:
+Every agent that has `management.signing_public_key` configured also requires the command to be signed with the matching private key. An agent without a signing public key accepts unsigned sleep and wake commands from any peer. To make sure only operators can sleep the mesh:
 
-- **Jittered polling**: Connection timing varies by +/- configured percentage, so many sleeping agents do not reconnect in lockstep
-- **No persistent connections**: All connections closed between polls
-- **Minimal poll duration**: Brief reconnection windows
+- Configure `management.signing_public_key` on every agent.
+- Keep `management.signing_private_key` only on operator agents; commands issued through those agents are signed automatically.
 
-## Command Authentication
+The agent that receives the `sleep` or `wake` request through its HTTP API acts on it whether or not it can sign it, so also protect each agent's HTTP API with `http.token_hash` or a local-only bind address. See [Authentication](/security/authentication#sleep-and-wake).
 
-By default, any party that can reach an agent's HTTP API can trigger sleep/wake commands. For untrusted environments, configure signing keys to authenticate commands.
+## Scheduled sleep
 
-### Generate Signing Keys
+Use cron or a systemd timer to sleep and wake on a schedule. The HTTP API does not prompt for confirmation:
 
 ```bash
-muti-metroo signing-key generate
+# Sleep at 18:00, wake at 08:00
+0 18 * * * curl -s -X POST http://localhost:8080/sleep
+0 8 * * * curl -s -X POST http://localhost:8080/wake
 ```
 
-### Configure Agents
-
-All agents need the public key to verify signatures:
-
-```yaml
-management:
-  signing_public_key: "a1b2c3d4..."
-```
-
-Operator nodes also need the private key to sign commands:
-
-```yaml
-management:
-  signing_public_key: "a1b2c3d4..."
-  signing_private_key: "e5f6a7b8..."
-```
-
-When signing keys are configured:
-
-- Commands are automatically signed when issued via CLI or HTTP API
-- Agents verify signatures before processing commands
-- Unsigned or invalid commands are rejected
-
-See [signing-key CLI](/cli/signing-key) for details.
-
-## Limitations
-
-- **Command propagation**: Sleep/wake commands only reach connected agents
-- **Isolated agents**: Agents not connected when sleep is triggered remain awake
-- **Poll timing**: Sleeping agents may miss real-time events between polls
-- **Unsigned commands**: Without signing keys, any party with API access can trigger sleep/wake
-
-## HTTP API
-
-Sleep mode also exposes HTTP endpoints:
-
-- `POST /sleep` - Trigger mesh-wide sleep
-- `POST /wake` - Trigger mesh-wide wake
-- `GET /sleep/status` - Get current sleep status
-
-See [Sleep API](/api/sleep) for details.
-
-## Example: Scheduled Sleep
-
-Use cron or systemd timers to schedule sleep/wake cycles:
-
-```bash
-# Sleep at 6 PM
-0 18 * * * curl -X POST http://localhost:8080/sleep
-
-# Wake at 8 AM
-0 8 * * * curl -X POST http://localhost:8080/wake
-```
+Add `-H "Authorization: Bearer <token>"` when the API requires a token. See [Sleep API](/api/sleep).
 
 ## Troubleshooting
 
-### Agent not entering sleep
+### sleep mode not enabled
 
-- Verify `sleep.enabled: true` in configuration
-- Check that the HTTP API is accessible
-- Review agent logs for sleep-related messages
+The agent you ran the command against does not have `sleep.enabled: true`.
 
-### Wake command not propagating
+### Some agents stay awake
 
-- Ensure at least one agent is awake or polling
-- Check that agents have matching peer configurations
-- Verify network connectivity between agents
+They were not connected when the sleep command spread, or they do not have sleep mode enabled. Run `muti-metroo sleep` again once they are connected.
 
-### State not persisting
+### Wake does not reach some agents
 
-- Confirm `persist_state: true` in configuration
-- Check that the data directory is writable
-- Verify the agent has clean shutdown (state saved on stop)
+Sleeping agents only see the wake command during a poll. Wait for one full `poll_interval`, then check `muti-metroo sleep-status` on an agent near them. Agents that have no awake or polling peer within reach cannot receive it.
 
-### Sleep/wake commands rejected
+### Commands are rejected
 
-If commands are being rejected due to signature verification:
+Agent logs show "sleep command rejected" or "wake command rejected" when a command fails verification:
 
-- Verify all agents have the same `signing_public_key`
-- Verify the operator node has the matching `signing_private_key`
-- Check that agent clocks are synchronized (within 5 minutes)
-- Review agent logs for "signature verification failed" messages
+- The command was unsigned or signed with a different key than the agent's `management.signing_public_key`. Issue it through an agent that holds the matching private key.
+- The agent's clock differs from the issuing agent's clock by more than five minutes.
+
+### Agent does not stay asleep after restart
+
+Check that `sleep.persist_state` is `true` and that `agent.data_dir` is writable; the state is stored in `sleep_state.json` there.
+
+## See Also
+
+- [Sleep Configuration](/configuration/sleep): poll timing, persistence, and deterministic windows
+- [sleep CLI](/cli/sleep): `sleep`, `wake`, and `sleep-status`
+- [Sleep API](/api/sleep): HTTP endpoints
+- [signing-key CLI](/cli/signing-key): generate the key pair that authenticates commands
+- [Authentication](/security/authentication): what the signing key protects

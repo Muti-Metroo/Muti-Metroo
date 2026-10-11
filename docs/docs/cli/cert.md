@@ -1,5 +1,8 @@
 ---
-title: cert
+title: muti-metroo cert
+sidebar_label: cert
+sidebar_position: 7
+description: Generate a certificate authority, agent and client certificates, and inspect certificate files.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,161 +11,198 @@ title: cert
 
 # muti-metroo cert
 
-Create the certificates that let agents trust each other. Generate a CA once, then create agent certificates signed by that CA.
+Generates the TLS certificates that agents use to authenticate each other, and prints details of existing certificate files. Create a certificate authority (CA) once, then issue an agent certificate for each agent from that CA. These commands work on local files only; no running agent is needed.
 
-**Typical workflow:**
-```bash
-# 1. Create your CA (do this once)
-muti-metroo cert ca --cn "My Mesh CA" -o ./certs
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-# 2. Create a certificate for each agent
-muti-metroo cert agent --cn "agent-1" --ca ./certs/ca.crt --ca-key ./certs/ca.key -o ./certs
-```
+All generated keys are ECDSA P-256. Certificates are written with mode `0644` and private keys with mode `0600`. The output directory is created if it does not exist. Existing files with the same name are overwritten without a prompt, so take care not to replace a CA you still need.
 
-## Subcommands
-
-### cert ca
-
-Generate Certificate Authority.
+## cert ca
 
 ```bash
-muti-metroo cert ca [--cn <name>] [-o <output-dir>] [--days <days>]
+muti-metroo cert ca [flags]
 ```
 
-**Flags:**
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--cn` | | "Muti Metroo CA" | Common name for the CA |
-| `--out` | `-o` | ./certs | Output directory |
-| `--days` | | 365 | Validity period in days |
+Generates a self-signed CA certificate and private key, written as `ca.crt` and `ca.key` in the output directory.
 
-**Output:**
-- `ca.crt`: CA certificate
-- `ca.key`: CA private key (keep secure!)
+### Flags
 
-### cert agent
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--cn` | `Muti Metroo CA` | Common name of the CA. |
+| `-o`, `--out` | `./certs` | Output directory. |
+| `--days` | `365` | Validity period in days. |
 
-Generate agent/peer certificate. The certificate can be used for both server authentication (listeners) and client authentication (peer connections with mTLS).
+### Examples
 
 ```bash
-muti-metroo cert agent --cn <name> [--dns <hostnames>] [--ip <ips>] [-o <output>] [--days <days>]
+muti-metroo cert ca --cn "Mesh CA"
 ```
 
-**Flags:**
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--cn` | | (required) | Common name for the certificate |
-| `--dns` | | | Additional DNS names (comma-separated) |
-| `--ip` | | | Additional IP addresses (comma-separated) |
-| `--out` | `-o` | ./certs | Output directory |
-| `--days` | | 365 | Validity period in days (matches the CA default; pick a shorter value for high-rotation environments) |
-| `--ca` | | ./certs/ca.crt | CA certificate path |
-| `--ca-key` | | ./certs/ca.key | CA private key path |
+```text
+Generating CA certificate...
+  Common Name: Mesh CA
+  Valid for: 365 days
 
-**Output:**
-- `<name>.crt`: Agent certificate (named after common name)
-- `<name>.key`: Agent private key
+CA certificate generated:
+  Certificate: ./certs/ca.crt
+  Private key: ./certs/ca.key
+  Fingerprint: sha256:fc5556612a9150254151333ddd886d95b271d82590f5e3ac3ac65c7d8c506d7c
+  Expires: 2027-10-11T11:53:25Z
+```
 
-### cert client
-
-Generate client-only certificate. This certificate can only be used for client authentication (connecting to listeners), not for server authentication.
+## cert agent
 
 ```bash
-muti-metroo cert client --cn <name> [-o <output>] [--days <days>]
+muti-metroo cert agent --cn <name> [flags]
 ```
 
-**Flags:**
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--cn` | | (required) | Common name for the certificate |
-| `--out` | `-o` | ./certs | Output directory |
-| `--days` | | 365 | Validity period in days (matches the CA default; pick a shorter value for high-rotation environments) |
-| `--ca` | | ./certs/ca.crt | CA certificate path |
-| `--ca-key` | | ./certs/ca.key | CA private key path |
+Generates an agent certificate signed by the CA. The certificate carries both the server authentication and client authentication extended key usages, so the same certificate serves an agent's listeners and its outbound peer connections, including mutual TLS.
 
-**Output:**
-- `<name>.crt`: Client certificate (named after common name)
-- `<name>.key`: Client private key
+The certificate always includes the common name and `localhost` as DNS names, and `127.0.0.1` and `::1` as IP addresses. Use `--dns` and `--ip` to add the names and addresses that peers use to reach the agent. The files are named after the common name: `<cn>.crt` and `<cn>.key`.
 
-### cert info
+### Flags
 
-Display detailed information about a certificate file.
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--cn` | none (required) | Common name. Also used as the file name. |
+| `--dns` | none | Additional DNS names, comma-separated. |
+| `--ip` | none | Additional IP addresses, comma-separated. An invalid address fails the command. |
+| `-o`, `--out` | `./certs` | Output directory. |
+| `--days` | `365` | Validity period in days. |
+| `--ca` | `./certs/ca.crt` | Path to the CA certificate. |
+| `--ca-key` | `./certs/ca.key` | Path to the CA private key. |
+
+### Examples
 
 ```bash
-muti-metroo cert info <cert-file>
+muti-metroo cert agent --cn agent-1 --dns agent1.example.com --ip 192.0.2.10
 ```
 
-**Example output:**
+```text
+Generating agent certificate...
+  Common Name: agent-1
+  Valid for: 365 days
+  CA: Mesh CA
+
+Agent certificate generated:
+  Certificate: ./certs/agent-1.crt
+  Private key: ./certs/agent-1.key
+  Fingerprint: sha256:540304b162a9fd55ee33e2e747dd76f85666daeaf7439f03fe78b715ce558a01
+  Expires: 2027-10-11T11:53:25Z
+  DNS Names: agent-1, localhost, agent1.example.com
+  IP Addresses: 127.0.0.1, ::1, 192.0.2.10
 ```
+
+Using a CA stored somewhere other than `./certs`:
+
+```bash
+muti-metroo cert agent --cn agent-2 \
+  --ca /etc/muti-metroo/ca.crt \
+  --ca-key /etc/muti-metroo/ca.key \
+  -o /etc/muti-metroo
+```
+
+## cert client
+
+```bash
+muti-metroo cert client --cn <name> [flags]
+```
+
+Generates a certificate signed by the CA that carries only the client authentication extended key usage. Use it for a connection that authenticates to a listener with mutual TLS but never accepts connections itself. It has no DNS or IP subject alternative names. The files are named `<cn>.crt` and `<cn>.key`.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--cn` | none (required) | Common name. Also used as the file name. |
+| `-o`, `--out` | `./certs` | Output directory. |
+| `--days` | `365` | Validity period in days. |
+| `--ca` | `./certs/ca.crt` | Path to the CA certificate. |
+| `--ca-key` | `./certs/ca.key` | Path to the CA private key. |
+
+### Examples
+
+```bash
+muti-metroo cert client --cn admin
+```
+
+```text
+Generating client certificate...
+  Common Name: admin
+  Valid for: 365 days
+  CA: Mesh CA
+
+Client certificate generated:
+  Certificate: ./certs/admin.crt
+  Private key: ./certs/admin.key
+  Fingerprint: sha256:e843152360ecc68d059ed41bd0c9df25ddb5928b134c6252effce82e534c6b57
+  Expires: 2027-10-11T11:53:25Z
+```
+
+## cert info
+
+```bash
+muti-metroo cert info <certificate>
+```
+
+Prints the subject, issuer, serial number, SHA-256 fingerprint, validity period, expiry status, subject alternative names, and key usages of a PEM certificate file. It takes no command-specific flags.
+
+### Examples
+
+```bash
+muti-metroo cert info ./certs/agent-1.crt
+```
+
+```text
 Certificate: ./certs/agent-1.crt
 
 Subject:      CN=agent-1,O=Muti Metroo
 Issuer:       CN=Mesh CA,O=Muti Metroo
-Serial:       1a2b3c4d5e6f...
-Fingerprint:  sha256:ab12cd34...
+Serial:       4840e0f8cabe061a09aa1f6d46d91a
+Fingerprint:  sha256:540304b162a9fd55ee33e2e747dd76f85666daeaf7439f03fe78b715ce558a01
 Is CA:        false
-Not Before:   2025-01-01T00:00:00Z
-Not After:    2025-04-01T00:00:00Z
-Status:       Valid (89 days left)
+Not Before:   2026-10-11T11:53:25Z
+Not After:    2027-10-11T11:53:25Z
+Status:       Valid (364 days left)
 DNS Names:    agent-1, localhost, agent1.example.com
-IP Addresses: 127.0.0.1, ::1, 192.168.1.10
-Key Usage:    KeyEncipherment, DigitalSignature
+IP Addresses: 127.0.0.1, ::1, 192.0.2.10
+Key Usage:    DigitalSignature, KeyEncipherment
 Ext Key Usage: ServerAuth, ClientAuth
 ```
 
-`Status` reports three warning bands so you have time to react:
+The day count is rounded down, so a certificate issued for 365 days shows 364 days left right after it is created.
 
-| Status line | Meaning |
-|---|---|
-| `EXPIRED` | Past `Not After`. The agent will refuse the cert; rotate immediately. |
-| `EXPIRING SOON (X days left)` | Less than 30 days remaining. Rotate now. |
-| `expiring within 60 days (X days left); plan rotation` | Heads-up window for unattended deployments. |
-| `Valid (X days left)` | More than 60 days remaining. |
+### Expiry status
 
-`muti-metroo run` also prints a startup warning (to stderr) when any configured TLS cert file is in the EXPIRED or `<60 days` bands, so the agent itself nags you on every restart instead of relying on someone running `cert info`.
+The `Status` line uses fixed bands:
 
-## Rotation cadence
+| Status line | Condition |
+| --- | --- |
+| `Valid (N days left)` | 60 or more days remaining. |
+| `expiring within 60 days (N days left); plan rotation` | Fewer than 60 days remaining. |
+| `EXPIRING SOON (N days left)` | Fewer than 30 days remaining. |
+| `EXPIRED` | The `Not After` time has passed. |
 
-Pick a `--days` value that matches the rotation capacity you actually have:
+[`muti-metroo run`](run.md) checks the certificate files configured in `tls.cert` and in each listener's `tls.cert` at startup with the same bands, and prints a notice (under 60 days) or a warning (under 30 days, or expired) to stderr. Certificates supplied inline with `cert_pem` are not checked.
 
-- **Long-running, unattended deployments** (hospital edge, spacecraft, factory floor) — keep the 365-day default; combine with a calendar reminder at 60 days out.
-- **Frequent-rotation environments** (PKI tooling automated, large fleets) — pass `--days 90` or shorter when generating cert and client certs.
-- **Air-gapped / offline replays** — match the certificate window to the maintenance window cadence, never longer.
+## Choosing a validity period
 
-The CA's `--days` default is also 365. If you bump CA validity, agent certs are still capped to whatever you pass on `muti-metroo cert agent --days`.
+The default of 365 days suits deployments that are rotated by hand once a year. Where certificate rotation is automated, a shorter `--days` value such as 90 limits how long a leaked key stays useful.
 
-## Examples
+The validity of an agent or client certificate is not limited by the CA's validity. A certificate whose `Not After` is later than the CA's stops validating when the CA expires, so plan CA rotation before issuing long-lived certificates from it.
 
-```bash
-# Generate CA
-muti-metroo cert ca --cn "Mesh CA" -o ./certs
+## Certificate types
 
-# Generate agent cert (signed by CA)
-muti-metroo cert agent --cn "agent-1" \
-  --ca ./certs/ca.crt \
-  --ca-key ./certs/ca.key \
-  --dns agent1.example.com \
-  --ip 192.168.1.10 \
-  -o ./certs
+| Type | Command | Server authentication | Client authentication | Typical use |
+| --- | --- | --- | --- | --- |
+| CA | `cert ca` | No | No | Signs agent and client certificates. |
+| Agent | `cert agent` | Yes | Yes | Listeners and peer connections. |
+| Client | `cert client` | No | Yes | Connections that only dial out with mutual TLS. |
 
-# Generate client cert (signed by CA)
-muti-metroo cert client --cn "admin" \
-  --ca ./certs/ca.crt \
-  --ca-key ./certs/ca.key \
-  -o ./certs
+## See Also
 
-# View cert info
-muti-metroo cert info ./certs/agent-1.crt
-```
-
-:::tip Default Paths
-The `--ca` and `--ca-key` flags default to `./certs/ca.crt` and `./certs/ca.key`. If your CA files are there, you can omit these flags.
-:::
-
-## Certificate Types
-
-| Type | Command | Server Auth | Client Auth | Use Case |
-|------|---------|-------------|-------------|----------|
-| CA | `cert ca` | N/A | N/A | Sign other certificates |
-| Agent | `cert agent` | Yes | Yes | Listeners and peer connections |
-| Client | `cert client` | No | Yes | Client-only connections |
+- [TLS certificates configuration](../configuration/tls-certificates.md): reference the generated files from the agent config
+- [TLS and mTLS](../security/tls-mtls.md): how agents verify each other and when to require client certificates
+- [muti-metroo setup](setup.md): generate certificates as part of the interactive setup wizard
+- [muti-metroo probe](probe.md): test that a listener accepts the certificates you issued

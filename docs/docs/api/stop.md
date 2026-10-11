@@ -1,103 +1,80 @@
-# Stop API
-
-HTTP endpoints for gracefully stopping an agent.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/shutdown` | POST | Stop the local agent |
-| `/agents/{id}/shutdown` | POST | Stop a remote agent over the mesh |
-
-Both endpoints require `http.remote_api: true` in the agent's configuration. They are intended for operator tooling (CLI, Muti Metroo Manager) -- the response confirms the request was accepted; the actual shutdown runs after the response flushes.
-
+---
+title: Shutdown Endpoints
+description: Stop the local agent or a remote agent gracefully over HTTP.
+sidebar_position: 15
 ---
 
-## POST /shutdown
+# Shutdown Endpoints
 
-Stop the local agent.
+These endpoints stop an agent gracefully, the same way as a `SIGTERM`: the agent withdraws its routes, closes peer connections, and exits. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`. The [`muti-metroo stop`](/cli/stop) command is a client of these endpoints.
 
-### Request
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /shutdown` | Stop the agent serving the request |
+| `POST /agents/{id}/shutdown` | Stop a remote agent |
+
+Shutdown is a signed operation: the agent serving the request must have `management.signing_private_key`, and for the remote endpoint the target must have `management.signing_public_key`.
+
+An agent installed as a system service may be started again by the service manager after it exits. See [CLI - stop](/cli/stop) for the behavior per platform, and run `muti-metroo service uninstall` first to remove an agent permanently.
+
+## `POST /shutdown`
+
+The response is sent before the shutdown starts. The request body is ignored.
 
 ```bash
-curl -X POST -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/json" \
-     -d '{}' \
-     http://localhost:8080/shutdown
+curl -X POST http://localhost:8080/shutdown
 ```
 
-The request body must be a JSON object. An empty `{}` is accepted; no fields are required.
-
-### Response
-
-**Success (200)**:
+**Response (200):**
 
 ```json
 {
-  "status": "shutting-down",
-  "message": "agent will exit shortly"
+  "message": "agent will exit shortly",
+  "status": "shutting-down"
 }
 ```
 
-**Forbidden (403)** -- agent is missing `management.signing_private_key`:
+### Errors
 
-```
-management signing private key not configured on this agent
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 403 | `management signing private key not configured on this agent` | No signing private key |
+| 404 | HTML page | `http.remote_api` is disabled |
+| 405 | `method not allowed` | Method other than `POST` |
 
-**Service Unavailable (503)** -- agent did not register a stop provider:
+## `POST /agents/{id}/shutdown`
 
-```
-shutdown not configured
-```
-
-### Behavior
-
-1. The handler verifies the agent has a signing private key (matches the gate used by other dynamic-config mutations).
-2. HTTP 200 is written immediately so the client sees confirmation.
-3. The agent's run loop is notified asynchronously via an internal channel; it then runs the same graceful shutdown path as a SIGTERM (drain in-flight streams up to 10 seconds, close peer connections, exit).
-
----
-
-## POST /agents/&#123;id&#125;/shutdown
-
-Stop a remote agent.
-
-### Request
+The request body must be a JSON object; `{}` is sufficient. The local agent signs it and forwards it over the mesh. The target verifies the signature, answers, and then shuts down.
 
 ```bash
-curl -X POST -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/json" \
-     -d '{}' \
-     http://localhost:8080/agents/kreata/shutdown
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/shutdown \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
-The path segment accepts either a full agent ID or a unique short prefix (resolved against the topology by the entry-point agent).
+**Response (200):**
 
-### Behavior
+```json
+{
+  "message": "agent will exit shortly",
+  "status": "shutting-down"
+}
+```
 
-1. The entry-point agent signs the body with `OpStop` using its `management.signing_private_key`.
-2. The signed payload is forwarded as a `CONTROL_REQUEST` of type `ControlTypeStop` (0x10) across the mesh.
-3. The target agent verifies the signature with its `management.signing_public_key`.
-4. On valid signature, the target agent enters the same shutdown path as the local endpoint.
+### Errors
 
-### Response
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"management signing public key not configured on this agent"}` | The target has no signing public key |
+| 400 | `{"error":"..."}` | The target rejected the signature |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 403 | `management signing private key not configured on this agent` | The serving agent has no signing private key |
+| 403 | `shutdown restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 500 | `failed to sign request: parse mutation body: unexpected end of JSON input` | Empty or non-JSON request body |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
 
-The response from the target is returned verbatim. Success returns the same 200 envelope as the local endpoint. On verification failure the target returns the `crypto.ErrAuth*` reason and the gateway surfaces it as HTTP 400.
+## See Also
 
----
-
-## Service manager restart
-
-A successful stop exits the process. Agents installed as a system service may be restarted automatically by the service manager (notably macOS launchd `KeepAlive` restarts immediately on clean exit). See the [stop CLI page](/cli/stop) for the per-platform matrix. For permanent removal, run `muti-metroo service uninstall` on the host before stopping.
-
----
-
-## Authorization summary
-
-| Path | Local signing key required | Target signing key required |
-|------|----------------------------|-----------------------------|
-| `POST /shutdown` | Yes (`signing_private_key` on the agent) | n/a -- target is the same agent |
-| `POST /agents/{id}/shutdown` | Yes on the entry-point agent | Yes (`signing_public_key` on the target) |
-
-Bearer-token auth applies to both endpoints if `http.token_hash` is set.
+- [CLI - stop](/cli/stop) - Stop agents from the command line
+- [Service management](/cli/service) - Install and uninstall agents as system services
+- [Management Keys](/configuration/management) - Signing keys for privileged operations

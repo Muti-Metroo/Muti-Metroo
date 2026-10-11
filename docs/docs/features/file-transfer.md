@@ -1,6 +1,7 @@
 ---
 title: File Transfer
-sidebar_position: 4
+description: Upload and download files and directories to and from remote agents, limit transfer speed, resume interrupted downloads, and browse remote directories.
+sidebar_position: 8
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,267 +10,133 @@ sidebar_position: 4
 
 # File Transfer
 
-Move files to and from any agent in your mesh. Grab a config file from a remote server, deploy scripts to multiple machines, or move large datasets between machines.
+`muti-metroo upload` and `muti-metroo download` copy files and whole directories between your machine and any agent in the mesh. The transfer goes through your local agent (the gateway) and the mesh to the target agent, end-to-end encrypted between the two.
 
 ```bash
-# Download a file from a remote agent
-muti-metroo download abc123 /etc/passwd ./passwd.txt
+# Fetch a log file from a remote agent
+muti-metroo download 1f743225 /var/log/app/app.log ./app.log
 
-# Upload a script to a remote agent
-muti-metroo upload abc123 ./deploy.sh /tmp/deploy.sh
+# Copy a script to a remote agent
+muti-metroo upload 1f743225 ./deploy.sh /tmp/deploy.sh
 
-# Transfer entire directories
-muti-metroo upload abc123 ./tools /opt/tools
+# Copy a directory
+muti-metroo upload 1f743225 ./tools /opt/tools
 ```
 
-:::tip Configuration
-See [File Transfer Configuration](/configuration/file-transfer) for all options including path restrictions, size limits, and authentication.
-:::
+## Requirements
 
-## CLI Usage
+File transfer is disabled by default. It needs settings on both agents:
 
-### Upload File
+| Agent | Setting |
+| ----- | ------- |
+| Target agent | `file_transfer.enabled: true` |
+| Target agent | `file_transfer.allowed_paths` listing the directories that may be read or written |
+| Target agent | `management.signing_public_key` |
+| Gateway agent (the one `-a` points at, default `localhost:8080`) | `management.signing_private_key` |
+
+The gateway agent signs each request and the target verifies the signature. There is no separate file-transfer password. See [File Transfer Configuration](/configuration/file-transfer) for `allowed_paths` patterns and size limits, and [Authentication](/security/authentication#management-signing-key) for the signing key pair.
+
+```yaml
+# Target agent
+file_transfer:
+  enabled: true
+  allowed_paths:
+    - /tmp
+    - /var/log/app
+management:
+  signing_public_key: "86d6714fc48cd41afd5051e6ad9523ad889c806001e92bc739913a18c6709a83"
+```
+
+## Upload and download
 
 ```bash
-muti-metroo upload <agent-id> <local-path> <remote-path>
-
-# Example
-muti-metroo upload abc123 ./data.bin /tmp/data.bin
+muti-metroo upload [flags] <target-agent-id> <local-path> <remote-path>
+muti-metroo download [flags] <target-agent-id> <remote-path> <local-path>
 ```
 
-### Upload Directory
+- The remote path must be absolute and inside an `allowed_paths` entry on the target.
+- The target agent ID can be a unique prefix of the full ID.
+- Directories are detected automatically and sent as a compressed tar archive, then unpacked at the destination.
+- File permissions are preserved.
+- Files are streamed, so they do not have to fit in memory. The target's `max_file_size` (default 500 MB) caps a single transfer.
+
+Use `-q` to suppress progress output and `-w` to change the transfer timeout (default `5m`). All flags are listed in [File Transfer CLI](/cli/file-transfer).
+
+### Limit transfer speed
+
+`--rate-limit` caps the transfer rate so a large file does not saturate a slow link:
 
 ```bash
-muti-metroo upload abc123 ./mydir /tmp/mydir
+muti-metroo upload --rate-limit 100KB 1f743225 ./large.iso /tmp/large.iso
+muti-metroo download --rate-limit 1MiB 1f743225 /data/backup.tar.gz ./backup.tar.gz
 ```
 
-### Download File
+Sizes accept decimal units (`100KB`, `1MB`; 1 KB = 1000 bytes), binary units (`100KiB`, `1MiB`; 1 KiB = 1024 bytes), or plain bytes (`1024000`). The sending side enforces the limit: your gateway agent for uploads, the target agent for downloads.
+
+### Resume an interrupted download
 
 ```bash
-muti-metroo download <agent-id> <remote-path> <local-path>
-
-# Example
-muti-metroo download abc123 /etc/config.yaml ./config.yaml
+muti-metroo download --resume 1f743225 /data/large.iso ./large.iso
 ```
 
-### Authorization
+While a download runs, data is written to `<local-path>.partial` and progress to `<local-path>.partial.json`. With `--resume`, the download continues from the end of the partial file. If the remote file's size has changed since the first attempt, the download is rejected instead of being resumed. When the download completes, the partial file is renamed to the final name.
 
-File transfer is gated by the mesh management Ed25519 signing keypair. The local agent reached via `-a` must have `management.signing_private_key` configured; the target agent must have `management.signing_public_key` configured. The `muti-metroo` CLI signs every request automatically -- there is no per-file password. See [Authentication](/security/authentication) for the full model.
+Resume does not apply to directories, and uploads are always sent again from the beginning.
 
-## HTTP API
+## Browse remote directories
 
-### Upload
+The HTTP API can list, inspect, change permissions of, and delete files on a target agent. It uses the same `allowed_paths` and signing key as file transfer. There is no CLI command for it.
 
-`POST /agents/{agent-id}/file/upload`
-
-Multipart form data:
-
-- `file`: File to upload
-- `path`: Remote destination path
-- `directory`: "true" if directory tar
-
-Requires a valid management signature header (the CLI handles signing).
-
-### Download
-
-`POST /agents/{agent-id}/file/download`
-
-Request:
+```bash
+curl -s -X POST http://localhost:8080/agents/1f743225d524f8acd3b42b55639702f0/file/browse \
+  -H "Content-Type: application/json" \
+  -d '{"action":"list","path":"/var/log/app"}'
+```
 
 ```json
-{
-  "path": "/tmp/file.txt"
-}
+{"path":"/var/log/app","entries":[{"name":"app.log","size":18874368,"mode":"0644","mod_time":"2026-10-11T11:51:24Z","is_dir":false}],"total":1,"truncated":false}
 ```
 
-Response: Binary file data. Same management-signature requirement as upload.
-
-## File Browsing
-
-Browse the filesystem on remote agents. Shares `allowed_paths` and the same management-signature authorization as file transfer -- no additional configuration needed.
-
-```bash
-# List directory contents
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"list","path":"/tmp"}'
-
-# Get info about a specific file
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"stat","path":"/tmp/config.yaml"}'
-
-# Discover browsable root paths
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"roots"}'
-
-# Change file permissions
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"chmod","path":"/tmp/script.sh","mode":"0755"}'
-
-# Delete a file
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"delete","path":"/tmp/old-config.yaml"}'
-
-# Delete a non-empty directory
-curl -X POST http://localhost:8080/agents/abc123/file/browse \
-  -H "Content-Type: application/json" \
-  -d '{"action":"delete","path":"/tmp/old-logs","recursive":true}'
-```
-
-The `list` action supports pagination with `offset` and `limit` parameters (default limit: 100, max: 5000). Entries are sorted with directories first, then files, alphabetically by name. The `delete` action removes files and empty directories directly; non-empty directories require `"recursive": true`.
-
-See [API - File Transfer](/api/file-transfer) for full request/response details.
-
-## Implementation Details
-
-- **Streaming**: Files transferred in 16KB chunks
-- **Streaming**: Stream directly without full-file memory buffering (configurable `max_file_size`, default 500 MB)
-- **Directories**: Automatically tar/gzip with permission preservation
-- **Authorization**: Ed25519 mesh management signature (no per-file password)
-- **Permissions**: File mode preserved (Unix)
-
-## Rate Limiting
-
-Limit transfer speed to avoid saturating network links.
-
-```bash
-# Upload at max 100 KB/s
-muti-metroo upload --rate-limit 100KB abc123 ./large.iso /tmp/large.iso
-
-# Download at max 1 MB/s
-muti-metroo download --rate-limit 1MB abc123 /data/backup.tar.gz ./backup.tar.gz
-```
-
-Supported size formats:
-
-- Decimal: `100KB`, `1MB`, `10GB` (1 KB = 1000 bytes)
-- Binary: `100KiB`, `1MiB`, `10GiB` (1 KiB = 1024 bytes)
-- Plain bytes: `1024000`
-
-Rate limiting is applied by the **sending agent**:
-
-- Upload: Your local agent limits the upload speed
-- Download: The remote agent limits the download speed
-
-## Resume Support
-
-Continue interrupted transfers without starting over.
-
-```bash
-# Resume interrupted download
-muti-metroo download --resume abc123 /data/large.iso ./large.iso
-
-# Resume interrupted upload
-muti-metroo upload --resume abc123 ./huge.iso /tmp/huge.iso
-
-# Combine with rate limiting
-muti-metroo download --rate-limit 500KB --resume abc123 /data/huge.iso ./huge.iso
-```
-
-### How It Works
-
-1. Partial data is written to `<filename>.partial`
-2. Progress is tracked in `<filename>.partial.json`
-3. On resume, transfer continues from the last byte written
-4. On completion, `.partial` is renamed to the final filename
-
-### Validation
-
-Resume uses **file size comparison** to detect if the source file changed:
-
-- If the original file size matches, transfer resumes from the offset
-- If size differs, transfer restarts from the beginning
-
-:::note Directory Transfers
-Resume is not supported for directory transfers. If a directory transfer is interrupted, it will restart from the beginning.
-:::
+The actions are `roots` (the browsable root paths), `list`, `stat`, `chmod`, and `delete`. See [File Transfer API](/api/file-transfer) for request and response fields, pagination, and recursive deletes.
 
 ## Troubleshooting
 
-### Permission Denied
+### path not in allowed list
 
-```
-Error: path not allowed: /etc/passwd
-```
-
-**Cause:** The path is not in the agent's `allowed_paths` configuration.
-
-**Solutions:**
-
-- Check the agent's `allowed_paths` setting
-- Use a path that's explicitly allowed
-- Contact the agent administrator to add the path
-
-### Authentication Failed
-
-```
-Error: authentication required
+```text
+Error: download failed: remote error: path not in allowed list: /etc/shadow
 ```
 
-**Cause:** The request was not signed with a valid management signing key.
+The path is outside every `allowed_paths` entry on the target agent, or `allowed_paths` is empty.
 
-**Solutions:**
+### management signing private key not configured on this agent
 
-- The local agent reached via `-a` must have `management.signing_private_key` set in its config -- only operator nodes typically hold the private half.
-- The target agent must have `management.signing_public_key` set; without it, every file-transfer request is rejected.
-- Generate a fresh keypair with `muti-metroo signing-key generate` and distribute the public half to every agent in the mesh; keep the private half on operator hosts.
+The gateway agent has no `management.signing_private_key`. Point `-a` at an operator agent that holds the private key, or add it to the gateway's configuration.
 
-```
-Error: invalid credentials
-```
+### management signing public key not configured on this agent
 
-**Cause:** The signature did not verify against the target's `management.signing_public_key`. Usually the operator and target are using different keys.
+The target agent has no `management.signing_public_key`, so it rejects every file transfer. Add the public half of the key pair to its configuration and restart it.
 
-### File Too Large
+### Signature rejected
 
-```
-Error: file exceeds maximum size limit
-```
+The gateway's private key does not match the public key on the target, or the two hosts' clocks differ by more than five minutes. Compare the keys with `muti-metroo signing-key public` and synchronize clocks.
 
-**Cause:** The file exceeds the agent's `max_file_size` setting.
+### file too large
 
-**Solutions:**
-
-- Check the size limit: `max_file_size: 0` means unlimited
-- Split the file into smaller parts
-- Contact the agent administrator to increase the limit
-
-### Agent Not Reachable
-
-```
-Error: no route to agent abc123
+```text
+Error: upload failed: remote error: file too large: 734003200 bytes (max 524288000)
 ```
 
-**Cause:** The target agent is not connected to the mesh or routes haven't propagated.
+The file exceeds `file_transfer.max_file_size` on the target agent. Raise the limit (`0` means unlimited) or split the file.
 
-**Solutions:**
+### no route to agent
 
-```bash
-# Check if agent is known
-curl http://localhost:8080/agents
+The gateway agent has no path to the target. Check `muti-metroo peer status` and `muti-metroo mesh-test`.
 
-# Verify connectivity
-curl http://localhost:8080/healthz | jq '.peer_count'
-```
+## See Also
 
-### Transfer Interrupted
-
-If a transfer is interrupted, use `--resume` to continue:
-
-```bash
-# Resume from where it left off
-muti-metroo download --resume abc123 /data/large.iso ./large.iso
-```
-
-Note: Resume is not supported for directory transfers.
-
-## Related
-
-- [CLI - File Transfer](/cli/file-transfer) - CLI reference
-- [API - File Transfer](/api/file-transfer) - HTTP API reference
-- [Security - Access Control](/security/access-control) - Path restrictions
-- [Troubleshooting - Common Issues](/troubleshooting/common-issues) - File transfer issues
+- [File Transfer CLI](/cli/file-transfer): every flag of `upload` and `download`
+- [File Transfer Configuration](/configuration/file-transfer): `allowed_paths` patterns and size limits
+- [File Transfer API](/api/file-transfer): upload, download, and browse endpoints
+- [Authentication](/security/authentication): the signing key pair that authorizes transfers
+- [Access Control](/security/access-control#file-transfer-paths): how path restrictions are enforced

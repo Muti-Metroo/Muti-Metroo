@@ -1,5 +1,7 @@
 ---
-title: Getting Started Overview
+title: Getting Started
+description: Run a demo Muti Metroo mesh in Docker, then choose between the setup wizard and a hand-written config for your own agents.
+sidebar_label: Overview
 sidebar_position: 1
 ---
 
@@ -9,11 +11,11 @@ sidebar_position: 1
 
 # Getting Started
 
-In the next few minutes, you will have a working tunnel that can reach networks behind firewalls, relay traffic through multiple hops, and route connections to any destination.
+This page shows two ways in: a demo mesh that runs in Docker with no installation, and the paths for setting up agents on your own hosts.
 
-## Try It in 2 Minutes
+## Try a demo mesh in Docker
 
-No installation needed - just Docker:
+The repository includes a six-agent example mesh. It needs Docker with Compose and builds the agent image from source.
 
 ```bash
 git clone https://github.com/postalsys/Muti-Metroo.git
@@ -21,70 +23,51 @@ cd Muti-Metroo/examples/docker-tryout
 docker compose up -d
 ```
 
-**That's it!** You now have a working 6-agent mesh:
+The ingress agent publishes its SOCKS5 proxy on port `11080` and its HTTP API on port `18080`. Once the containers are up, check the ingress agent and send a request through the mesh:
 
-- **Dashboard API:** `curl http://localhost:18080/api/dashboard | jq`
-- **Test proxy:** `curl -x socks5h://localhost:11080 https://httpbin.org/ip`
+```bash
+curl http://localhost:18080/healthz
+curl -x socks5h://localhost:11080 https://httpbin.org/ip
+```
 
-Query the dashboard API to see how agents connect through the mesh, then continue below for production setup.
+The second command travels through the mesh and returns JSON with the source address that httpbin.org saw. Stop the demo with `docker compose down`. The `README.md` in the `examples/docker-tryout` directory describes the topology and more things to try.
 
----
+## Set up your own agents
 
-## Production Setup
+You need the `muti-metroo` binary on each host. See [Installation](/getting-started/installation) or the [Download](/download) page. TLS certificates are generated automatically at startup, so no certificate setup is needed to start; see [TLS Certificates](/configuration/tls-certificates) when you want CA-verified peers.
 
-**What you will build:**
-- A SOCKS5 proxy that tunnels traffic through restricted networks
-- Multi-hop relay chains that reach destinations you could not access directly
-- Exit points that connect to internal resources or the internet
+Choose one of these paths:
 
-:::tip Transparent Routing with TUN Interface
-Want to route all traffic through the mesh without configuring each application for SOCKS5? On Linux, you can use [Mutiauk](/mutiauk) - a companion TUN interface that transparently intercepts Layer 3 traffic and forwards it through Muti Metroo.
-:::
+| Path | Use it when |
+| --- | --- |
+| [Interactive Setup](/getting-started/interactive-setup) | You want a guided wizard that writes the config, and optionally installs a service. |
+| [Quick Start](/getting-started/quick-start) | You want to write a minimal config by hand, or script the setup. |
+| [Docker Deployment](/deployment/docker) | You run agents as containers. |
 
-### Prerequisites
-
-- **Muti Metroo binary** - [Download for your platform](/download)
-- **Basic networking knowledge** (TCP/IP, CIDR notation)
-
-### Choose Your Path
-
-| Path | Best For | Time |
-|------|----------|------|
-| **[Interactive Setup](/getting-started/interactive-setup)** | New users, guided experience | 5-10 min |
-| **[Quick Start](/getting-started/quick-start)** | Manual control, scripting | 10-15 min |
-| **[Docker](/deployment/docker)** | Containerized deployments | 5 min |
-
-### Recommended: Interactive Setup
-
-The wizard handles everything - certificates, identity, and configuration:
+The wizard is a single command:
 
 ```bash
 muti-metroo setup
 ```
 
-[Go to Interactive Setup](/getting-started/interactive-setup)
-
-### Alternative: Manual Configuration
-
-For full control or automation:
+The manual path initializes an identity, then runs the agent with a config file you write (the [Quick Start](/getting-started/quick-start) has a minimal one):
 
 ```bash
 muti-metroo init -d ./data
-# Create config.yaml (see Quick Start)
 muti-metroo run -c ./config.yaml
 ```
 
-[Go to Quick Start](/getting-started/quick-start)
+After one agent works, [Your First Mesh](/getting-started/first-mesh) connects two or three agents so traffic enters on one host and leaves from another.
 
-## Next Steps
+:::tip Transparent routing
+Applications that cannot use a SOCKS proxy can reach the mesh through [Mutiauk](/mutiauk), a companion tool that creates a TUN interface and forwards IP traffic into the agent's SOCKS5 proxy. It runs on Linux, macOS, and Windows and requires root or Administrator.
+:::
 
-After setup, explore:
+## See Also
 
-- **[Your First Mesh](/getting-started/first-mesh)** - Connect multiple agents
-- **[Core Concepts](/concepts/architecture)** - Understand the architecture
-- **[Configuration Reference](/configuration/overview)** - All available options
-
-## Need Help?
-
-- [Troubleshooting](/troubleshooting/common-issues) - Common issues and solutions
-- [FAQ](/troubleshooting/faq) - Frequently asked questions
+- [Installation](/getting-started/installation): download the binary and install it as a service
+- [Your First Mesh](/getting-started/first-mesh): connect an ingress agent to an exit agent
+- [Architecture](/concepts/architecture): how agents, routes, and streams fit together
+- [Configuration Overview](/configuration/overview): every configuration section
+- [Troubleshooting](/troubleshooting/common-issues): fixes for common problems
+- [FAQ](/troubleshooting/faq): answers to frequently asked questions

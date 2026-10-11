@@ -1,51 +1,71 @@
-# Peer Management API
-
-HTTP endpoints for managing dynamic outbound peer connections at runtime.
-
-Dynamic peers let you instruct an already-running agent to dial a new peer without editing `config.yaml` and restarting. A typical use case: a new agent that can only accept connections but an existing agent (behind a firewall or NAT) must initiate the dial.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/peers/manage` | POST | Manage peer connections on local agent |
-| `/agents/{agent-id}/peers/manage` | POST | Manage peer connections on remote agent |
-
-These endpoints require `http.remote_api: true` in configuration.
-
+---
+title: Peer Management Endpoints
+description: Tell a running agent to dial a new peer, disconnect a dynamic peer, or list its peer connections.
+sidebar_position: 7
 ---
 
-## POST /peers/manage
+# Peer Management Endpoints
 
-Manage outbound peer connections on the local agent.
+These endpoints add and remove outbound peer connections on a running agent, and list its current connections. A typical use is an agent that can only accept connections: an existing agent that can reach it is told to dial it. The endpoints belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /peers/manage` | Manage peers of the local agent |
+| `POST /agents/{id}/peers/manage` | Manage peers of a remote agent |
+
+`add` and `remove` are mutations: the agent serving the request must have `management.signing_private_key`, otherwise it returns `403`. Mutations are written to the [dynamic configuration journal](/configuration/dynamic-config-persistence) when `agent.data_dir` is set and are replayed on restart. Peers from the `peers` configuration section cannot be removed or replaced.
+
+## `POST /peers/manage`
 
 ### Request
 
-Add a peer (QUIC, any peer ID accepted):
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `address` | string | `add`, `remove` | Dial address. For `quic`, `host:port`. For `h2` and `ws`, `host:port` (path `/mesh`) or a URL with a path such as `https://relay.example.com:443/mesh` or `wss://relay.example.com/mesh`. |
+| `transport` | string | `add` | `quic` (default), `h2`, or `ws` |
+| `id` | string | `add` | Expected agent ID of the peer. Omit or use `auto` to accept any ID. |
+| `tcp_keepalive` | string | `add` | TCP keepalive period for `h2` and `ws`, as a Go duration such as `20s`. `0` disables it. Default: `connections.tcp_keepalive`. |
+
+Dynamic peers use the agent's global TLS settings; per-peer TLS, proxy, and protocol overrides are not available. A dynamic peer reconnects with backoff when the connection drops, like a configured peer.
+
+### `add`
+
+Starts dialing in the background and returns immediately. A failed dial is retried with backoff; check the result with `list`. Adding an address that already exists as a dynamic peer closes the old connection and dials again with the new settings.
 
 ```bash
 curl -X POST http://localhost:8080/peers/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "address": "newagent.example:4433"}'
+  -d '{"action": "add", "address": "203.0.113.10:4433", "id": "331974cd4a0be0d7f945ed9d367a0211"}'
 ```
 
-Add a peer with a specific transport and expected ID:
+```json
+{
+  "status": "ok",
+  "message": "peer 203.0.113.10:4433 added (transport=quic)"
+}
+```
+
+### `remove`
+
+Closes the connection to a dynamic peer and cancels reconnection. When a connection was open, the message includes the peer's short ID.
 
 ```bash
 curl -X POST http://localhost:8080/peers/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "address": "newagent.example:443", "transport": "h2", "id": "abc123def456..."}'
+  -d '{"action": "remove", "address": "203.0.113.10:4433"}'
 ```
 
-Remove a dynamic peer:
-
-```bash
-curl -X POST http://localhost:8080/peers/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "remove", "address": "newagent.example:4433"}'
+```json
+{
+  "status": "ok",
+  "message": "peer 203.0.113.10:4433 removed (disconnected 331974cd)"
+}
 ```
 
-List all peers (dynamic and config):
+### `list`
+
+Returns outbound peers (configured and dynamic) and inbound connections accepted by this agent, sorted by address.
 
 ```bash
 curl -X POST http://localhost:8080/peers/manage \
@@ -53,162 +73,87 @@ curl -X POST http://localhost:8080/peers/manage \
   -d '{"action": "list"}'
 ```
 
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | Action to perform: `add`, `remove`, or `list` |
-| `address` | string | For add/remove | Peer dial address (e.g. `host:4433`) |
-| `transport` | string | No | Transport type: `quic` (default), `h2`, or `ws` |
-| `id` | string | No | Expected peer agent ID; omit or `auto` to accept any |
-
-### Response
-
-**Add Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "peer newagent.example:4433 added (transport=quic)"
-}
-```
-
-**Remove Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "peer newagent.example:4433 removed (disconnected abc123de)"
-}
-```
-
-When no live connection exists (e.g. still in reconnect backoff), the short ID suffix is omitted.
-
-**List Success (200)**:
-
 ```json
 {
   "status": "ok",
   "peers": [
     {
-      "address": "agent2:4433",
+      "address": "127.0.0.1:52511",
       "transport": "quic",
-      "remote_id": "abcdef1234567890abcdef1234567890",
+      "remote_id": "653422d2fc10b554514c5cbe6e6cd6cd",
+      "connected": true,
+      "persistent": false,
+      "dynamic": false,
+      "direction": "inbound"
+    },
+    {
+      "address": "198.51.100.20:443",
+      "transport": "h2",
+      "expected_id": "331974cd4a0be0d7f945ed9d367a0211",
+      "remote_id": "331974cd4a0be0d7f945ed9d367a0211",
       "connected": true,
       "persistent": true,
       "dynamic": false
     },
     {
-      "address": "newagent.example:4433",
+      "address": "203.0.113.10:4433",
       "transport": "quic",
-      "remote_id": "9876543210fedcba9876543210fedcba",
-      "connected": true,
+      "connected": false,
       "persistent": true,
       "dynamic": true
-    },
-    {
-      "address": "198.51.100.7:54321",
-      "transport": "quic",
-      "remote_id": "fedcba0987654321fedcba0987654321",
-      "connected": true,
-      "persistent": false,
-      "dynamic": false,
-      "direction": "inbound"
     }
   ]
 }
 ```
 
-**Bad Request (400)**:
+| Field | Description |
+| ----- | ----------- |
+| `address` | Dial address for outbound peers; the remote socket address for inbound connections |
+| `transport` | `quic`, `h2`, or `ws` |
+| `expected_id` | Configured expected agent ID; omitted when any ID is accepted |
+| `remote_id` | Agent ID of the connected peer; omitted while disconnected |
+| `connected` | A connection is open |
+| `persistent` | The agent reconnects when the connection drops; `false` for inbound entries |
+| `dynamic` | `true` for peers added at runtime |
+| `direction` | `inbound` for accepted connections; omitted for outbound peers |
 
-```json
-{ "error": "address is required" }
-```
+### Errors
 
-```json
-{ "error": "unknown transport \"xyz\" (expected quic, h2, or ws)" }
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"address is required"}` | Missing `address` |
+| 400 | `{"error":"unknown transport \"xyz\" (expected quic, h2, or ws)"}` | Invalid `transport` |
+| 400 | `{"error":"invalid peer id: ..."}` | `id` is not a valid agent ID |
+| 400 | `{"error":"invalid tcp_keepalive \"abc\": ..."}` | `tcp_keepalive` is not a duration |
+| 400 | `{"error":"peer \"198.51.100.20:443\" is a config peer and cannot be replaced"}` | `add` of a configured address |
+| 400 | `{"error":"peer \"198.51.100.20:443\" is a config peer and cannot be removed"}` | `remove` of a configured address |
+| 400 | `{"error":"dynamic peer \"203.0.113.99:4433\" not found"}` | `remove` of an unknown address |
+| 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key |
+| 403 | `peer management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 405 | `method not allowed` | Method other than `POST` |
 
-```json
-{ "error": "peer \"agent2:4433\" is a config peer and cannot be replaced" }
-```
+## `POST /agents/{id}/peers/manage`
 
-```json
-{ "error": "dynamic peer \"newagent.example:4433\" not found" }
-```
-
-**Forbidden (403)**:
-
-```
-peer management restricted: management key decryption unavailable
-```
-
-### Behavior
-
-When a peer is added:
-1. Address is required; transport defaults to `quic`; expected ID is parsed if set and not `auto`.
-2. If the address belongs to a config peer, the request is rejected.
-3. If a dynamic peer with the same address exists, its live connection is closed and its pending reconnect is cancelled, then the peer is replaced.
-4. A background dial is started using the agent's global TLS configuration. If the initial dial fails, the peer manager will retry with exponential backoff.
-
-When a peer is removed:
-1. The address must belong to a dynamic peer (not from config).
-2. Any live connection is closed immediately.
-3. Pending reconnect attempts are cancelled.
-
-When listing:
-- Outbound peers (config and dynamic) are returned, plus any inbound peers that have dialed into this agent.
-- The `dynamic` field distinguishes runtime peers from config-file peers.
-- The `direction` field is `"inbound"` for accepted connections and omitted for outbound. For inbound entries, `address` is the remote socket (ephemeral), and `persistent`/`dynamic`/`expected_id` are not applicable and left at their zero values.
-- `connected` indicates whether a live connection currently exists; `remote_id` is populated only when connected.
-
-Dynamic peers:
-- Are ephemeral (lost on agent restart).
-- Inherit TLS settings (CA, client cert, mTLS, strict-verify) from the agent's global config; per-peer TLS overrides are not supported.
-- Auto-reconnect on disconnect (persistent=true), just like config peers.
-
----
-
-## POST /agents/\{agent-id\}/peers/manage
-
-Manage peer connections on a remote agent.
-
-### Request
+Manages peers of a remote agent. The request body and responses are the same as for [`POST /peers/manage`](#post-peersmanage).
 
 ```bash
-curl -X POST http://localhost:8080/agents/abc123def456/peers/manage \
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/peers/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "address": "F.example:4433"}'
+  -d '{"action": "add", "address": "203.0.113.20:4433"}'
 ```
 
-### Request Body
+The local agent signs `add` and `remove` and forwards the request over the mesh; the target verifies the signature with its `management.signing_public_key`. Additional errors:
 
-Same as `/peers/manage`.
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"management signing public key not configured on this agent"}` | The target has no signing public key |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
 
-### Response
+## See Also
 
-Same response formats as `/peers/manage`.
-
-The request is forwarded to the target agent via the mesh control channel. The response reflects the result from the remote agent.
-
----
-
-## Error Responses
-
-All endpoints may return:
-
-| Status | Description |
-|--------|-------------|
-| 400 | Invalid request body or parameters |
-| 403 | Management key required but unavailable |
-| 404 | Endpoint disabled (`remote_api` not enabled) or agent not found |
-| 405 | Method not allowed (must be POST) |
-| 503 | Peer management not configured |
-
-:::note Management Key Protection
-Peer management endpoints follow the same management key restrictions as route and forward management. Agents with only `management.public_key` (field agents) cannot manage peers. Agents with both keys (operator nodes) can manage peers freely.
-:::
-
-:::warning Dynamic Peers are Ephemeral
-Dynamic peers added via the API are lost when the agent restarts. For persistent peers, add them to the `peers:` section in the configuration file.
-:::
+- [CLI - peer](/cli/peer) - The `peer` commands that call these endpoints
+- [Peers Configuration](/configuration/peers) - Configured peers and their options
+- [Listener Management Endpoints](/api/listener-management) - Open listeners for peers to dial
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart

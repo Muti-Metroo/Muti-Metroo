@@ -1,328 +1,99 @@
 ---
 title: Environment Variables
-sidebar_position: 8
+description: How environment variable references in the configuration file are expanded, including default values, unset variables, and passing multi-line PEM content.
+sidebar_position: 22
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-inspecting.png" alt="Mole reading environment" style={{maxWidth: '180px'}} />
 </div>
 
-# Environment Variable Substitution
+# Environment Variables
 
-Keep secrets out of your config files. Reference environment variables instead of hardcoding passwords, API keys, and deployment-specific values.
+Any value in the configuration file can come from an environment variable. This keeps secrets and per-host values out of the file.
 
-**Quick example:**
 ```yaml
-socks5:
-  auth:
-    users:
-      - username: "admin"
-        password_hash: "${SOCKS5_PASSWORD_HASH}"  # From environment
-
 agent:
-  log_level: "${LOG_LEVEL:-info}"                 # Default if not set
+  log_level: "${LOG_LEVEL:-info}"
+
+http:
+  token_hash: "${HTTP_TOKEN_HASH}"
 ```
 
 ## Syntax
 
-### Basic Substitution
+| Form             | Result                                                                    |
+| ---------------- | ------------------------------------------------------------------------- |
+| `${VAR}`         | Value of `VAR`. If `VAR` is not set, the text `${VAR}` stays in place.    |
+| `${VAR:-default}`| Value of `VAR`, or `default` if `VAR` is not set. A set but empty `VAR` gives an empty value. |
+| `$VAR`           | Same as `${VAR}`. The name must start with a letter or underscore.        |
+
+Expansion is plain text substitution over the whole file before it is parsed as YAML. It also applies inside comments and quoted strings, and there is no escape syntax for a literal `$` followed by a name. A substituted value is parsed as YAML, so quote references that may expand to something YAML would interpret differently:
 
 ```yaml
-agent:
-  log_level: "${LOG_LEVEL}"
-```
-
-If `LOG_LEVEL` is not set and no `:-default` is given, the literal text `${LOG_LEVEL}` is left in place -- it is not substituted, and the agent does not abort. To avoid surprising downstream parse errors, always provide a default with `${VAR:-fallback}` or make sure the variable is exported.
-
-### With Default Value
-
-```yaml
-agent:
-  log_level: "${LOG_LEVEL:-info}"
-```
-
-Uses `info` if `LOG_LEVEL` is not set.
-
-### Examples
-
-```yaml
-agent:
-  id: "${AGENT_ID:-auto}"
-  display_name: "${HOSTNAME:-unknown}"
-  data_dir: "${DATA_DIR:-./data}"
-  log_level: "${LOG_LEVEL:-info}"
-
-socks5:
-  address: "${SOCKS_ADDR:-127.0.0.1:1080}"
-  auth:
-    users:
-      - username: "${SOCKS_USER:-user}"
-        password_hash: "${SOCKS_PASS_HASH}"
-
 peers:
-  - id: "${PEER_ID}"
+  - id: "${PEER_ID:-auto}"
     transport: "${PEER_TRANSPORT:-quic}"
     address: "${PEER_ADDR}"
 ```
 
-## Common Use Cases
-
-### Secrets
-
-Never hardcode secrets in configuration:
+Values that are not strings work without quotes:
 
 ```yaml
 http:
-  token_hash: "${HTTP_TOKEN_HASH}"
-
-socks5:
-  auth:
-    users:
-      - username: "admin"
-        password_hash: "${SOCKS5_PASSWORD_HASH}"
-
-management:
-  signing_public_key:  "${MESH_SIGNING_PUBLIC_KEY}"
-  signing_private_key: "${MESH_SIGNING_PRIVATE_KEY}"  # Operator nodes only
+  enabled: ${HTTP_ENABLED:-true}
+shell:
+  timeout: ${SHELL_TIMEOUT:-5m}
 ```
 
-:::tip CLI Authentication
-The CLI also supports `MUTI_METROO_TOKEN` environment variable for API authentication:
+## Unset variables
+
+A reference to an unset variable without a default is not an error. The literal `${VAR}` text is used as the value, and the problem shows up later as a validation error or odd behavior, for example a SOCKS password hash that never matches. Use `muti-metroo config show` to see the expanded result:
+
 ```bash
-export MUTI_METROO_TOKEN=my-secret-token
-muti-metroo status
+muti-metroo config show ./config.yaml
 ```
-:::
 
-### TLS Certificates
+Give non-secret values a default. Leave secrets without a default, so a missing secret is visible instead of silently falling back to a known value.
 
-Inline certificates from environment:
+## Multiline values
+
+YAML folds line breaks inside a double-quoted string into spaces, so a PEM certificate exported with real line breaks does not survive `cert_pem: "${TLS_CERT}"`. Export the content with `\n` escape sequences instead; YAML turns them back into line breaks:
+
+```bash
+export TLS_CERT="$(awk '{printf "%s\\n", $0}' ./certs/agent.crt)"
+export TLS_KEY="$(awk '{printf "%s\\n", $0}' ./certs/agent.key)"
+```
 
 ```yaml
 tls:
-  ca_pem: "${TLS_CA}"
   cert_pem: "${TLS_CERT}"
   key_pem: "${TLS_KEY}"
-  mtls: true
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
 ```
 
-### Deployment Configuration
+In an env file read by Docker or systemd, write the value on one line with `\n` between the PEM lines.
 
-Different values per environment:
+## Supplying variables
 
-```yaml
-agent:
-  display_name: "${ENVIRONMENT:-dev}-${HOSTNAME}"
-
-http:
-  address: "${HTTP_ADDR:-:8080}"
-
-listeners:
-  - transport: quic
-    address: "${LISTEN_ADDR:-0.0.0.0:4433}"
-```
-
-### Dynamic Peer Discovery
-
-```yaml
-peers:
-  - id: "${PEER_1_ID}"
-    address: "${PEER_1_ADDR}"
-    transport: quic
-    tls:
-      ca: "${PEER_1_CA:-/etc/muti-metroo/ca.crt}"
-
-  - id: "${PEER_2_ID}"
-    address: "${PEER_2_ADDR}"
-    transport: quic
-    tls:
-      ca: "${PEER_2_CA:-/etc/muti-metroo/ca.crt}"
-```
-
-## Running with Environment Variables
-
-### Command Line
+The agent reads its own process environment. Set variables in the shell, a service manager, or a container runtime:
 
 ```bash
-# Single variable
-LOG_LEVEL=debug muti-metroo run -c config.yaml
-
-# Multiple variables
-SOCKS_ADDR=0.0.0.0:1080 \
-LOG_LEVEL=info \
-PEER_ID=abc123 \
-muti-metroo run -c config.yaml
+LOG_LEVEL=debug muti-metroo run -c ./config.yaml
 ```
-
-### Environment File
-
-Create `.env` file:
-
-```bash
-# .env
-LOG_LEVEL=info
-SOCKS_ADDR=0.0.0.0:1080
-SOCKS5_PASSWORD_HASH=$2a$10$...
-PEER_ID=abc123def456789012345678901234ab
-PEER_ADDR=192.168.1.10:4433
-```
-
-Load and run:
-
-```bash
-# Using env command
-env $(cat .env | xargs) muti-metroo run -c config.yaml
-
-# Using set -a
-set -a && source .env && set +a
-muti-metroo run -c config.yaml
-```
-
-### Docker
-
-```bash
-docker run -d \
-  -e LOG_LEVEL=info \
-  -e SOCKS_ADDR=0.0.0.0:1080 \
-  -e PEER_ID=abc123... \
-  -v ./config.yaml:/app/config.yaml \
-  muti-metroo
-```
-
-Or with env file:
-
-```bash
-docker run -d \
-  --env-file .env \
-  -v ./config.yaml:/app/config.yaml \
-  muti-metroo
-```
-
-### Docker Compose
-
-```yaml
-services:
-  agent:
-    image: muti-metroo
-    environment:
-      - LOG_LEVEL=info
-      - SOCKS_ADDR=0.0.0.0:1080
-    env_file:
-      - .env
-    volumes:
-      - ./config.yaml:/app/config.yaml
-```
-
-### systemd
 
 ```ini
-# /etc/systemd/system/muti-metroo.service
+# systemd unit
 [Service]
-Environment="LOG_LEVEL=info"
-Environment="SOCKS_ADDR=0.0.0.0:1080"
 EnvironmentFile=/etc/muti-metroo/environment
-ExecStart=/usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
 ```
 
-## Best Practices
+For containers, see [Docker Deployment](/deployment/docker).
 
-### 1. Use Defaults for Non-Secrets
+The CLI uses its own variables, such as `MUTI_METROO_TOKEN` for the HTTP API token; those are documented on [CLI overview](/cli/overview).
 
-```yaml
-# Good - has sensible default
-log_level: "${LOG_LEVEL:-info}"
+## See Also
 
-# Bad - will fail if not set
-log_level: "${LOG_LEVEL}"
-```
-
-### 2. Never Default Secrets
-
-```yaml
-# Good - forces explicit configuration
-password_hash: "${PASSWORD_HASH}"
-
-# Bad - insecure default
-password_hash: "${PASSWORD_HASH:-$2a$10$defaulthash...}"
-```
-
-### 3. Document Required Variables
-
-```yaml
-# Required environment variables:
-# - PEER_ID: Agent ID of peer
-# - PEER_ADDR: Address of peer
-# - SOCKS5_PASSWORD_HASH: bcrypt hash for SOCKS5 auth
-#
-# Optional:
-# - LOG_LEVEL: Logging level (default: info)
-# - SOCKS_ADDR: SOCKS5 bind address (default: 127.0.0.1:1080)
-```
-
-### 4. Use Descriptive Names
-
-```yaml
-# Good
-MUTI_METROO_LOG_LEVEL
-MUTI_METROO_SOCKS5_PASSWORD_HASH
-
-# OK for simple deployments
-LOG_LEVEL
-SOCKS5_PASSWORD_HASH
-```
-
-### 5. Validate Before Deployment
-
-```bash
-# Check all required vars are set
-required_vars="PEER_ID PEER_ADDR SOCKS5_PASSWORD_HASH"
-for var in $required_vars; do
-  if [ -z "${!var}" ]; then
-    echo "Error: $var is not set"
-    exit 1
-  fi
-done
-```
-
-## Troubleshooting
-
-### Missing Environment Variable
-
-An unset variable with no `:-default` is **not** an error in itself: the literal
-`${VAR}` text is passed through to the field unchanged. The failure usually
-surfaces later as a confusing downstream error (for example an invalid address,
-a never-matching token hash, or a YAML value that looks like `${PEER_ID}`). If a
-config value appears to contain a literal `${...}`, the variable was unset.
-
-Set the variable (export it before launching the agent) or add a default value
-with `${VAR:-fallback}`.
-
-### Multiline Values
-
-For multiline values (like PEM certificates):
-
-```bash
-# In shell
-export TLS_CERT="$(cat ./certs/agent.crt)"
-
-# In .env file (escape newlines)
-TLS_CERT="-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"
-```
-
-### Special Characters
-
-Escape special characters in values:
-
-```bash
-# Password with special chars
-SOCKS5_PASSWORD_HASH='$2a$10$abc123...'  # Use single quotes
-```
-
-## Related
-
-- [Configuration Overview](/configuration/overview) - Full configuration reference
-- [Deployment: Docker](/deployment/docker) - Docker deployment
+- [Configuration Overview](/configuration/overview) for the file layout and validation
+- [TLS](/configuration/tls-certificates) for inline PEM keys
+- [Docker Deployment](/deployment/docker) for passing variables to containers
+- [System Service](/deployment/system-service) for service manager setup

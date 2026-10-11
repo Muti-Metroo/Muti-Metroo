@@ -1,272 +1,120 @@
 ---
 title: HTTP API
-sidebar_position: 11
+description: Configuration reference for the http section, covering the API server address and timeouts, bearer token authentication, minimal mode, and the endpoint group switches.
+sidebar_position: 16
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-presenting.png" alt="Mole configuring HTTP API" style={{maxWidth: '180px'}} />
 </div>
 
-# HTTP API Configuration
+# HTTP API
 
-Enable health checks, dashboard API endpoints, and remote agent APIs. The HTTP server is your window into the mesh - use it for monitoring, status queries, and distributed operations.
-
-**Most common settings:**
-
-```yaml
-http:
-  enabled: true
-  address: ":8080"
-```
+The `http` section starts the agent's HTTP server. It serves health checks, the dashboard API used by Muti Metroo Manager and Mutiauk, the management API that the `muti-metroo` CLI talks to, and optional Go profiling endpoints.
 
 ## Configuration
 
 ```yaml
 http:
-  enabled: true # Enable HTTP API server
-  address: ":8080" # Bind address (host:port)
-  read_timeout: 10s # Request read timeout
-  write_timeout: 10s # Response write timeout
-  token_hash: "" # bcrypt hash of API bearer token (empty = no auth)
-
-  # Endpoint controls
-  minimal: false # When true, only health endpoints enabled
-  pprof: false # /debug/pprof/* profiling endpoints (default: true, disable in production)
-  dashboard: true # /api/* dashboard endpoints
-  remote_api: true # /agents/* distributed APIs
+  enabled: true
+  address: "127.0.0.1:8080"
+  read_timeout: 10s
+  write_timeout: 10s
+  token_hash: ""      # bcrypt hash of the bearer token; empty = no authentication
+  minimal: false      # true = health endpoints only
+  pprof: true         # /debug/pprof/*
+  dashboard: true     # /api/*
+  remote_api: true    # /agents/*, management and mutation endpoints
 ```
 
-## Options
+## Keys
 
-| Option          | Type     | Default | Description                                   |
-| --------------- | -------- | ------- | --------------------------------------------- |
-| `enabled`       | bool     | `false` | Enable the HTTP API server                    |
-| `address`       | string   | `:8080` | Bind address (`:8080` or `127.0.0.1:8080`)    |
-| `read_timeout`  | duration | `10s`   | Maximum time to read request                  |
-| `write_timeout` | duration | `10s`   | Maximum time to write response                |
-| `token_hash`    | string   | `""`    | bcrypt hash of bearer token (empty = no auth) |
-| `minimal`       | bool     | `false` | Only enable health endpoints                  |
-| `pprof`         | bool     | `true`  | Enable Go profiling endpoints                 |
-| `dashboard`     | bool     | `true`  | Enable dashboard API endpoints                |
-| `remote_api`    | bool     | `true`  | Enable distributed mesh APIs                  |
+| Key             | Type     | Default   | Description                                                                                                         |
+| --------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
+| `enabled`       | bool     | `false`   | Start the HTTP server.                                                                                              |
+| `address`       | string   | `":8080"` | Bind address. The default listens on all interfaces.                                                                |
+| `read_timeout`  | duration | `10s`     | Maximum time to read a request.                                                                                     |
+| `write_timeout` | duration | `10s`     | Maximum time to write a response.                                                                                   |
+| `token_hash`    | string   | `""`      | bcrypt hash of the API bearer token. When set, every endpoint except the [exempt ones](#authentication) needs the token. Redacted by `config show`. |
+| `minimal`       | bool     | `false`   | Serve only the health endpoints. Overrides `pprof`, `dashboard`, and `remote_api`.                                  |
+| `pprof`         | bool     | `true`    | Serve Go profiling endpoints.                                                                                       |
+| `dashboard`     | bool     | `true`    | Serve the dashboard API.                                                                                            |
+| `remote_api`    | bool     | `true`    | Serve the management API.                                                                                           |
+
+## Endpoint groups
+
+| Switch       | Paths                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| always on    | `/health`, `/healthz`, `/ready`, and the `/` splash page                                                                                                    |
+| `dashboard`  | `/api/*` (topology, dashboard, nodes, mesh test, probe, interfaces, setup defaults)                                                                         |
+| `remote_api` | `/agents`, `/agents/*`, `/routes/advertise`, `/routes/manage`, `/route/trace`, `/peers/manage`, `/listeners/manage`, `/forward/manage`, `/forward/endpoints/manage`, `/display-name/manage`, `/hosts/manage`, `/hosts/suffixes/manage`, `/sleep`, `/sleep/status`, `/wake`, `/shutdown` |
+| `pprof`      | `/debug/pprof/*`                                                                                                                                            |
+
+A disabled group returns HTTP 404. Most `muti-metroo` CLI commands that talk to an agent, and Muti Metroo Manager, need `remote_api`, and Manager also needs `dashboard`. Endpoint details are in the [HTTP API reference](/api/overview).
 
 ## Authentication
 
-Protect the HTTP API with bearer token authentication. When `token_hash` is set, all non-health endpoints require a valid token.
+With `token_hash` set, requests must carry the token as `Authorization: Bearer <token>`, or as a `?token=<token>` query parameter for WebSocket clients. A missing or wrong token gets HTTP 401. These paths never need the token: `/health`, `/healthz`, `/ready`, `/`, `/logo.png`, and `/notfound.png`.
 
-### Setup
+Generate the hash with [`muti-metroo hash`](/cli/hash) and put it in the configuration:
 
 ```bash
-# 1. Generate a token hash
 muti-metroo hash
-# Enter your chosen token when prompted
-
-# 2. Add the hash to your config
-# http:
-#   token_hash: "$2a$10$..."
 ```
-
-### Usage
-
-```bash
-# CLI flag
-muti-metroo status --token my-secret-token
-
-# Environment variable
-export MUTI_METROO_TOKEN=my-secret-token
-muti-metroo status
-
-# curl
-curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/agents
-
-# WebSocket (query parameter fallback)
-wscat -c "ws://localhost:8080/agents/{id}/shell?token=my-secret-token"
-```
-
-### Exempt Endpoints
-
-These endpoints never require authentication (for load balancer probes):
-
-- `/health`, `/healthz`, `/ready`
-- `/` (splash page), `/logo.png`, `/notfound.png`
-
-## Endpoints
-
-### Always Available
-
-These endpoints are always enabled when `http.enabled: true`:
-
-| Endpoint   | Method | Description                        |
-| ---------- | ------ | ---------------------------------- |
-| `/health`  | GET    | Simple health check, returns "OK"  |
-| `/healthz` | GET    | Detailed health with JSON stats    |
-| `/ready`   | GET    | Readiness probe for load balancers |
-
-### Dashboard API Endpoints
-
-Enabled when `dashboard: true`:
-
-| Endpoint         | Method   | Description                               |
-| ---------------- | -------- | ----------------------------------------- |
-| `/api/topology`  | GET      | Topology data for visualization           |
-| `/api/dashboard` | GET      | Dashboard overview (stats, peers, routes) |
-| `/api/nodes`     | GET      | Detailed node info for all agents         |
-| `/api/mesh-test` | GET/POST | Mesh connectivity test                    |
-| `/api/probe`     | POST     | Probe a Muti Metroo listener (dial + handshake) |
-
-### Remote API Endpoints
-
-Enabled when `remote_api: true`:
-
-| Endpoint                     | Method    | Description                                        |
-| ---------------------------- | --------- | -------------------------------------------------- |
-| `/agents`                    | GET       | List all known agents                              |
-| `/agents/{id}`               | GET       | Get status from specific agent                     |
-| `/agents/{id}/routes`        | GET       | Get route table from agent                         |
-| `/agents/{id}/peers`         | GET       | Get peer list from agent                           |
-| `/agents/{id}/shell`         | WebSocket | Management commands                                |
-| `/agents/{id}/icmp`          | WebSocket | ICMP ping sessions                                 |
-| `/agents/{id}/file/upload`   | POST      | Upload file to agent                               |
-| `/agents/{id}/file/download` | POST      | Download file from agent                           |
-| `/agents/{id}/probe`         | POST      | Probe a listener from a remote agent's perspective |
-| `/routes/advertise`          | POST      | Trigger immediate route advertisement              |
-
-### Profiling Endpoints
-
-Enabled when `pprof: true`:
-
-| Endpoint                 | Method | Description      |
-| ------------------------ | ------ | ---------------- |
-| `/debug/pprof/`          | GET    | Profiling index  |
-| `/debug/pprof/profile`   | GET    | CPU profile      |
-| `/debug/pprof/heap`      | GET    | Heap profile     |
-| `/debug/pprof/goroutine` | GET    | Goroutine stacks |
-
-:::warning Production Security
-Disable `pprof` in production - profiling endpoints can leak sensitive information and consume significant resources.
-:::
-
-## Minimal Mode
-
-For a minimal exposure, enable only health endpoints:
 
 ```yaml
 http:
   enabled: true
-  address: "127.0.0.1:8080" # Localhost only
-  minimal: true # Only /health, /healthz, /ready
+  address: ":8080"
+  token_hash: "$2a$12$GiitCO3IBCFV2/QmQ4BzNOQGykcLM1DtPyvfMB7kF5qZLDGk6BtnS"
 ```
 
-When `minimal: true`, all endpoint flags (`pprof`, `dashboard`, `remote_api`) are ignored and those endpoints return HTTP 404.
+The CLI sends the token from `--token` or the `MUTI_METROO_TOKEN` environment variable:
 
-## Bind Address
+```bash
+export MUTI_METROO_TOKEN=my-secret-token
+muti-metroo status
+curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/agents
+```
 
-### All Interfaces
+Without `token_hash`, every enabled endpoint is open to anyone who can reach `address`, including the endpoints that change configuration, transfer files, open management command sessions, and stop the agent. The management signing key does not protect against such callers, because the agent signs requests made through its own API. When `address` is not a loopback address and `token_hash` is empty, the agent prints a warning at startup.
+
+## Minimal mode
 
 ```yaml
 http:
-  address: ":8080" # Listen on all interfaces
+  enabled: true
+  address: "127.0.0.1:8080"
+  minimal: true
 ```
 
-### Localhost Only
-
-```yaml
-http:
-  address: "127.0.0.1:8080" # Local access only
-```
-
-### Specific Interface
-
-```yaml
-http:
-  address: "192.168.1.10:8080" # Specific IP only
-```
-
-## Security Considerations
-
-| Configuration                     | Access        | Use Case                         |
-| --------------------------------- | ------------- | -------------------------------- |
-| `address: "127.0.0.1:8080"`       | Local only    | Development, single-user         |
-| `address: ":8080"` + `token_hash` | Authenticated | Production with remote access    |
-| `address: ":8080"` + firewall     | Controlled    | Production with network controls |
-| `minimal: true`                   | Health only   | High-security field deployments  |
-| `pprof: true`                     | Profiling     | Debugging only, never production |
-
-### Recommendations
-
-1. **Set `token_hash`** when the API is accessible over a network
-2. **Bind to localhost** in production unless remote access is required
-3. **Disable pprof** in production deployments
-4. **Use minimal mode** for field agents that don't need dashboard API
-5. **Firewall the port** if binding to all interfaces
+Only `/health`, `/healthz`, and `/ready` are served, which is enough for load balancer and container health probes.
 
 ## Examples
 
-### Development
-
-```yaml
-http:
-  enabled: true
-  address: ":8080"
-  pprof: true # Enable profiling for debugging
-  dashboard: true
-  remote_api: true
-```
-
-### Production
+### Local access only
 
 ```yaml
 http:
   enabled: true
   address: "127.0.0.1:8080"
-  pprof: false # Disable profiling
-  dashboard: true
-  remote_api: true
+  pprof: false
 ```
 
-### Authenticated API
+### Remote access with a token
 
 ```yaml
 http:
   enabled: true
   address: ":8080"
-  token_hash: "$2a$10$..." # muti-metroo hash
-  dashboard: true
-  remote_api: true
+  token_hash: "${HTTP_TOKEN_HASH}"
+  pprof: false
 ```
 
-### Field Agent (Minimal Endpoints)
+## See Also
 
-```yaml
-http:
-  enabled: true
-  address: "127.0.0.1:8080"
-  minimal: true # Health endpoints only
-```
-
-### Monitoring Integration
-
-```yaml
-http:
-  enabled: true
-  address: ":8080"
-  minimal: false
-  dashboard: false # No dashboard API needed
-  remote_api: false # No distributed APIs
-  # Only /health, /healthz, /ready for load balancer probes
-```
-
-## Environment Variables
-
-```yaml
-http:
-  enabled: ${HTTP_ENABLED:-true}
-  address: "${HTTP_ADDRESS:-:8080}"
-  minimal: ${HTTP_MINIMAL:-false}
-```
-
-## Related
-
-- [HTTP API Reference](/api/overview) - Complete API documentation
-- [Troubleshooting](/troubleshooting/common-issues) - Connection issues
-- [Deployment](/deployment/scenarios) - Production deployment patterns
+- [HTTP API reference](/api/overview) for every endpoint, request, and response
+- [Authentication](/security/authentication) for how the bearer token relates to management signing keys
+- [hash CLI](/cli/hash) to generate `token_hash`
+- [Health API](/api/health) for the probe endpoints that stay open in minimal mode
+- [Management](/configuration/management) for the signing keys that authorize management operations

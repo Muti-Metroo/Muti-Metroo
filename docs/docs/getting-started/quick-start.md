@@ -1,5 +1,6 @@
 ---
 title: Quick Start
+description: Write a minimal configuration and run a single Muti Metroo agent that serves as a SOCKS5 proxy and exit.
 sidebar_position: 4
 ---
 
@@ -9,40 +10,30 @@ sidebar_position: 4
 
 # Quick Start
 
-By the end of this guide, you will have a working SOCKS5 proxy that can tunnel traffic to any destination. You will be able to run commands like:
+This guide runs one agent from a hand-written config file. The agent accepts SOCKS5 connections on `localhost:1080`, opens connections to any destination itself, and serves its HTTP API on `localhost:8080`. A single agent is not yet a mesh; [Your First Mesh](/getting-started/first-mesh) adds a second agent so traffic leaves from another host.
 
-```bash
-curl -x socks5://localhost:1080 https://internal.example.com
-ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@remote-host
-```
+For a guided alternative that writes the config for you, use the [Interactive Setup](/getting-started/interactive-setup) wizard.
 
-This guide gives you full control over the configuration. For a guided experience, use the [Interactive Setup Wizard](/getting-started/interactive-setup) instead.
+## Prerequisites
 
-:::info No TLS Setup Required
-Muti Metroo auto-generates TLS certificates at startup. E2E encryption (X25519 + ChaCha20-Poly1305) secures all traffic. For strict TLS verification, see [TLS Configuration](/configuration/tls-certificates).
-:::
+The `muti-metroo` binary must be installed. See [Installation](/getting-started/installation).
 
-## Step 1: Initialize Agent Identity
-
-Each agent needs a unique identity. Create one:
+## Step 1: Initialize the agent identity
 
 ```bash
 muti-metroo init -d ./data
 ```
 
-This generates a 128-bit Agent ID stored in `./data/agent_id`:
-
+```text
+Agent initialized in ./data
+Agent ID: 250bcc6f4401c0cfe55de1c8b643c9db
 ```
-Agent ID: a1b2c3d4e5f6789012345678901234ab
-```
 
-:::tip
-Save this Agent ID - you will need it when connecting other agents to this one.
-:::
+This step is optional, because the agent creates its identity on first start. Running it first lets you see the agent ID before the agent runs, which other agents need when they [pin a peer ID](/configuration/peers).
 
-## Step 2: Create Configuration File
+## Step 2: Create the configuration file
 
-Create `config.yaml` with a minimal working configuration:
+Create `config.yaml`:
 
 ```yaml
 agent:
@@ -63,80 +54,93 @@ exit:
 
 http:
   enabled: true
-  address: ":8080"
+  address: "127.0.0.1:8080"
 ```
 
-This creates a fully functional agent that can:
-- Accept peer connections on port 4433 (QUIC)
-- Provide a SOCKS5 proxy on localhost:1080
-- Route traffic to any destination (exit)
-- Serve the HTTP API on port 8080
+With this config, the agent:
 
-:::tip Minimal Config
-All other settings use sensible defaults. See [Configuration Reference](/configuration/overview) for customization.
-:::
+- Accepts peer connections from other agents on UDP port 4433 (QUIC). A standalone agent does not need this, but [Your First Mesh](/getting-started/first-mesh) uses it.
+- Accepts SOCKS5 connections on `127.0.0.1:1080`.
+- Acts as an exit for all IPv4 destinations (`0.0.0.0/0`).
+- Serves the HTTP API on `127.0.0.1:8080`.
 
-## Step 3: Run the Agent
+Every other setting uses its default. The TLS certificate for the QUIC listener is generated in memory at startup. See the [Configuration Overview](/configuration/overview) for all sections.
 
-Start your agent:
+## Step 3: Run the agent
 
 ```bash
 muti-metroo run -c ./config.yaml
 ```
 
-You should see output like:
+The agent runs in the foreground. The first lines of its output show the agent ID and the services it started:
 
+```text
+Loaded configuration from: /home/user/config.yaml (mtime 2026-10-11 14:49:15 EEST)
+Starting Muti Metroo agent...
+Agent ID: 250bcc6f4401c0cfe55de1c8b643c9db
+time=2026-10-11T14:49:15.431+03:00 level=INFO msg="starting agent" agent_id=250bcc6f component=agent
+time=2026-10-11T14:49:15.431+03:00 level=INFO msg="HTTP server started" address=127.0.0.1:8080
+time=2026-10-11T14:49:15.434+03:00 level=INFO msg="listener started" address=:4433 transport=quic
+time=2026-10-11T14:49:15.434+03:00 level=INFO msg="SOCKS5 server started" address=127.0.0.1:1080
+time=2026-10-11T14:49:15.434+03:00 level=INFO msg="exit handler started" count=1 domain_routes=0
+time=2026-10-11T14:49:15.434+03:00 level=INFO msg="forward handler started" endpoints=0
+time=2026-10-11T14:49:15.434+03:00 level=INFO msg="agent started" agent_id=250bcc6f peers=0 listeners=1
 ```
-INFO  Starting Muti Metroo agent
-INFO  Agent ID: a1b2c3d4e5f6789012345678901234ab
-INFO  QUIC listener started on 0.0.0.0:4433
-INFO  SOCKS5 server started on 127.0.0.1:1080
-INFO  HTTP server started on :8080
-INFO  Agent ready
-```
 
-## Step 4: Verify the Agent
+Stop the agent with Ctrl+C.
 
-In another terminal, test your agent:
+## Step 4: Check the agent
+
+In another terminal:
 
 ```bash
-# Check health
-curl http://localhost:8080/health
-# Output: OK
-
-# Get detailed status
 curl http://localhost:8080/healthz
-# Output: {"status":"healthy","running":true,"peer_count":0,"stream_count":0,"route_count":0,"socks5_running":true,"exit_handler_running":true}
 ```
 
-## Step 5: Test the Proxy
+```json
+{"accepts_signed_management":false,"can_sign_management":false,"exit_handler_running":true,"peer_count":0,"route_count":1,"running":true,"socks5_running":true,"status":"healthy","stream_count":0}
+```
 
-Your agent is now a working SOCKS5 proxy:
+`muti-metroo status` shows the same information in a readable form:
 
 ```bash
-# Test with curl
-curl -x socks5://localhost:1080 https://httpbin.org/ip
-
-# Test with SSH
-ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@remote-host
+muti-metroo status
 ```
 
-Query the dashboard API to see the mesh topology:
+```text
+Agent Status
+============
+Status:       healthy
+Running:      true
+Peer Count:   0
+Stream Count: 0
+Route Count:  1
+SOCKS5:       true
+Exit Handler: true
+```
+
+## Step 5: Send traffic through the proxy
 
 ```bash
-curl http://localhost:8080/api/dashboard | jq
+curl -x socks5h://localhost:1080 https://example.com
 ```
 
-## Alternative: Client-Only Configuration
+With `socks5h://`, curl sends the hostname to the proxy and the agent resolves it. Any SOCKS5-capable client works the same way, for example SSH through `nc`:
 
-If you want to connect to an **existing** exit agent (instead of running your own exit), use this simpler config:
+```bash
+ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@server.example.com
+```
+
+## Connect to an existing exit instead
+
+On a laptop or other client that only needs to reach an exit agent someone else runs, skip the listener and the exit section and dial the exit as a peer:
 
 ```yaml
 agent:
   data_dir: "./data"
 
 peers:
-  - id: "exit-agent-id-here"      # Get this from the exit agent
+  - id: "auto"
     transport: quic
     address: "exit.example.com:4433"
 
@@ -145,138 +149,31 @@ socks5:
   address: "127.0.0.1:1080"
 ```
 
-This configuration:
-- Connects to a remote exit agent
-- No listeners needed (outbound-only)
-- No exit config needed (uses remote exit)
+`id: "auto"` accepts whatever agent ID the peer presents. Set it to the exit agent's 32-character ID to refuse any other agent. The peer address and port must match a listener on the exit agent. See [Peers](/configuration/peers) for TLS and proxy options.
 
-Ideal for laptops connecting to a central exit server.
+## Route all traffic without proxy settings
 
-## Optional: Transparent Routing with Mutiauk
-
-Instead of configuring each application to use SOCKS5, you can use **Mutiauk** to transparently route all traffic through the mesh.
-
-:::info Linux Only
-Mutiauk requires Linux and root privileges to create the TUN interface.
-:::
-
-### Install Mutiauk
-
-```bash
-curl -L -o mutiauk https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64
-chmod +x mutiauk
-sudo mv mutiauk /usr/local/bin/
-```
-
-### Option A: Autoroutes (Recommended)
-
-If your exit agents advertise specific CIDR routes (like `10.0.0.0/8` or `192.168.0.0/16`), Mutiauk can automatically sync them:
-
-```bash
-sudo tee /etc/mutiauk/config.yaml > /dev/null << 'EOF'
-tun:
-  name: tun0
-  mtu: 1400
-  address: 10.200.200.1/24
-
-socks5:
-  server: 127.0.0.1:1080
-
-autoroutes:
-  enabled: true
-  url: "http://localhost:8080"
-  poll_interval: 30s
-EOF
-
-sudo mutiauk daemon start
-```
-
-Routes are automatically fetched from the Muti Metroo API and applied to the TUN interface.
-
-:::warning Default Routes Not Synced
-Autoroutes filters out `0.0.0.0/0` (default route) for safety. If your exit advertises `0.0.0.0/0`, use manual routes instead.
-:::
-
-### Option B: Manual Routes
-
-For exit agents advertising `0.0.0.0/0` (like the docker-tryout example), add routes manually:
-
-```bash
-sudo tee /etc/mutiauk/config.yaml > /dev/null << 'EOF'
-tun:
-  name: tun0
-  mtu: 1400
-  address: 10.200.200.1/24
-
-socks5:
-  server: 127.0.0.1:1080
-
-routes:
-  # Route all traffic (same as 0.0.0.0/0 but in two halves)
-  - destination: 0.0.0.0/1
-    enabled: true
-  - destination: 128.0.0.0/1
-    enabled: true
-EOF
-
-sudo mutiauk daemon start
-```
-
-### Test Transparent Routing
-
-```bash
-# No SOCKS5 flag needed - traffic goes through TUN automatically
-curl https://httpbin.org/ip
-ping 8.8.8.8
-```
-
-See [Mutiauk documentation](/mutiauk) for more options including systemd service installation.
-
-## Next Steps
-
-- [Your First Mesh](/getting-started/first-mesh) - Connect multiple agents
-- [Configuration Reference](/configuration/overview) - All configuration options
-- [SOCKS5 Proxy](/features/socks5-proxy) - Authentication and advanced usage
-- [Exit Routing](/features/exit-routing) - Route configuration and DNS
+[Mutiauk](/mutiauk) creates a TUN interface and forwards IP traffic into this agent's SOCKS5 proxy, so applications reach the mesh without any proxy configuration. It runs on Linux, macOS, and Windows and requires root or Administrator. The Mutiauk guide covers installation and configuration.
 
 ## Troubleshooting
 
-### Agent won't start
+### The agent does not start
 
-Check for common issues:
-
-```bash
-# Check if port is already in use
-lsof -i :4433
-lsof -i :1080
-lsof -i :8080
-
-# Check file permissions
-ls -la ./data/
-ls -la ./certs/
-
-# Enable debug logging in config.yaml:
-# agent:
-#   log_level: "debug"
-muti-metroo run -c ./config.yaml
-```
-
-### Certificate errors (strict TLS only)
-
-If you enabled [strict TLS verification](/configuration/tls-certificates):
-
-```bash
-# Verify certificate
-muti-metroo cert info ./certs/agent.crt
-
-# Check certificate expiration
-openssl x509 -in ./certs/agent.crt -text -noout | grep -A2 "Validity"
-```
+- Another process may already use one of the ports. On Linux and macOS, `lsof -i :4433 -i :1080 -i :8080` lists them.
+- Check the config without starting the agent: `muti-metroo config validate ./config.yaml`.
+- For more detail, set `agent.log_level: "debug"` and start the agent again.
 
 ### SOCKS5 connection refused
 
-- Ensure SOCKS5 is enabled in config
-- Check the bind address (use `127.0.0.1` for local-only, `0.0.0.0` for network access)
-- Verify firewall rules
+- Check that `socks5.enabled` is `true` and the agent log shows `SOCKS5 server started`.
+- `127.0.0.1` accepts only local clients. To accept clients from other hosts, bind another address and enable [SOCKS5 authentication](/configuration/socks5).
 
-See [Troubleshooting](/troubleshooting/common-issues) for more help.
+See [Common Issues](/troubleshooting/common-issues) for more.
+
+## See Also
+
+- [Your First Mesh](/getting-started/first-mesh): connect an ingress agent to a remote exit agent
+- [Configuration Overview](/configuration/overview): every configuration section and its defaults
+- [SOCKS5 Proxy](/features/socks5-proxy): authentication, UDP, and client examples
+- [Exit Routing](/features/exit-routing): CIDR and domain routes, and where DNS is resolved
+- [`run` command](/cli/run): flags for running the agent

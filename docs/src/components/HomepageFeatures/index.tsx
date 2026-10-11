@@ -32,8 +32,8 @@ const FeatureList: FeatureItem[] = [
     link: '/concepts/architecture',
     description: (
       <>
-        Deploy anywhere in seconds. One binary, no root required, no kernel
-        modules. Runs on containers, VMs, cloud instances, or bare metal.
+        One binary, no root required, no kernel modules. Runs on Linux, macOS,
+        and Windows, in containers, VMs, cloud instances, or bare metal.
       </>
     ),
   },
@@ -44,8 +44,8 @@ const FeatureList: FeatureItem[] = [
     link: '/concepts/routing',
     description: (
       <>
-        Build relay chains through multiple network segments. Traffic
-        automatically finds its way through any mesh topology to reach the exit.
+        Build relay chains through multiple network segments. Routes propagate
+        through the mesh, so traffic reaches the exit across any number of hops.
       </>
     ),
   },
@@ -56,9 +56,9 @@ const FeatureList: FeatureItem[] = [
     link: '/features/socks5-proxy',
     description: (
       <>
-        SOCKS5 proxy for application-level integration, or TUN interface via{' '}
-        <Link to="/mutiauk">Mutiauk</Link> for transparent routing. Route any
-        traffic through the mesh without per-app configuration.
+        SOCKS proxy for application-level integration, or a TUN interface via
+        the Mutiauk companion tool for transparent routing without per-app
+        configuration.
       </>
     ),
   },
@@ -81,8 +81,8 @@ const FeatureList: FeatureItem[] = [
     link: '/security/e2e-encryption',
     description: (
       <>
-        Transit nodes relay traffic they cannot decrypt. Built on proven
-        cryptography (X25519 + ChaCha20-Poly1305) with zero trust by design.
+        Stream payloads are encrypted between ingress and exit with X25519 and
+        ChaCha20-Poly1305, so transit agents relay data they do not decrypt.
       </>
     ),
   },

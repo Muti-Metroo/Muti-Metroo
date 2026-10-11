@@ -1,161 +1,116 @@
-# Display Name Commands
+---
+title: muti-metroo display-name
+sidebar_label: display-name
+sidebar_position: 18
+description: Set or read an agent's display name at runtime, locally or on a remote agent.
+---
 
-Commands for managing the agent display name at runtime.
+# muti-metroo display-name
+
+Set or read the display name of a running agent. The display name labels the agent in topology views, the dashboard, and agent listings. A name set with this command overrides `agent.display_name` from the configuration until it is cleared.
+
+The commands talk to the agent's HTTP API. Pass `-t` to act on another agent in the mesh, reached through the agent at `--agent`. An agent that has `management.public_key` configured without `management.private_key` refuses both `set` and `get`.
+
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
 ## display-name set
-
-Set the agent display name dynamically.
 
 ```bash
 muti-metroo display-name set <name> [flags]
 ```
 
-### Description
+Set the display name. The new name is advertised to peers right away. The name may be up to 255 bytes long.
 
-Sets a new display name for the target agent. The name is immediately propagated to all connected peers and appears in the dashboard, topology view, and agent listings.
+An empty name (`""`) clears the runtime name and reverts to `agent.display_name`. If that is also empty, the agent is shown by its short ID.
 
-Dynamic display names persist across restarts when `agent.data_dir` is configured (see [Dynamic Config Persistence](/configuration/dynamic-config-persistence)); when no `data_dir` is set they remain ephemeral. For always-on names, use the `agent.display_name` configuration.
+When `agent.data_dir` is set, the name is recorded in the [dynamic config journal](../configuration/dynamic-config-persistence.md) and restored on the next start. Without a `data_dir`, or if the journal cannot be written, the change lasts until the agent restarts.
 
-Setting an empty name reverts to the configured display name value.
+Setting a display name is a privileged operation: the agent at `--agent` must have `management.signing_private_key` configured. For a remote target, the entry agent signs the request and the target verifies it with its `management.signing_public_key`. See [management configuration](../configuration/management.md).
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to rename: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
 
-### Examples
+### Confirmation prompt
 
-```bash
-# Set display name on local agent
-muti-metroo display-name set "gateway-us-east"
+Only the empty name prompts:
 
-# Set display name on remote agent
-muti-metroo display-name set "exit-eu-west" -t abc123def456
-
-# Set using short agent ID prefix
-muti-metroo display-name set "transit-node" -t abc123
-
-# Via a specific API server
-muti-metroo display-name set "backup-exit" -a 192.168.1.10:8080 -t def456
-
-# Revert to config value
-muti-metroo display-name set ""
+```text
+An empty name reverts the agent's display name to the config-file value.
+Continue? [y/N]:
 ```
+
+Answering anything other than `y` or `yes` prints `Aborted.` and exits 0. `--yes` skips the prompt; without it, a non-terminal stdin makes the command exit 6. See [confirmation prompts](overview.md#confirmation-prompts).
 
 ### Output
 
-```
+```text
 Display name set: gateway-us-east
 ```
 
----
+When reverting:
+
+```text
+Display name reverted to config value: gateway-a
+```
+
+### Examples
+
+Rename the local agent:
+
+```bash
+muti-metroo display-name set "gateway-us-east"
+```
+
+Rename a remote agent by ID prefix:
+
+```bash
+muti-metroo display-name set "exit-eu-west" -t abc123de
+```
+
+Revert to the configured name without prompting:
+
+```bash
+muti-metroo display-name set "" -y
+```
 
 ## display-name get
-
-Get the current agent display name.
 
 ```bash
 muti-metroo display-name get [flags]
 ```
 
-### Description
-
-Retrieves the current effective display name from the target agent. The returned name reflects the active display name, whether set dynamically or from configuration.
+Print the agent's current display name: the runtime name if one is set, otherwise `agent.display_name`, otherwise the short agent ID.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to query: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+
+### Output
+
+```text
+gateway-us-east
+```
 
 ### Examples
 
 ```bash
-# Get display name from local agent
 muti-metroo display-name get
-
-# Get display name from remote agent
-muti-metroo display-name get -t abc123def456
-
-# Via a specific API server
-muti-metroo display-name get -a 192.168.1.10:8080 -t def456
 ```
-
-### Output
-
-```
-gateway-us-east
-```
-
----
-
-## Authorization
-
-### Management Key Restriction
-
-Display name modifications are restricted when the mesh is configured with management key encryption, following the same rules as dynamic route management.
-
-If an agent has `management.public_key` configured but does NOT have the corresponding `management.private_key`, the `display-name set` command is rejected with HTTP 403 Forbidden.
-
----
-
-## Important Notes
-
-### Persistence
-
-Dynamic display names survive agent restarts when `agent.data_dir` is configured: every `display-name set` is appended to a [dynamic config journal](/configuration/dynamic-config-persistence) under `data_dir/dynamic-config.log` and replayed on the next start so the agent comes back up with the same name.
-
-If no `data_dir` is configured, or the journal file cannot be written (bad permissions, read-only filesystem, disk full), the runtime change still succeeds but remains ephemeral and reverts to `agent.display_name` on the next restart.
-
-For an always-on name, use `agent.display_name` in `config.yaml`:
-
-```yaml
-agent:
-  display_name: "gateway-us-east"
-```
-
-### Name Propagation
-
-After setting a display name, the change is immediately advertised to all connected peers via route and node info advertisements. No manual action is required.
-
-### Short Agent ID Prefixes
-
-The `--target` flag accepts short agent ID prefixes, same as the `route` and `forward` commands.
-
----
-
-## Workflow Examples
-
-### Rename Agents in a Fleet
-
-Set descriptive names on all agents from a single control point:
 
 ```bash
-#!/bin/bash
-AGENT="http://localhost:8080"
-
-muti-metroo display-name set "ingress-us-east" -a "$AGENT" -t abc123
-muti-metroo display-name set "transit-eu-west" -a "$AGENT" -t def456
-muti-metroo display-name set "exit-ap-south"   -a "$AGENT" -t ghi789
+muti-metroo display-name get -a 192.168.1.10:8080 -t def456789012345678901234567890cd
 ```
 
-### Verify Display Name
+## See Also
 
-```bash
-# Set and verify
-muti-metroo display-name set "my-gateway"
-muti-metroo display-name get
-# Output: my-gateway
-```
-
-### Revert to Config Name
-
-```bash
-# Revert to config value
-muti-metroo display-name set ""
-muti-metroo display-name get
-# Output: (config display_name or short agent ID)
-```
+- [Display name API](../api/display-name-management.md): the HTTP endpoint behind these commands
+- [Agent configuration](../configuration/agent.md): set a permanent name with `agent.display_name`
+- [Dynamic config persistence](../configuration/dynamic-config-persistence.md): how runtime changes survive restarts
+- [Runtime configuration](../features/runtime-configuration.md): other settings you can change on a running agent

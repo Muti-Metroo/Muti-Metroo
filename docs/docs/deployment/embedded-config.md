@@ -1,6 +1,7 @@
 ---
 title: Embedded Configuration
-sidebar_position: 2
+description: Build a single Muti Metroo executable that carries its own configuration and identity, so nothing else has to be copied to the target host.
+sidebar_position: 5
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,287 +10,136 @@ sidebar_position: 2
 
 # Embedded Configuration
 
-Drop a single executable. No config files, no setup - just run the binary and the agent starts with all settings baked in.
+A Muti Metroo executable can carry its YAML configuration appended to the end of the file. When the binary starts, it detects the embedded config and uses it. With the agent identity embedded as well, the binary is the only file the target host needs.
 
-**What you get:**
-- One file to transfer and deploy
-- Nothing to configure on the target system
-- Custom binary name for each deployment
-- Can still edit config later without rebuilding
+Embedding works for the executables of every platform. It is not supported for the [Windows DLL](/deployment/dll-mode).
 
-:::note
-Embedded configuration is supported for both standalone executables and the Windows DLL variant. The DLL can run with embedded config via `rundll32.exe muti-metroo.dll,Run` (no config path argument). See [DLL Mode](/deployment/dll-mode) for details.
-:::
+## How an embedded binary behaves
 
-## How It Works
+- Running the binary with no arguments starts the agent, as if `run` had been given. Set `default_action: help` at the top level of the embedded config to print help instead.
+- `run` uses the embedded config and ignores `-c`.
+- Every other command works normally, for example `./my-agent status` or `./my-agent --version`.
+- `muti-metroo config show <binary>` and `muti-metroo config validate <binary>` read the embedded config.
 
-The configuration is appended to the binary itself:
-- YAML config is XOR-obfuscated and added to the end of the executable
-- The agent detects and loads embedded config automatically on startup
-- No `-c` flag or `run` command needed - just `./my-agent`
-- External config files are ignored when embedded config is present
+On startup, the agent reports where the config came from:
 
-## True Single-File Deployment
+```text
+Loaded configuration: embedded in binary
+Starting Muti Metroo agent...
+Display Name: branch-office
+Agent ID: 114251b9ef730e0ab0295460c7c576f7
+```
 
-With embedded identity, the agent requires **zero external files**:
+The embedded config is obfuscated, not encrypted. Anyone with the binary can recover it, including secrets such as `agent.private_key` and `management.signing_private_key`. Protect the binary like the config file it contains.
 
-- **Agent ID** - Stored in config as `agent.id`
-- **X25519 keypair** - Stored in config as `agent.private_key`
-- **No data directory** - Not needed when identity is in config
+## Embedded identity
 
-The setup wizard offers this option automatically when embedding config.
+An agent's identity is its agent ID and its X25519 private key, normally stored in `data_dir`. Both can live in the config instead:
 
-## Creating an Embedded Binary
+```yaml
+agent:
+  id: "ed65187723415eea4de1ea73e3a540fc"
+  private_key: "7878954c7da02d0edcda90f57cb9eb1fa8de675ef8375fd90831c2ae693b555b"
+```
 
-### Using the Setup Wizard
+The values above are an example; generate your own with `muti-metroo init` or the setup wizard. When `agent.id` and `agent.private_key` are both set, `agent.data_dir` can be omitted. Without a data directory, runtime changes made with the dynamic management commands (`route add`, `peer add`, and similar) are not persisted across restarts.
 
-The easiest way to create an embedded binary:
+The setup wizard sets these fields automatically when it embeds a config. When you prepare a config for `embed-config` yourself, copy the values from an initialized data directory (`agent_id` and `agent_key`) or leave `data_dir` set so the agent creates and keeps its own identity.
+
+## Create an embedded binary
+
+### With `embed-config`
+
+[`muti-metroo embed-config`](/cli/overview) embeds a prepared YAML file without prompts, for scripts and CI pipelines:
 
 ```bash
-muti-metroo setup
+# Write a new binary, leaving the source untouched
+muti-metroo embed-config agent.yaml -b ./muti-metroo -o ./branch-office
+
+# Embed into the running muti-metroo binary in place
+muti-metroo embed-config agent.yaml
 ```
 
-When prompted for "Configuration Delivery" (step 12 of 13), choose **"Embed in binary"**:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-b`, `--binary` | The running executable | Source binary. |
+| `-o`, `--output` | The source path (in place) | Destination binary. |
 
+The config file must have a `.yaml` or `.yml` extension and must pass validation; otherwise nothing is written. A config already embedded in the source is replaced, not stacked. The result is written to a temporary file and renamed into place, and keeps the source file's permissions. `.dll` targets are refused.
+
+To build binaries for another platform, download that platform's release binary and pass it with `-b`:
+
+```bash
+muti-metroo embed-config agent.yaml -b ./muti-metroo-windows-amd64.exe -o ./branch-office.exe
 ```
---- Configuration Delivery ----------------------------------------------------
-Choose how to deploy the configuration.
-Embedding creates a single-file binary with config baked in.
 
+### With the setup wizard
+
+Run [`muti-metroo setup`](/cli/setup). After the configuration steps, the wizard asks how to deliver the config:
+
+```text
 Delivery method:
   Save to config file (traditional)
 > Embed in binary (single-file deployment)
 ```
 
-You'll then specify:
-- **Service name**: Custom name for the service (e.g., `my-agent`)
-- **Output path**: Where to save the embedded binary
+Choosing **Embed in binary** prompts for:
 
-### Automatic Identity Embedding
+- **Service name**: used for the default output file name and, if you install a service, for the service and installed binary name.
+- **Output binary path**: defaults to the system temporary directory, for example `/tmp/<service-name>`.
 
-When you choose to embed config, the wizard **automatically** embeds the identity:
-- `agent.id` is set to the generated agent ID
-- `agent.private_key` is set to the generated X25519 private key
-- `agent.data_dir` is cleared (not needed)
+The wizard embeds the generated identity in the config, clears `data_dir`, copies the running binary to the output path with the config appended, and saves a copy of the config to the config path from the first step for reference. It then offers to install the embedded binary as a system service.
 
-The resulting binary can run with no external files - true single-file deployment.
-
-### Binary Output
-
-The wizard creates a new binary with the embedded config:
+## Run an embedded binary
 
 ```bash
-# Original binary size
-$ ls -la muti-metroo
--rwxr-xr-x  1 user  staff  20753408 muti-metroo
-
-# Embedded binary (config adds ~1-2KB)
-$ ls -la my-agent
--rwxr-xr-x  1 user  staff  20755200 my-agent
+./branch-office
 ```
 
-### Non-interactive embedding
-
-For CI pipelines and scripted deployments where the config is already prepared, `muti-metroo embed-config` embeds a YAML config without the interactive wizard:
-
-```bash
-# Embed config.yaml into the running muti-metroo binary, in place
-muti-metroo embed-config config.yaml
-
-# Embed into a specific source binary and write the result elsewhere
-muti-metroo embed-config config.yaml -b ./muti-metroo -o ./my-agent
-```
-
-Flags:
-- `-b, --binary`: source binary to embed into (default: the running executable).
-- `-o, --output`: destination path (default: overwrite the source in place).
-
-Behavior:
-- **Validation**: the config is parsed and validated before anything is written; an invalid config aborts with no change to the binary.
-- **Idempotent**: any config already embedded in the source binary is stripped first, so repeated runs replace rather than stack configs.
-- **Atomic write**: the result is written to a temporary file in the destination directory and renamed into place, so a partially written binary is never left behind. Source permissions are preserved.
-- **DLL rejection**: `.dll` targets are refused; use a config file with `rundll32.exe muti-metroo.dll,Run config.yaml` instead (see [DLL Mode](/deployment/dll-mode)).
-
-As with the wizard, a binary with an embedded config auto-runs on launch unless the embedded config sets `default_action: help`.
-
-## Running an Embedded Binary
-
-Simply run the binary - no `run` command needed:
-
-```bash
-./my-agent
-```
-
-The wizard automatically sets `default_action: run` in embedded configs, so the agent starts without any arguments.
-
-Output shows it's using embedded config:
-
-```
-Using embedded configuration
-Starting Muti Metroo agent...
-Display Name: my-agent
-Agent ID: abc123def456...
-```
-
-Other commands still work normally:
-
-```bash
-./my-agent help     # Show help
-./my-agent status   # Check status
-./my-agent --version
-```
-
-## Editing Embedded Configuration
-
-To modify the configuration in an existing embedded binary:
-
-```bash
-# Use a regular muti-metroo binary to edit the embedded one
-muti-metroo setup -c /path/to/embedded-binary
-```
-
-The wizard will:
-1. Detect and extract the embedded configuration
-2. Use existing values as defaults
-3. Skip questions about config file path and data directory (not needed for embedded binaries)
-4. Preserve the existing agent identity (Agent ID and X25519 keypair)
-5. Guide you through changes
-6. Write the updated configuration directly back to the binary
-
-No backup config file or data folder is created when editing an existing embedded binary - the config goes directly into the target binary.
-
-### Example: Updating a Deployed Agent
-
-```bash
-# Stop the service
-sudo systemctl stop my-agent
-
-# Edit the embedded config
-muti-metroo setup -c /usr/local/bin/my-agent
-
-# Restart the service
-sudo systemctl start my-agent
-```
-
-## Service Installation with Embedded Config
-
-When installing as a service, embedded binaries are handled specially:
-
-1. The binary is copied to a standard location:
-   - Linux/macOS: `/usr/local/bin/<service-name>`
-   - Windows: `C:\Program Files\<service-name>\<service-name>.exe`
-
-2. The service definition runs without `-c` flag:
-   ```bash
-   # Traditional service
-   ExecStart=/usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
-
-   # Embedded config service (no config flag needed)
-   ExecStart=/usr/local/bin/my-agent run
-   ```
-
-### Linux (systemd)
-
-```bash
-# Wizard creates:
-# - /usr/local/bin/my-agent (embedded binary)
-# - /etc/systemd/system/my-agent.service
-
-sudo systemctl enable my-agent
-sudo systemctl start my-agent
-```
-
-### macOS (launchd)
-
-```bash
-# Wizard creates:
-# - /usr/local/bin/my-agent (embedded binary)
-# - /Library/LaunchDaemons/com.my-agent.plist
-
-sudo launchctl load /Library/LaunchDaemons/com.my-agent.plist
-```
-
-### Windows
+On Windows:
 
 ```powershell
-# Wizard creates:
-# - C:\Program Files\my-agent\my-agent.exe (embedded binary)
-# - Windows Service registration
-
-sc start my-agent
+.\branch-office.exe
 ```
 
-## Binary Format
+## Change an embedded config
 
-The embedded binary format is:
+### With `embed-config`
 
-```
-[original executable]
-[XOR-obfuscated YAML config]
-[8-byte config length (little-endian)]
-[8-byte magic: "MUTI_METROOCFG"]
-```
+Run `embed-config` again with the edited YAML file and the deployed binary as the source:
 
-The XOR obfuscation prevents casual inspection of the config but is **not cryptographic security**. Do not rely on it for protecting secrets - use the management key feature for sensitive data.
-
-## Use Cases
-
-### IoT and Edge Devices
-
-Single-file deployment is ideal for resource-constrained devices:
-- Deploy a single executable to edge nodes
-- No config files to manage on limited storage
-- Pre-configured for immediate operation
-- Easy to update config without redeploying binary
-
-### Air-Gapped Environments
-
-For environments without network access during deployment:
-- Pre-configure the binary with all settings
-- Transfer single file to target
-- Run immediately without additional setup
-
-### Simplified Distribution
-
-For distributing pre-configured agents:
-- Build once with embedded config
-- Distribute single file to remote sites
-- No separate config file management
-
-## Backup Configuration
-
-When creating a **new** embedded binary via `muti-metroo setup`, the wizard also saves a backup config file:
-
-```
-Backup config saved to: ./config.yaml
+```bash
+sudo systemctl stop branch-office
+sudo muti-metroo embed-config agent.yaml -b /usr/local/bin/branch-office
+sudo systemctl start branch-office
 ```
 
-Keep this backup for:
-- Documentation of the configuration
-- Recovery if the binary is lost
-- Reference when editing embedded config
+The new file replaces the old embedded config completely. If the old config embedded the identity, the new one must contain the same `agent.id` and `agent.private_key`, or the agent comes up with a different identity. `config show` redacts secrets, so keep the source YAML file rather than relying on reading it back from the binary.
 
-**Note**: When editing an existing embedded binary via `muti-metroo setup -c /path/to/binary`, no backup file is created - changes go directly into the binary.
+### With the setup wizard
 
-## Security Considerations
+```bash
+muti-metroo setup -c /usr/local/bin/branch-office
+```
 
-### Config Obfuscation
+When `-c` points to a file that does not end in `.yaml` or `.yml`, the wizard treats it as a binary. It loads the embedded config as defaults, skips the config path and data directory questions, keeps the existing identity, and writes the result back into the same binary. No separate config file is written.
 
-The XOR obfuscation:
-- Prevents casual `strings` inspection
-- Is NOT encryption - can be reversed
-- Should not be relied upon for secrets
+## Install as a service
 
-### Secrets Management
+When the setup wizard creates an embedded binary, it offers to install it as a service. The installed service runs the binary without `-c`:
 
-For sensitive data:
-- Use the management key feature for topology encryption
-- Store passwords as bcrypt hashes (generated by `muti-metroo hash`)
-- Consider environment variable substitution for runtime secrets
+| Platform | Binary location | Service definition |
+|----------|-----------------|--------------------|
+| Linux | `/usr/local/bin/<name>` | `/etc/systemd/system/<name>.service` with `ExecStart=/usr/local/bin/<name> run` |
+| macOS | `/usr/local/bin/<name>` | `/Library/LaunchDaemons/com.<name>.plist`, logging to `/var/log/<name>.log` and `/var/log/<name>.err.log` |
+| Windows | `C:\Program Files\<name>\<name>.exe` | Windows Service `<name>` |
 
-### Binary Integrity
+The service is enabled and started as part of the installation. Manage it as described in [System Service](/deployment/system-service), using `<name>` in place of `muti-metroo`.
 
-After embedding:
-- The binary checksum will change
-- Re-sign if code signing is required
-- Update any integrity verification systems
+## See Also
+
+- [CLI - setup](/cli/setup) - Interactive wizard, including the embed option
+- [CLI - config](/cli/overview) - `config show` and `config validate` on embedded binaries
+- [System Service](/deployment/system-service) - Managing the installed service
+- [Configuration - Agent](/configuration/agent) - `agent.id`, `agent.private_key`, and `data_dir`
+- [Security Best Practices](/security/best-practices) - Protecting keys and secrets

@@ -1,230 +1,112 @@
-# Sleep API
-
-HTTP endpoints for managing mesh sleep mode.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/sleep` | POST | Trigger mesh-wide sleep |
-| `/wake` | POST | Trigger mesh-wide wake |
-| `/sleep/status` | GET | Get current sleep status |
-
-These endpoints require `http.remote_api: true` in configuration.
-
+---
+title: Sleep Endpoints
+description: Put the mesh to sleep, wake it, and read an agent's sleep state over HTTP.
+sidebar_position: 14
 ---
 
-## POST /sleep
+# Sleep Endpoints
 
-Trigger mesh-wide sleep mode.
+These endpoints control [sleep mode](/features/sleep-mode): `POST /sleep` and `POST /wake` send a command that spreads to every agent in the mesh, and `GET /sleep/status` reports the state of the agent serving the request. They belong to the remote API group (`http.remote_api`, enabled by default).
 
-### Request
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /sleep` | Put this agent and the mesh to sleep |
+| `POST /wake` | Wake this agent and the mesh |
+| `GET /sleep/status` | Sleep state of this agent |
+
+`POST /sleep` and `POST /wake` need `sleep.enabled: true` on the agent serving the request. When it has `management.signing_private_key`, the command is signed; agents with `management.signing_public_key` ignore unsigned or wrongly signed commands. The HTTP response only confirms that the command was sent. See [Sleep Configuration](/configuration/sleep).
+
+## `POST /sleep`
+
+Sends the sleep command to all peers, then closes peer connections, stops the SOCKS and transport listeners, and starts polling at `sleep.poll_interval`. The request body is ignored.
 
 ```bash
 curl -X POST http://localhost:8080/sleep
 ```
 
-### Response
-
-**Success (200)**:
-
 ```json
 {
-  "status": "triggered",
-  "message": "sleep command triggered"
+  "message": "sleep command triggered",
+  "status": "triggered"
 }
 ```
 
-**Sleep Not Enabled (503)**:
+## `POST /wake`
 
-```
-sleep mode not enabled
-```
-
-**Error (500)**:
-
-```json
-{
-  "status": "error",
-  "error": "already sleeping"
-}
-```
-
-### Behavior
-
-When triggered:
-1. A SLEEP_COMMAND is flooded to all connected peers
-2. All peer connections are closed
-3. SOCKS5 and listener services stop
-4. The agent enters sleep mode with periodic polling
-
-### Command Signing
-
-If `signing_private_key` is configured, the sleep command is automatically signed with Ed25519. Agents with `signing_public_key` configured will verify the signature before processing.
-
----
-
-## POST /wake
-
-Trigger mesh-wide wake from sleep mode.
-
-### Request
+Reconnects this agent, restarts its services, and sends the wake command repeatedly so that sleeping agents receive it during one of their polls. The request body is ignored.
 
 ```bash
 curl -X POST http://localhost:8080/wake
 ```
 
-### Response
-
-**Success (200)**:
-
 ```json
 {
-  "status": "triggered",
-  "message": "wake command triggered"
+  "message": "wake command triggered",
+  "status": "triggered"
 }
 ```
 
-**Sleep Not Enabled (503)**:
-
-```
-sleep mode not enabled
-```
-
-**Error (500)**:
-
-```json
-{
-  "status": "error",
-  "error": "not sleeping"
-}
-```
-
-### Behavior
-
-When triggered:
-1. The agent reconnects to all configured peers
-2. SOCKS5 and listener services restart
-3. A WAKE_COMMAND is flooded to all connected peers
-4. Normal operation resumes
-
-### Command Signing
-
-If `signing_private_key` is configured, the wake command is automatically signed with Ed25519. Agents with `signing_public_key` configured will verify the signature before processing.
-
----
-
-## GET /sleep/status
-
-Get current sleep mode status.
-
-### Request
+## `GET /sleep/status`
 
 ```bash
 curl http://localhost:8080/sleep/status
 ```
 
-### Response
-
-**Success (200)**:
+**Response (200)** while sleeping:
 
 ```json
 {
   "state": "SLEEPING",
   "enabled": true,
-  "sleep_start_time": "2026-01-19T10:30:00Z",
-  "last_poll_time": "2026-01-19T10:35:00Z",
-  "next_poll_time": "2026-01-19T10:40:00Z",
-  "queued_peers": 2
+  "sleep_start_time": "2026-10-11T14:56:03.519736+03:00",
+  "last_poll_time": "0001-01-01T00:00:00Z",
+  "next_poll_time": "2026-10-11T14:57:00.35768573+03:00",
+  "queued_peers": 0,
+  "poll_interval_sec": 60,
+  "poll_interval_jitter": 0.3
 }
 ```
 
-### Response Fields
+**Response (200)** while awake:
+
+```json
+{
+  "state": "AWAKE",
+  "enabled": true,
+  "sleep_start_time": "0001-01-01T00:00:00Z",
+  "last_poll_time": "0001-01-01T00:00:00Z",
+  "next_poll_time": "0001-01-01T00:00:00Z",
+  "queued_peers": 0,
+  "poll_interval_sec": 60,
+  "poll_interval_jitter": 0.3
+}
+```
 
 | Field | Type | Description |
-|-------|------|-------------|
-| `state` | string | Current state: `AWAKE`, `SLEEPING`, or `POLLING` |
-| `enabled` | boolean | Whether sleep mode is enabled |
-| `sleep_start_time` | string (ISO 8601) | When sleep mode was entered |
-| `last_poll_time` | string (ISO 8601) | When last poll cycle completed |
-| `next_poll_time` | string (ISO 8601) | When next poll cycle is scheduled |
-| `queued_peers` | integer | Number of sleeping peers with queued state |
+| ----- | ---- | ----------- |
+| `state` | string | `AWAKE`, `SLEEPING`, or `POLLING` |
+| `enabled` | boolean | `sleep.enabled` |
+| `sleep_start_time` | string | When the agent went to sleep |
+| `last_poll_time` | string | When the last poll started |
+| `next_poll_time` | string | When the next poll is scheduled |
+| `queued_peers` | integer | Sleeping peers for which this agent holds queued state |
+| `poll_interval_sec` | number | `sleep.poll_interval` in seconds |
+| `poll_interval_jitter` | number | `sleep.poll_interval_jitter` |
 
-### Notes
+Timestamps that do not apply are reported as `0001-01-01T00:00:00Z`.
 
-- If sleep mode is not configured, returns `state: "AWAKE"` and `enabled: false`
-- Times are omitted when zero (e.g., no sleep has occurred)
+## Errors
 
----
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 404 | HTML page | `http.remote_api` is disabled |
+| 405 | `method not allowed` | Wrong method (`/sleep` and `/wake` need `POST`, `/sleep/status` needs `GET`) |
+| 500 | `{"error":"already sleeping","status":"error"}` | `POST /sleep` while asleep |
+| 500 | `{"error":"not sleeping","status":"error"}` | `POST /wake` while awake |
+| 503 | `sleep mode not enabled` | `sleep.enabled` is `false` |
 
-## Error Responses
+## See Also
 
-All endpoints may return:
-
-| Status | Description |
-|--------|-------------|
-| 404 | Endpoint disabled (remote_api not enabled) |
-| 405 | Method not allowed |
-| 503 | Sleep mode not enabled in configuration |
-| 500 | Internal error (see error message) |
-
-:::note Signature Verification
-Commands with invalid signatures are rejected by receiving agents (not the API endpoint). The API returns success when the command is sent, but agents with `signing_public_key` configured will drop commands that fail signature verification. Check agent logs for "signature verification failed" messages.
-:::
-
----
-
-## Examples
-
-### Check Status Before Sleep
-
-```bash
-# Check current status
-STATUS=$(curl -s http://localhost:8080/sleep/status | jq -r '.state')
-
-if [ "$STATUS" = "AWAKE" ]; then
-    # Put to sleep
-    curl -X POST http://localhost:8080/sleep
-fi
-```
-
-### Scheduled Sleep with Logging
-
-```bash
-#!/bin/bash
-LOG_FILE="/var/log/muti-metroo-sleep.log"
-
-echo "$(date): Triggering sleep" >> $LOG_FILE
-RESULT=$(curl -s -X POST http://localhost:8080/sleep)
-echo "$(date): Result: $RESULT" >> $LOG_FILE
-```
-
-### Health Check Integration
-
-```bash
-# For monitoring systems - check if agent is in expected state
-EXPECTED_STATE="SLEEPING"  # or "AWAKE"
-
-STATE=$(curl -s http://localhost:8080/sleep/status | jq -r '.state')
-if [ "$STATE" != "$EXPECTED_STATE" ]; then
-    echo "CRITICAL: Agent in unexpected state: $STATE (expected $EXPECTED_STATE)"
-    exit 2
-fi
-echo "OK: Agent state is $STATE"
-exit 0
-```
-
-### Wake All Agents via Different Entry Points
-
-If you have multiple agents and one is unreachable, try waking via another:
-
-```bash
-for AGENT in "192.168.1.10:8080" "192.168.1.11:8080" "192.168.1.12:8080"; do
-    if curl -s -X POST "http://$AGENT/wake" | grep -q "triggered"; then
-        echo "Wake triggered via $AGENT"
-        exit 0
-    fi
-done
-echo "Failed to trigger wake via any agent"
-exit 1
-```
+- [Sleep Mode](/features/sleep-mode) - How sleep and polling work
+- [Sleep Configuration](/configuration/sleep) - Poll interval, jitter, and persistence
+- [CLI - sleep](/cli/sleep) - The `sleep`, `wake`, and status commands

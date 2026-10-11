@@ -1,51 +1,89 @@
-# Listener Management API
-
-HTTP endpoints for managing dynamic transport listeners at runtime.
-
-Transport listeners are the QUIC/HTTP2/WebSocket sockets that accept inbound peer connections (the top-level `listeners:` config block). Dynamic listeners let you open or close one on an already-running agent without editing `config.yaml` and restarting.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/listeners/manage` | POST | Manage transport listeners on local agent |
-| `/agents/{agent-id}/listeners/manage` | POST | Manage transport listeners on remote agent |
-
-These endpoints require `http.remote_api: true` in configuration.
-
+---
+title: Listener Management Endpoints
+description: Open, close, and list QUIC, HTTP/2, and WebSocket transport listeners on a running agent.
+sidebar_position: 8
 ---
 
-## POST /listeners/manage
+# Listener Management Endpoints
 
-Manage transport listeners on the local agent.
+Transport listeners are the QUIC, HTTP/2, and WebSocket sockets that accept connections from peers (the `listeners` configuration section). These endpoints open and close listeners on a running agent and list the active ones. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /listeners/manage` | Manage listeners of the local agent |
+| `POST /agents/{id}/listeners/manage` | Manage listeners of a remote agent |
+
+`add` and `remove` are mutations: the agent serving the request must have `management.signing_private_key`, otherwise it returns `403`. Mutations are written to the [dynamic configuration journal](/configuration/dynamic-config-persistence) when `agent.data_dir` is set and are replayed on restart and after wake. Listeners from the configuration file cannot be removed or replaced.
+
+## `POST /listeners/manage`
 
 ### Request
 
-Add a QUIC listener:
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `address` | string | `add`, `remove` | Bind address, for example `0.0.0.0:4434` or `127.0.0.1:3002`. Identifies the listener for `remove`. |
+| `transport` | string | `add` | `quic` (default), `h2`, or `ws` |
+| `path` | string | `add` | HTTP path; required for `h2` and `ws` |
+| `plaintext` | boolean | `add` | Accept unencrypted WebSocket connections, for use behind a TLS-terminating reverse proxy. `ws` only. |
+| `advertise_address` | string | `add` | Public `host:port` that other agents should dial. Loopback and unspecified hosts are rejected. |
+| `advertise_path` | string | `add` | Advertised path for `h2` and `ws`; defaults to `path` |
+| `advertise_transport` | string | `add` | Advertised transport; defaults to `transport` |
+
+Validation follows the same rules as the `listeners` configuration section. New listeners use the agent's global TLS certificate and mTLS setting; per-listener TLS overrides are not available at runtime. When `advertise_address` is set, the dial target is published to the mesh and appears in `advertised_listeners` of [`GET /api/topology`](/api/dashboard#get-apitopology).
+
+### `add`
+
+Adding an address that already has a dynamic listener stops it and starts the new one. Bind failures, such as an address already in use, are returned as errors.
 
 ```bash
 curl -X POST http://localhost:8080/listeners/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "transport": "quic", "address": ":4434"}'
+  -d '{"action": "add", "transport": "quic", "address": "0.0.0.0:4434"}'
 ```
 
-Add a plaintext WebSocket listener with an advertised dial target:
+```json
+{
+  "status": "ok",
+  "message": "listener 0.0.0.0:4434 added (transport=quic)"
+}
+```
+
+A plaintext WebSocket listener behind a reverse proxy, advertised under its public address:
 
 ```bash
 curl -X POST http://localhost:8080/listeners/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "transport": "ws", "address": "127.0.0.1:3002", "path": "/ws/", "plaintext": true, "advertise_address": "vps.example.com:4433"}'
+  -d '{"action": "add", "transport": "ws", "address": "127.0.0.1:3002", "path": "/ws/", "plaintext": true, "advertise_address": "relay.example.com:443"}'
 ```
 
-Remove a dynamic listener:
+```json
+{
+  "status": "ok",
+  "message": "listener 127.0.0.1:3002 added (transport=ws)"
+}
+```
+
+### `remove`
+
+Stops accepting new connections on a dynamic listener and closes its socket. Peer connections that are already established stay up.
 
 ```bash
 curl -X POST http://localhost:8080/listeners/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "remove", "address": ":4434"}'
+  -d '{"action": "remove", "address": "0.0.0.0:4434"}'
 ```
 
-List all listeners (dynamic and config):
+```json
+{
+  "status": "ok",
+  "message": "listener 0.0.0.0:4434 removed"
+}
+```
+
+### `list`
+
+Returns configured and dynamic listeners, sorted by address. The `listeners` field is omitted when there are none.
 
 ```bash
 curl -X POST http://localhost:8080/listeners/manage \
@@ -53,50 +91,14 @@ curl -X POST http://localhost:8080/listeners/manage \
   -d '{"action": "list"}'
 ```
 
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | Action to perform: `add`, `remove`, or `list` |
-| `transport` | string | For add | Transport type: `quic` (default), `h2`, or `ws` |
-| `address` | string | For add/remove | Bind address (e.g. `:4433`, `127.0.0.1:3002`) |
-| `path` | string | For h2/ws add | HTTP path (e.g. `/ws/`) |
-| `plaintext` | bool | No | Start a WebSocket listener without TLS (ws only) |
-| `advertise_address` | string | No | Public `host:port` to advertise to the mesh |
-| `advertise_path` | string | No | Path to advertise for h2/ws (defaults to `path`) |
-| `advertise_transport` | string | No | Transport to advertise (defaults to `transport`) |
-
-### Response
-
-**Add Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "listener :4434 added (transport=quic)"
-}
-```
-
-**Remove Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "listener :4434 removed"
-}
-```
-
-**List Success (200)**:
-
 ```json
 {
   "status": "ok",
   "listeners": [
     {
       "transport": "quic",
-      "address": ":4433",
+      "address": "0.0.0.0:4433",
       "plaintext": false,
-      "advertise_address": "vps.example.com:4433",
       "dynamic": false
     },
     {
@@ -104,92 +106,59 @@ curl -X POST http://localhost:8080/listeners/manage \
       "address": "127.0.0.1:3002",
       "path": "/ws/",
       "plaintext": true,
+      "advertise_address": "relay.example.com:443",
       "dynamic": true
     }
   ]
 }
 ```
 
-**Bad Request (400)**:
+| Field | Description |
+| ----- | ----------- |
+| `transport` | `quic`, `h2`, or `ws` |
+| `address` | Bind address |
+| `path` | HTTP path; omitted for QUIC |
+| `plaintext` | The listener accepts unencrypted WebSocket connections |
+| `advertise_address` | Advertised dial target; omitted when not advertised |
+| `dynamic` | `true` for listeners added at runtime |
 
-```json
-{ "error": "address is required" }
-```
+### Errors
 
-```json
-{ "error": "invalid transport: xyz (must be quic, h2, or ws)" }
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"address is required"}` | Missing `address` |
+| 400 | `{"error":"invalid transport: xyz (must be quic, h2, or ws)"}` | Invalid `transport` |
+| 400 | `{"error":"path is required for h2 transport"}` | `h2` or `ws` without `path` |
+| 400 | `{"error":"listener \"0.0.0.0:4433\" is a config listener and cannot be replaced"}` | `add` on a configured address |
+| 400 | `{"error":"listener \"0.0.0.0:4433\" is a config listener and cannot be removed"}` | `remove` of a configured listener |
+| 400 | `{"error":"dynamic listener \"0.0.0.0:4499\" not found"}` | `remove` of an unknown address |
+| 400 | `{"error":"start listener: ..."}` | The address could not be bound |
+| 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key |
+| 403 | `listener management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 405 | `method not allowed` | Method other than `POST` |
 
-```json
-{ "error": "listener \":4433\" is a config listener and cannot be replaced" }
-```
+## `POST /agents/{id}/listeners/manage`
 
-```json
-{ "error": "dynamic listener \":4434\" not found" }
-```
-
-**Forbidden (403)**:
-
-```
-listener management restricted: management key decryption unavailable
-```
-
-### Behavior
-
-When a listener is added:
-1. The spec is validated (transport, address, path-for-h2/ws, advertise block) using the same rules as config-file listeners.
-2. If the address belongs to a config listener, the request is rejected.
-3. If a dynamic listener with the same address exists, it is stopped and replaced.
-4. The listener binds using the agent's global TLS certificate (or an auto-generated self-signed one) and the global mTLS setting. `plaintext` (ws only) starts the listener without TLS for reverse-proxy deployments. A bind failure (e.g. address already in use) is returned as an error.
-5. If `advertise_address` is set, the dial target is published to the mesh via NodeInfo.
-
-When a listener is removed:
-1. The address must belong to a dynamic listener (not from config).
-2. The listener stops accepting new connections and its socket is closed; existing peer connections are unaffected.
-
-When listing:
-- Both config and dynamic listeners are returned; the `dynamic` field distinguishes them.
-
-Dynamic listeners:
-- Persist across restarts when `agent.data_dir` is set (replayed from the [dynamic config journal](/configuration/dynamic-config-persistence)) and are restored across sleep/wake; otherwise they are ephemeral.
-- Reuse the agent's global TLS configuration and mTLS setting; per-listener certificate overrides are not supported at runtime.
-
----
-
-## POST /agents/\{agent-id\}/listeners/manage
-
-Manage transport listeners on a remote agent.
-
-### Request
+Manages listeners of a remote agent. The request body and responses are the same as for [`POST /listeners/manage`](#post-listenersmanage).
 
 ```bash
-curl -X POST http://localhost:8080/agents/abc123def456/listeners/manage \
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/listeners/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "transport": "quic", "address": ":4433"}'
+  -d '{"action": "add", "transport": "quic", "address": "0.0.0.0:4433"}'
 ```
 
-### Request Body
+The local agent signs `add` and `remove` and forwards the request over the mesh; the target verifies the signature with its `management.signing_public_key`. Additional errors:
 
-Same as `/listeners/manage`.
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"management signing public key not configured on this agent"}` | The target has no signing public key |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
 
-### Response
+## See Also
 
-Same response formats as `/listeners/manage`. The request is forwarded to the target agent via the mesh control channel; `add`/`remove` are signed with the local operator's management key, while `list` passes through unsigned.
-
----
-
-## Error Responses
-
-All endpoints may return:
-
-| Status | Description |
-|--------|-------------|
-| 400 | Invalid request body or parameters |
-| 403 | Management key required but unavailable |
-| 404 | Endpoint disabled (`remote_api` not enabled) or agent not found |
-| 405 | Method not allowed (must be POST) |
-| 503 | Listener management not configured |
-
-:::note Management Key Protection
-Listener management follows the same management key restrictions as route, forward, and peer management. Agents with only `management.public_key` (field agents) cannot manage listeners. Agents with both keys (operator nodes) can manage listeners freely.
-:::
+- [CLI - listener](/cli/listener) - The `listener` commands that call these endpoints
+- [Listeners Configuration](/configuration/listeners) - Listener options and advertisement
+- [Peer Management Endpoints](/api/peer-management) - Dial peers at runtime
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart

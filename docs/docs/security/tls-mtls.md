@@ -1,5 +1,6 @@
 ---
 title: TLS and mTLS
+description: How peer connections use TLS 1.3, what the default unverified mode does and does not protect against, and when to enable strict verification and mutual TLS.
 sidebar_position: 3
 ---
 
@@ -7,160 +8,118 @@ sidebar_position: 3
   <img src="/img/mole-inspecting.png" alt="Mole securing connections" style={{maxWidth: '180px'}} />
 </div>
 
-# TLS and Mutual TLS
+# TLS and mTLS
 
-## Layered Security Model
+Every peer connection (QUIC, HTTP/2, or WebSocket) runs over TLS 1.3; older TLS versions are refused. The one exception is a WebSocket listener with `plaintext: true`, intended to sit behind a reverse proxy that terminates TLS.
 
-Muti Metroo uses a **layered security model**:
+How much TLS protects depends on whether certificates are verified. Muti Metroo has three modes:
 
-1. **End-to-End Encryption (Primary)**: X25519 key exchange + ChaCha20-Poly1305 encrypts all stream data. Transit agents cannot decrypt traffic - only ingress and exit agents can read the payload.
+| Mode | Settings | Who can sit on a peer link |
+| ---- | -------- | -------------------------- |
+| Default | No `tls` section, or `strict: false` | Anyone who can reach the listener, and anyone who can intercept the connection |
+| Strict | `strict: true` and a CA | Listeners must present a certificate from your CA |
+| Strict with mutual TLS | `strict: true`, `mtls: true`, and a CA | Both sides must present certificates from your CA |
 
-2. **Transport TLS (Defense-in-depth)**: TLS 1.3 encrypts the transport layer. This provides an additional encryption layer but is not the primary security mechanism.
+Certificate keys and paths are described in [TLS Certificates Configuration](/configuration/tls-certificates).
 
-Because of the E2E encryption layer, **TLS certificate verification is optional by default**. Agents auto-generate self-signed certificates and don't verify peer certificates. This allows quick deployment without PKI setup while maintaining strong security guarantees.
+## Default mode
 
-:::tip Configuration
-See [TLS Certificates Configuration](/configuration/tls-certificates) for all options including certificate paths, strict mode, and mTLS setup.
-:::
+Without TLS configuration, each agent generates a self-signed ECDSA P-256 certificate in memory at startup, and dialing agents accept any certificate. Agents can connect with no certificate setup.
 
-## TLS Verification Modes
+In this mode:
 
-| Mode | Certificate Verification | Use Case |
-|------|-------------------------|----------|
-| **Default** | None (auto-generated certs) | Quick deployment, development |
-| **Strict** | CA-based verification | Production, compliance |
-| **Strict + mTLS** | Mutual authentication | Zero-trust, high-security |
+- Traffic on each link is encrypted, so a passive observer on the network sees neither payloads nor destinations.
+- A dialing agent cannot tell its real peer from an impostor. An attacker who can intercept the connection (for example by DNS spoofing or on a shared network) can terminate TLS with its own certificate and relay traffic as if it were a transit agent.
+- Because [end-to-end session keys](/security/e2e-encryption#limits-of-the-protection) are not authenticated either, such an attacker can also read and change the session payloads that pass through it.
+- Any host that can reach a listener can join the mesh as a peer.
 
-## Why Default No-Verification is Safe
+Use the default mode for development and for meshes whose links run over networks you control. Use strict mode with mutual TLS when links cross networks you do not control.
 
-The default configuration doesn't verify TLS certificates, yet remains secure:
+## Strict verification
 
-1. **E2E Encryption**: Stream data is encrypted with ChaCha20-Poly1305 using keys derived from X25519 exchange. Even if a MITM intercepts TLS, they cannot decrypt stream content.
+With `strict: true`, a dialing agent checks the listener's certificate against the configured CA and checks that it covers the address being dialed. A connection to a listener with a self-signed or foreign certificate fails.
 
-2. **Agent ID Verification**: Peers verify each other's Agent ID during handshake. This is independent of TLS certificates.
-
-3. **Double Encryption**: Traffic is encrypted twice - once at the E2E layer, once at TLS. A MITM would need to break both.
-
-## When to Enable Strict Mode
-
-Enable `strict: true` when you need:
-
-- **Defense-in-depth**: Additional validation beyond E2E encryption
-- **Network access control**: Reject connections from agents without valid certificates
-- **Compliance requirements**: Environments requiring PKI-based authentication
-- **Early MITM detection**: TLS verification can detect interception attempts earlier
-
-## When to Enable mTLS
-
-Enable `mtls: true` (mutual TLS) when you need:
-
-- **Mutual authentication**: Both sides must present valid certificates
-- **Network-level access control**: Only agents with valid certs can connect
-- **Early rejection**: Unauthorized connections rejected at TLS, before protocol handshake
-- **Zero-trust compliance**: Required for many security frameworks
-
-## Certificate Requirements
-
-**Important**: Muti Metroo only accepts EC (Elliptic Curve) certificates. RSA certificates are rejected.
-
-Generate certificates using the built-in CLI:
-
-```bash
-# Generate CA
-muti-metroo cert ca --cn "My Mesh CA" -o ./certs
-
-# Generate agent certificate
-muti-metroo cert agent --cn "agent-1" \
-  --ca ./certs/ca.crt \
-  --ca-key ./certs/ca.key \
-  -o ./certs
+```yaml
+tls:
+  ca: "./certs/ca.crt"
+  cert: "./certs/agent-1.crt"
+  key: "./certs/agent-1.key"
+  strict: true
 ```
 
-See [cert command](/cli/cert) for full options.
+Strict mode can be set per peer with `peers[].tls.strict`, and a peer can use its own CA with `peers[].tls.ca`. This lets an agent verify internal peers while accepting, for example, a peer reached through a public reverse proxy whose certificate comes from a public CA.
 
-## Mixed TLS Environments
+## Mutual TLS
 
-When connecting through public proxies (like nginx with Let's Encrypt) while using strict TLS internally, you can disable verification for specific peers:
+With `mtls: true`, listeners require the connecting agent to present a client certificate signed by the global `tls.ca`. Connections without one are refused during the TLS handshake, before any Muti Metroo traffic is exchanged. Dialing agents present their `tls.cert` as the client certificate.
 
-- Internal peers: Verified against your internal CA
-- Public proxy peers: Skip verification (E2E encryption still protects traffic)
+```yaml
+tls:
+  ca: "./certs/ca.crt"
+  cert: "./certs/agent-1.crt"
+  key: "./certs/agent-1.key"
+  strict: true
+  mtls: true
+```
 
-This is safe because E2E encryption protects all traffic regardless of TLS verification status.
+`mtls` works independently of `strict` and can be turned off for a single listener with `listeners[].tls.mtls: false`. Combine both settings so that each side verifies the other.
 
-## Security Properties
+## What certificates prove
 
-### What TLS Verification Adds
+A valid certificate proves that its holder was issued a certificate by your CA. It does not prove which agent the holder is:
 
-| Feature | Without Strict | With Strict | With mTLS |
-|---------|---------------|-------------|-----------|
-| Transport encryption | Yes | Yes | Yes |
-| E2E encryption | Yes | Yes | Yes |
-| Server identity verification | No | Yes | Yes |
-| Client identity verification | No | No | Yes |
-| Early MITM detection | No | Yes | Yes |
-| Network-level access control | No | Partial | Full |
+- Certificates are not tied to agent IDs. Any agent with a valid certificate can claim any agent ID.
+- The `id` in a peer entry is checked against the ID the remote agent reports, which detects misconfiguration but is not an authentication mechanism.
+- There is no certificate revocation (CRL or OCSP) and no certificate pinning. To remove an agent's access, issue new certificates from a new CA to the remaining agents, or restrict the agent at the network level.
 
-### What's Always Protected
+Treat every holder of a certificate from your CA as a trusted member of the mesh.
 
-Regardless of TLS mode, your traffic is protected by:
-- E2E encryption (ChaCha20-Poly1305)
-- Agent ID verification during handshake
-- Integrity checking (AEAD authentication)
+## Generate certificates
+
+Muti Metroo only accepts ECDSA certificates and keys for its own certificate and CA. RSA and Ed25519 are rejected. The built-in commands generate ECDSA P-256:
+
+```bash
+# Certificate authority
+muti-metroo cert ca --cn "Example Mesh CA" -o ./certs
+
+# Agent certificate, valid for the addresses peers will dial
+muti-metroo cert agent --cn agent-1 \
+  --dns agent-1.example.com --ip 203.0.113.10 \
+  --ca ./certs/ca.crt --ca-key ./certs/ca.key -o ./certs
+```
+
+Agent certificates always include the common name, `localhost`, `127.0.0.1`, and `::1`; add every hostname and IP address that peers use to reach the agent. Certificates are valid for 365 days unless `--days` says otherwise. See [cert CLI](/cli/cert).
 
 ## Troubleshooting
 
-### Certificate Not Trusted
+### x509: certificate signed by unknown authority
 
-```
-Error: x509: certificate signed by unknown authority
-```
+The dialing agent has `strict: true` and the listener's certificate was not issued by the configured CA. Check the CA path, and verify the certificate with `openssl verify -CAfile ca.crt agent-1.crt`.
 
-**Cause:** `strict: true` is enabled but the CA certificate is missing or incorrect.
+### x509: certificate is valid for ..., not ...
 
-**Solutions:**
-- Verify CA certificate path is correct
-- Check certificate was signed by the configured CA: `openssl verify -CAfile ca.crt agent.crt`
+The listener's certificate does not include the address the peer dials. Issue a new certificate with the right `--dns` or `--ip` values.
 
-### Certificate Expired
+### x509: certificate has expired
 
-```
-Error: x509: certificate has expired
-```
+Check the date with `muti-metroo cert info ./certs/agent-1.crt` and issue a new certificate. `muti-metroo run` also warns at startup when a configured certificate expires within 60 days.
 
-**Solution:** Check expiration with `openssl x509 -enddate -noout -in agent.crt` and regenerate if needed.
+### RSA certificates are not supported
 
-### RSA Certificate Rejected
-
-```
-Error: certificate must use ECDSA, got RSA
+```text
+RSA certificates are not supported; use EC (ECDSA) certificates
 ```
 
-**Cause:** Muti Metroo only accepts EC certificates.
+Issue an ECDSA certificate with `muti-metroo cert` or OpenSSL.
 
-**Solution:** Regenerate using the CLI: `muti-metroo cert agent ...`
+### tls: certificate required
 
-### Client Certificate Required
+The listener has `mtls: true` and the dialing agent presented no client certificate. Configure `tls.cert` and `tls.key` on the dialing agent.
 
-```
-Error: tls: client didn't provide a certificate
-```
+## See Also
 
-**Cause:** The listener has mTLS enabled but the connecting peer doesn't have a certificate configured.
-
-**Solution:** Configure `tls.cert` and `tls.key` on the connecting agent.
-
-## Decision Guide
-
-| Scenario | Recommended Mode |
-|----------|-----------------|
-| Development/testing | Default (no verification) |
-| Internal mesh, trusted network | Default or Strict |
-| Production with compliance needs | Strict |
-| Zero-trust environment | Strict + mTLS |
-| Mixed internal/external peers | Per-peer overrides |
-
-## Next Steps
-
-- [TLS Certificates Configuration](/configuration/tls-certificates) - Full configuration reference
-- [Authentication](/security/authentication) - Additional authentication layers
-- [Best Practices](/security/best-practices) - Production hardening
+- [TLS Certificates Configuration](/configuration/tls-certificates): every TLS key, per-peer and per-listener overrides
+- [cert CLI](/cli/cert): create and inspect certificates
+- [End-to-End Encryption](/security/e2e-encryption): the encryption layer inside the TLS connection
+- [Best Practices](/security/best-practices): certificate rotation and CA protection
+- [Transports](/concepts/transports): QUIC, HTTP/2, and WebSocket

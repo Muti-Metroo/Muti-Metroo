@@ -1,5 +1,6 @@
 ---
 title: Connectivity Troubleshooting
+description: Step-by-step diagnosis for Muti Metroo peers that do not connect, routes that do not appear, and connections that take the wrong path.
 sidebar_position: 2
 ---
 
@@ -9,402 +10,180 @@ sidebar_position: 2
 
 # Connectivity Troubleshooting
 
-Agents not connecting? Routes not showing up? Step through these diagnostics to find the problem.
+Work through this page from the top: first confirm the agent itself is healthy, then its peer connections, then the routes, then the path a connection takes. For the meaning of a specific error message, see [Common Issues](/troubleshooting/common-issues).
 
-**Quick checks:**
-```bash
-# Is the agent healthy?
-curl http://localhost:8080/healthz | jq '{peers: .peer_count, routes: .route_count}'
+## Check the agent
 
-# Can you reach the peer?
-nc -zv peer-address 4433
-
-# Are certificates valid?
-muti-metroo cert info ./certs/agent.crt
-```
-
-## Diagnostic Tools
-
-### CLI Commands
-
-Use the built-in CLI commands for quick diagnostics:
+On the agent you are diagnosing:
 
 ```bash
-# Check overall agent status
 muti-metroo status
-
-# List connected peers with state and RTT
-muti-metroo peer status
-
-# View routing table with hop counts
-muti-metroo route status
-
-# Test connectivity to a listener before deployment
-muti-metroo probe server.example.com:4433
-muti-metroo probe --transport h2 server.example.com:443
-
-# Ping through the mesh to test exit connectivity
-muti-metroo ping abc123 8.8.8.8
+curl -s http://localhost:8080/healthz | jq
 ```
 
-### HTTP API
-
-For scripting and monitoring:
-
-```bash
-# Basic health check
-curl http://localhost:8080/health
-
-# Detailed status with counts
-curl http://localhost:8080/healthz | jq
-
-# Expected output:
+```json
 {
-  "status": "healthy",
+  "accepts_signed_management": true,
+  "can_sign_management": false,
+  "exit_handler_running": false,
+  "peer_count": 1,
+  "route_count": 2,
   "running": true,
-  "peer_count": 2,
-  "stream_count": 10,
-  "route_count": 5
+  "socks5_running": true,
+  "status": "healthy",
+  "stream_count": 0
 }
-
-# List all known agents
-curl http://localhost:8080/agents | jq
-
-# Trigger route refresh
-curl -X POST http://localhost:8080/routes/advertise
 ```
 
-## Peer Connection Issues
+`peer_count` is the number of connected peers. `route_count` is the number of routes in this agent's table. Both require the HTTP API (`http.enabled: true`); see [API - Health](/api/health).
 
-### Can't Connect to Peer
+## Peers do not connect
 
-**Step 1: Check network reachability**
+List the peers and their state:
 
 ```bash
-# TCP (for HTTP/2, WebSocket)
-nc -zv peer-address 4433
-telnet peer-address 4433
-
-# UDP (for QUIC)
-nc -zvu peer-address 4433
-```
-
-**Step 2: Check DNS resolution**
-
-```bash
-dig peer-hostname
-nslookup peer-hostname
-```
-
-**Step 3: Check firewall**
-
-```bash
-# On peer host
-sudo iptables -L -n | grep 4433
-sudo ufw status
-
-# Try from another host on same network
-curl http://peer-address:8080/health
-```
-
-**Step 4: Check TLS**
-
-```bash
-# Test TLS connection
-openssl s_client -connect peer-address:4433 -CAfile ca.crt
-
-# Verify certificate
-muti-metroo cert info ./certs/agent.crt
-```
-
-### Peer Disconnects Frequently
-
-**Check keepalive settings:**
-
-```yaml
-connections:
-  idle_threshold: 30s    # Send keepalive after 30s idle
-  timeout: 90s           # Disconnect after 90s no response
-```
-
-If network is slow, increase timeout:
-
-```yaml
-connections:
-  idle_threshold: 60s
-  timeout: 180s
-```
-
-**Check logs for disconnect reasons:**
-
-```bash
-journalctl -u muti-metroo | grep -i "disconnect\|timeout"
-```
-
-### Slow Reconnection
-
-Tune reconnection backoff:
-
-```yaml
-connections:
-  reconnect:
-    initial_delay: 500ms  # Start faster
-    max_delay: 30s        # Cap sooner
-    multiplier: 1.5       # Slower backoff
-    jitter: 0.3           # More randomization
-```
-
-## Transport-Specific Issues
-
-### QUIC Not Working
-
-QUIC uses UDP, which may be blocked or throttled.
-
-**Test UDP connectivity:**
-
-```bash
-# From client
-echo "test" | nc -u peer-address 4433
-
-# On server, check if receiving
-tcpdump -i any udp port 4433
-```
-
-**Common issues:**
-- Corporate firewalls block UDP
-- NAT devices timeout UDP quickly
-- Some ISPs throttle UDP
-
-**Solution:** Fall back to HTTP/2 or WebSocket:
-
-```yaml
-peers:
-  - id: "..."
-    transport: h2    # Instead of quic
-    address: "peer-address:443"
-```
-
-### HTTP/2 Not Working
-
-**Test HTTP/2:**
-
-```bash
-curl -v --http2 https://peer-address:8443/mesh
-```
-
-**Check TLS:**
-
-```bash
-openssl s_client -connect peer-address:8443 -alpn h2
-```
-
-### WebSocket Through Proxy
-
-**Test proxy connectivity:**
-
-```bash
-# Test CONNECT through proxy
-curl -v --proxy http://proxy:8080 https://peer-address:443/
-
-# Check if proxy allows WebSocket upgrade
-curl -v --proxy http://proxy:8080 \
-  -H "Upgrade: websocket" \
-  -H "Connection: Upgrade" \
-  https://peer-address:443/mesh
-```
-
-**Configure proxy authentication:**
-
-```yaml
-peers:
-  - transport: ws
-    address: "wss://peer-address:443/mesh"
-    proxy: "http://proxy:8080"
-    proxy_auth:
-      username: "${PROXY_USER}"
-      password: "${PROXY_PASS}"
-```
-
-## Routing Issues
-
-### No Route Found
-
-```
-Error: no route to 10.0.0.5
-```
-
-**Start with `route trace`** -- it runs the live selection logic against a destination and explains which route (if any) would win:
-
-```bash
-muti-metroo route trace 10.0.0.5
-muti-metroo route trace 10.0.0.5 --target abc123
-```
-
-The output lists every matching CIDR with the reason it won or lost. No matches at all usually means the route has not reached this agent yet or has expired; in that case work through the steps below.
-
-**Step 1: Check if route should exist**
-
-```bash
-# On exit agent
-grep -A5 "exit:" /etc/muti-metroo/config.yaml
-```
-
-**Step 2: Check route propagation**
-
-```bash
-# On ingress agent - using CLI
-muti-metroo route status
-
-# Or using HTTP API
-curl http://localhost:8080/healthz | jq '.route_count'
-```
-
-**Step 3: Check peer connectivity**
-
-Routes propagate through peers. If peer is disconnected, routes are lost.
-
-```bash
-# Using CLI
 muti-metroo peer status
-
-# Or using HTTP API
-curl http://localhost:8080/healthz | jq '.peer_count'
 ```
 
-**Step 4: Trigger route advertisement**
+```text
+Connected Peers
+===============
+ID           NAME                 STATE          ROLE       RTT
+--           ----                 -----          ----       ---
+bff2a511     exitB                CONNECTED      dialer     -
 
-```bash
-curl -X POST http://exit-agent:8080/routes/advertise
+Total: 1 peer(s)
 ```
 
-**Step 5: Wait for propagation**
+A configured peer that never appears here is failing to connect. Look for `failed to connect to peer` in the dialing agent's log; the `error` field gives the reason. The table in [Common Issues - Peers do not connect](/troubleshooting/common-issues#peers-do-not-connect) explains the usual values.
 
-Routes take time to propagate (up to `advertise_interval`).
+Then check, in order:
 
-### Route Expired
+1. **The listener is running.** On the listening agent, the startup log contains `listener started` with the address and transport, and `muti-metroo listener list` shows it.
+2. **The address and transport match.** A peer's `transport` must equal the listener's `transport`. For HTTP/2 and WebSocket, the path must match too: give it in the address (`wss://relay.example.com:443/mesh`). Without a path, the dialer uses `/mesh`.
+3. **The network allows it.** QUIC uses UDP; HTTP/2 and WebSocket use TCP. A TCP test such as `nc -zv host 4433` says nothing about a QUIC listener.
+4. **The handshake succeeds.** Run [`muti-metroo probe`](/cli/probe) from the dialing host. It dials the listener with the same transport code as the agent and reports the remote agent ID:
 
-Routes expire after `route_ttl` without refresh.
-
-```bash
-# Check route TTL
-grep route_ttl config.yaml
-
-# If exit disconnected for too long, routes expire
-# Reconnect exit and trigger advertisement
-```
-
-### Wrong Route Selected
-
-Routes are selected by:
-1. Longest prefix match
-2. Lowest metric (hop count) if tied
-
-**Debug route selection:**
-
-```bash
-# Explain which CIDR would win for a given destination
-muti-metroo route trace 1.2.3.4
-
-# Enable debug logging
-muti-metroo run --log-level debug
-
-# Look for route lookup logs
-grep "route lookup" logs
-```
-
-## Stream Issues
-
-### Streams Not Opening
-
-```
-Error: stream open timeout
-```
-
-**Causes:**
-- Network latency too high
-- Too many hops
-- Exit agent overloaded
-
-**Solutions:**
-
-1. Increase timeout:
-   ```yaml
-   limits:
-     stream_open_timeout: 60s
+   ```bash
+   muti-metroo probe relay.example.com:4433
+   muti-metroo probe --transport ws relay.example.com:443 --path /mesh
    ```
 
-2. Check each hop is responsive
+   If `probe` succeeds but the agent still cannot connect, compare TLS settings: with `mtls: true` on the listener, the dialing agent needs a certificate signed by the listener's CA, and `probe` needs `--ca`, `--cert`, and `--key` to test the same way.
 
-3. Reduce hop count if possible
+5. **The peer ID is right.** `probe` prints the listener's agent ID. It must equal the `id` in the dialing agent's `peers` entry, or be `"auto"`.
 
-### Streams Dying
+### Through an HTTP proxy
 
-**Check logs for stream issues:**
-
-```bash
-journalctl -u muti-metroo | grep -i "stream"
-```
-
-**Common causes:**
-- Idle timeout
-- Buffer exhaustion
-- Network issues
-
-## Network Diagnostics
-
-### Capture Traffic
+For WebSocket peers that use `proxy`, the proxy must allow `CONNECT` to the peer's host and port. Test the proxy separately:
 
 ```bash
-# QUIC (UDP)
-tcpdump -i any udp port 4433 -w capture.pcap
-
-# HTTP/2, WebSocket (TCP)
-tcpdump -i any tcp port 443 -w capture.pcap
+curl -v --proxy http://proxy.corp.example.com:8080 https://relay.example.com/
 ```
 
-### Monitor Connections
+A `407` response means `proxy_auth` is missing or wrong.
+
+### Peers that disconnect repeatedly
+
+Each disconnect is logged as `peer disconnected` with an `error` field. A common cause is a NAT device, firewall, or reverse proxy that drops idle connections sooner than the agents send keepalives. Agents send a keepalive after `connections.idle_threshold` (default 5 minutes) without traffic. Lower it below the device's idle timeout:
+
+```yaml
+connections:
+  idle_threshold: 30s
+```
+
+## Routes are missing
+
+On the ingress agent:
 
 ```bash
-# Watch connection states
-watch -n 1 'netstat -an | grep 4433'
-
-# Count connections
-netstat -an | grep 4433 | wc -l
+muti-metroo route status
 ```
 
-### Latency Testing
+```text
+Route Table
+===========
+NETWORK              NEXT HOP        ORIGIN          METRIC   HOPS   COMMENT
+-------              --------        ------          ------   ----   -------
+10.99.0.0/16                         bff2a511        0        1
+
+Total: 1 route(s)
+```
+
+If an expected route is missing:
+
+1. **Check the exit.** On the exit agent, `exit.enabled` must be `true` and the CIDR must be in `exit.routes` or added with `muti-metroo route add`. The exit's startup output lists its exit routes.
+2. **Check every hop.** Routes travel only over connected peers. Run `muti-metroo peer status` on each agent along the path.
+3. **Check `routing.max_hops`.** Advertisements are not forwarded beyond this many hops (default 16).
+4. **Trigger an advertisement.** Exits advertise every `routing.advertise_interval` (default 2 minutes). To advertise immediately, on the exit:
+
+   ```bash
+   curl -X POST http://localhost:8080/routes/advertise
+   ```
+
+Routes expire if they are not refreshed within `routing.route_ttl` (default 5 minutes). A route that disappears a few minutes after an exit or transit agent goes offline has expired as designed.
+
+## Routing problems
+
+`route trace` explains which route an agent would use for a destination:
 
 ```bash
-# Measure round-trip time
-ping peer-address
-
-# Measure TCP latency
-hping3 -S -p 443 peer-address
-
-# Time a stream open
-time curl -x socks5://localhost:1080 https://example.com -o /dev/null
+muti-metroo route trace 10.99.1.1
 ```
 
-## Checklist
+```text
+Trace for 10.99.1.1
+    -> 10.99.0.0/16         metric=1 hops=1 next_hop=exitB (bff2a511) origin=exitB (bff2a511)
+```
 
-- [ ] Network reachable (ping, nc, telnet)
-- [ ] Firewall allows traffic
-- [ ] DNS resolves correctly
-- [ ] TLS certificates valid
-- [ ] Peer ID matches
-- [ ] Routes advertised
-- [ ] Logs show no errors
+Add `-t <agent-id>` to run the trace on a remote agent. When several routes match, the most specific prefix wins, then the lowest metric.
+
+```text
+Trace for 8.8.8.8
+    no matching CIDR route
+```
+
+When no route matches, the ingress agent connects to the destination directly from its own host instead of through the mesh. If connections reach a destination from the wrong network, this is the usual cause: add the CIDR to an exit, or add `0.0.0.0/0` and `::/0` to an exit to send everything through the mesh.
+
+Host names are resolved on the ingress agent before the route lookup unless they match a domain route. Trace a host name to see the addresses it resolves to and the route for each. A SOCKS connection uses the first address in the list, which may be IPv6; an exit that advertises only `0.0.0.0/0` does not match it.
+
+```bash
+muti-metroo route trace intranet.corp.example.com
+```
+
+## Test the full path
+
+From the ingress side:
+
+```bash
+curl -v -x socks5h://127.0.0.1:1080 http://10.99.1.1/
+```
+
+To test an exit's own network reachability without SOCKS, send ICMP echo through it with [`muti-metroo ping`](/cli/ping) (ICMP must be enabled on the exit):
+
+```bash
+muti-metroo ping bff2a511dad5ea3c3d8025c58f12e5b5 10.99.1.1
+```
+
+To check that every agent in the mesh is reachable from the agent you are on:
+
+```bash
+muti-metroo mesh-test
+```
+
+## Logs
+
+Set `agent.log_level: "debug"` and restart the agent for detailed connection and routing logs. Under systemd, follow them with:
+
+```bash
+journalctl -u muti-metroo -f
+```
 
 ## See Also
 
-- [CLI - Status](/cli/status) - Check agent status
-- [CLI - Peers](/cli/peers) - List connected peers
-- [CLI - Routes](/cli/routes) - View routing table
-- [CLI - Probe](/cli/probe) - Test listener connectivity
-- [CLI - Ping](/cli/ping) - Test network reachability through mesh
-- [API - Health](/api/health) - Health check endpoints
-
-## Next Steps
-
-- [Performance Troubleshooting](/troubleshooting/performance)
-- [Common Issues](/troubleshooting/common-issues)
+- [Common Issues](/troubleshooting/common-issues) - Error messages and fixes
+- [CLI - peer](/cli/peer) - `peer status`, `peer add`, and `peer list`
+- [CLI - route](/cli/route) - `route status` and `route trace`
+- [CLI - probe](/cli/probe) - Testing listeners from another host
+- [Routing](/concepts/routing) - How routes are advertised and selected
+- [Configuration - Connections](/configuration/connections) - Keepalive, timeouts, and reconnection

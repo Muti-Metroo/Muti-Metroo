@@ -1,5 +1,6 @@
 ---
 title: Frequently Asked Questions
+description: Short answers to common questions about running, configuring, and troubleshooting Muti Metroo, with links to the full documentation.
 sidebar_position: 4
 ---
 
@@ -9,375 +10,160 @@ sidebar_position: 4
 
 # Frequently Asked Questions
 
-Quick answers to common questions about running Muti Metroo.
+Short answers, each with a link to the page that covers the topic in full.
 
-**Most asked:**
+## Running the agent
 
-- [Do I need root?](#do-i-need-root-to-run-muti-metroo) - No, except for low ports or services
-- [Which transport should I use?](#what-transport-should-i-use) - QUIC for speed, WebSocket through firewalls
-- [How many hops?](#how-many-hops-can-i-have) - 8-12 for interactive, 4-6 for high latency
-- [IPv6 support?](#does-muti-metroo-support-ipv6) - Yes, fully supported
+### Does the agent need root or Administrator rights?
 
-## General
+No. The agent runs in userspace with no TUN device or kernel module. Elevation is needed only to bind ports below 1024 on Linux and macOS, and to install a system-wide service. [User services](/deployment/system-service#linux-user-service) and [PM2](/deployment/pm2) work without it.
 
-### What is Muti Metroo?
+### Which platforms are supported?
 
-Muti Metroo is a userspace mesh networking agent that creates virtual TCP tunnels across different transport protocols. It enables multi-hop routing with SOCKS5 proxy ingress and CIDR-based exit routing.
+Linux, macOS, and Windows, each on amd64 and arm64. Windows also has a DLL build for each architecture. See [Download](/download).
 
-### Do I need root to run Muti Metroo?
+### Can I run several agents on one machine?
 
-No. Muti Metroo runs entirely in userspace. However, you may need root for:
+Yes. Give each agent its own config file, its own `agent.data_dir`, and its own listener, SOCKS, and HTTP API ports. Install each as a service with a different `-n <name>`.
 
-- Ports below 1024
-- Installing as a system service
-- Setting capabilities
+### Where are the logs?
 
-### What platforms are supported?
+The agent writes its log to stderr.
 
-- Linux (amd64, arm64)
-- macOS (amd64, arm64)
-- Windows (amd64, arm64)
+| How it runs | Where the log goes |
+|-------------|--------------------|
+| Foreground | The terminal |
+| systemd service | `journalctl -u muti-metroo` |
+| systemd user service | `journalctl --user -u muti-metroo` |
+| Linux cron user service | `~/.muti-metroo/muti-metroo.log` |
+| macOS launchd | `muti-metroo.err.log` in the config file's directory |
+| Docker | `docker logs <container>` |
+| PM2 | `pm2 logs muti-metroo` |
+| Windows Service, DLL | Not captured |
 
-## Networking
+Set `agent.log_level: "debug"` for more detail and `agent.log_format: "json"` for machine-readable output. See [Configuration - Agent](/configuration/agent).
 
-### What transport should I use?
+### Do I have to restart after changing the config file?
 
-| Use Case              | Recommended         |
-| --------------------- | ------------------- |
-| Best performance      | QUIC                |
-| Corporate firewall    | HTTP/2 or WebSocket |
-| Through HTTP proxy    | WebSocket           |
-| Maximum compatibility | WebSocket           |
+Yes. The config file is read only at startup. Routes, peers, listeners, forwards, mesh hosts, and the display name can also be changed on a running agent with the dynamic management commands, such as [`route add`](/cli/route) and [`peer add`](/cli/peer). Those changes are saved in the data directory and survive restarts.
 
-See [Transports](/concepts/transports) for details.
+### Can I use environment variables in the config?
 
-### How many hops can I have?
-
-Theoretically, up to 255 (max_hops). Practically, limit to:
-
-- 8-12 for interactive use (SSH)
-- 6-10 for streaming
-- 4-6 for high-latency WAN
-
-### Can I mix transport types?
-
-Yes. Each peer connection can use a different transport:
-
-```yaml
-peers:
-  - transport: quic
-    address: "direct-peer:4433"
-  - transport: ws
-    address: "wss://proxy-peer:443/mesh"
-```
-
-### Does Muti Metroo support IPv6?
-
-Yes. IPv6 is fully supported across the stack:
-
-**Listeners** - Bind to IPv6 addresses:
-
-```yaml
-listeners:
-  - transport: quic
-    address: "[::]:4433" # All IPv6 interfaces
-    # or
-    address: "[::1]:4433" # IPv6 localhost only
-```
-
-**Peers** - Connect to IPv6 peers:
-
-```yaml
-peers:
-  - transport: quic
-    address: "[2001:db8::1]:4433"
-```
-
-**Exit routes** - Advertise IPv6 CIDRs:
-
-```yaml
-exit:
-  routes:
-    - "0.0.0.0/0" # IPv4 default
-    - "::/0" # IPv6 default
-    - "2001:db8::/32"
-```
-
-**DNS servers** - Use IPv6 resolvers:
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "[2001:4860:4860::8888]:53" # Google IPv6 DNS
-```
-
-**SOCKS5** - Bind to IPv6 and proxy IPv6 destinations:
-
-```yaml
-socks5:
-  address: "[::1]:1080" # IPv6 localhost
-```
-
-**Limitations:**
-
-- DNS resolution prefers IPv4 when both A and AAAA records exist
-- Node info advertisements only include IPv4 addresses
-
-## Security
-
-### How is traffic encrypted?
-
-Traffic is protected at two levels:
-
-**Transport encryption** (peer-to-peer):
-
-- TLS 1.3 with AES-256-GCM or ChaCha20-Poly1305
-- Perfect forward secrecy
-
-**End-to-end encryption** (ingress-to-exit):
-
-- X25519 key exchange per stream
-- ChaCha20-Poly1305 authenticated encryption
-- Transit agents cannot decrypt payload data
-
-See [E2E Encryption](/security/e2e-encryption) for details.
-
-### Is mutual TLS (mTLS) required?
-
-No, but it's recommended for production. Without mTLS, any client can connect if they can reach the port.
-
-### Can I use Let's Encrypt certificates?
-
-Yes, for listeners. However, you'll also need:
-
-- A CA for signing client certificates (for mTLS)
-- Agent certificates signed by your CA
-
-### How do I rotate certificates?
-
-1. Generate new certificates before old ones expire
-2. Deploy new certificates
-3. Restart agents
-4. Remove old certificates
-
-See [TLS Certificates](/configuration/tls-certificates) for details.
-
-## SOCKS5
-
-### What SOCKS5 features are supported?
-
-- CONNECT command: Yes
-- BIND: No
-- UDP ASSOCIATE: Yes (see [UDP Relay](/features/udp-relay))
-- IPv4/IPv6: Yes
-- Domain names: Yes
-- No auth: Yes
-- Username/password: Yes
-
-### Can I use SOCKS5 with browsers?
-
-Yes. Configure your browser's proxy settings:
-
-- SOCKS Host: localhost (or agent address)
-- Port: 1080 (or configured port)
-- SOCKS version: 5
-
-### How do I use SOCKS5 with SSH?
-
-```bash
-ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@host
-```
-
-Or in `~/.ssh/config`:
-
-```
-Host myhost
-  ProxyCommand nc -x localhost:1080 %h %p
-```
-
-## Performance
-
-### How much memory does Muti Metroo use?
-
-Base memory plus:
-
-- 256 KB per stream per hop (default buffer)
-
-Example: 1000 streams x 3 hops x 256 KB = 768 MB
-
-### How fast is Muti Metroo?
-
-Throughput depends on:
-
-- Network speed between hops
-- Number of hops
-- Transport type (QUIC is fastest)
-- Buffer size
-
-Latency overhead:
-
-- LAN: 1-5ms per hop
-- WAN: 50-200ms per hop
-
-### Can I run multiple agents on one machine?
-
-Yes. Use different:
-
-- Data directories
-- Port numbers
-- Agent IDs
-
-## Configuration
-
-### Can I reload configuration without restart?
-
-Currently, no. Restart the agent to apply configuration changes.
-
-### How do I use environment variables?
+Yes. `${VAR}` and `${VAR:-default}` are replaced with environment variable values when the config is loaded:
 
 ```yaml
 agent:
   log_level: "${LOG_LEVEL:-info}"
-
-socks5:
-  auth:
-    users:
-      - username: "${USER}"
-        password_hash: "${PASS_HASH}"
 ```
 
-### Where should I put the configuration file?
+See [Environment Variables](/configuration/environment-variables).
 
-- Development: `./config.yaml`
-- Production: `/etc/muti-metroo/config.yaml`
-- Docker: `/app/config.yaml`
+## Networking
 
-## Deployment
+### Which transport should I use?
 
-### How do I run Muti Metroo as a service?
+| Situation | Transport |
+|-----------|-----------|
+| UDP allowed between agents | QUIC |
+| Only TCP allowed, or UDP is throttled | HTTP/2 |
+| Outbound only through an HTTP proxy, or behind a reverse proxy | WebSocket |
 
-The service auto-starts immediately after installation:
+A mesh can mix transports; each peer connection uses its own. See [Transports](/concepts/transports).
 
-```bash
-# Linux (requires root)
-sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
+### How many hops can a path have?
 
-# Linux without root
-muti-metroo service install --user -c ~/muti-metroo/config.yaml
+`routing.max_hops` sets the limit for route advertisements (default 16, maximum 255). Each hop adds its network latency to connection setup, so keep paths as short as the topology allows.
 
-# Windows (as Administrator)
-muti-metroo.exe service install -c C:\config\config.yaml
+### Is IPv6 supported?
 
-# Windows without admin (requires DLL)
-muti-metroo service install --user --dll C:\path\to\muti-metroo.dll -c C:\config\config.yaml
-```
-
-### Can I run Muti Metroo in Docker?
-
-Yes. See [Docker Deployment](/deployment/docker).
-
-## Troubleshooting
-
-### How do I enable debug logging?
+Yes, for listeners, peers, SOCKS listeners and destinations, exit routes, and DNS servers. Write IPv6 addresses in brackets with a port:
 
 ```yaml
-agent:
-  log_level: "debug"
+listeners:
+  - transport: quic
+    address: "[::]:4433"
+
+exit:
+  enabled: true
+  routes:
+    - "0.0.0.0/0"
+    - "::/0"
 ```
 
-Or at runtime:
+When the ingress agent resolves a host name, it uses the first address the resolver returns, which may be an IPv6 address. Advertise `::/0` alongside `0.0.0.0/0` on exits that should carry all traffic.
+
+### What happens to traffic that matches no route?
+
+The ingress agent connects to the destination directly from its own host. Use `muti-metroo route trace <destination>` to see whether a destination matches a route. See [Connectivity Troubleshooting](/troubleshooting/connectivity#routing-problems).
+
+## SOCKS
+
+### Which SOCKS features are supported?
+
+SOCKS5, SOCKS4, and SOCKS4a on the same listener, detected automatically. SOCKS5 supports CONNECT and UDP ASSOCIATE, IPv4, IPv6, and domain name destinations, and either no authentication or username and password. BIND is not supported. See [SOCKS5 Proxy](/features/socks5-proxy) and [UDP Relay](/features/udp-relay).
+
+### How do I use the SOCKS listener with SSH?
 
 ```bash
-./muti-metroo run -c config.yaml
+ssh -o ProxyCommand='nc -x 127.0.0.1:1080 %h %p' user@10.0.12.5
 ```
 
-### How do I check if agents are connected?
+`nc -x` does not support SOCKS authentication. If the listener requires it, use `ncat --proxy 127.0.0.1:1080 --proxy-type socks5 --proxy-auth user:password %h %p` as the proxy command.
+
+### Do host names resolve at the ingress or the exit?
+
+At the ingress, with its system resolver, unless the name matches a domain route (`exit.domain_routes`). Names that match a domain route are passed through the mesh and resolved by the exit, using `exit.dns` if set. The client must send the name to the proxy (`socks5h://` in curl) for either to happen. See [Exit Routing](/features/exit-routing).
+
+## Security
+
+### How is traffic protected?
+
+Each link between agents uses TLS 1.3. In addition, every stream is encrypted end to end between the ingress and the exit with X25519 key exchange and ChaCha20-Poly1305, so transit agents cannot read the payload. See [End-to-End Encryption](/security/e2e-encryption).
+
+### Is mTLS required?
+
+No. Without it, any client that can reach a listener can complete the TLS handshake. With `tls.mtls: true`, a listener accepts only clients with a certificate signed by the mesh CA. See [TLS and mTLS](/security/tls-mtls).
+
+### Can I use Let's Encrypt certificates?
+
+For listeners, yes, if the certificate uses an ECDSA key (Certbot: `--key-type ecdsa`). For mTLS you still need your own CA, because client certificates must be signed by the CA in `tls.ca`. See [TLS Certificates](/configuration/tls-certificates).
+
+### How do I rotate certificates?
+
+Generate new certificates from the same CA, replace the files, and restart the agent. `muti-metroo cert info <file>` shows the expiry date, and `muti-metroo run` warns at startup when a configured certificate expires within 60 days. See [CLI - cert](/cli/cert).
+
+## Management
+
+### Can I run commands and transfer files on remote agents?
+
+Yes, when the target enables them and both sides have the management signing keys configured:
 
 ```bash
-# Using CLI
-muti-metroo peers
-
-# Using HTTP API
-curl http://localhost:8080/healthz | jq '.peer_count'
+muti-metroo shell bff2a511dad5ea3c3d8025c58f12e5b5 whoami
+muti-metroo shell --tty bff2a511dad5ea3c3d8025c58f12e5b5 bash
+muti-metroo upload bff2a511dad5ea3c3d8025c58f12e5b5 ./local.txt /tmp/remote.txt
+muti-metroo download bff2a511dad5ea3c3d8025c58f12e5b5 /tmp/remote.txt ./local.txt
 ```
 
-### How do I check routes?
+See [Shell](/features/shell) and [File Transfer](/features/file-transfer).
+
+### How do I check that agents are connected?
 
 ```bash
-# Using CLI
-muti-metroo routes
-
-# Using HTTP API
-curl http://localhost:8080/healthz | jq '.route_count'
+muti-metroo peer status
+muti-metroo route status
+muti-metroo mesh-test
 ```
 
-### Where are the logs?
+See [Connectivity Troubleshooting](/troubleshooting/connectivity).
 
-- Foreground: stderr
-- systemd: `journalctl -u muti-metroo`
-- Docker: `docker logs <container>`
+### Is there an API for monitoring?
 
-### How do I get help?
-
-1. Check this documentation
-2. Enable debug logging and review logs
-3. Search existing issues
-4. Open a new issue with:
-   - Configuration (redacted)
-   - Logs
-   - Steps to reproduce
-
-## Features
-
-### Can I execute commands on remote agents?
-
-Yes, using management commands:
-
-```bash
-# Simple command (default normal mode)
-muti-metroo shell agent-id whoami
-
-# Interactive shell (requires --tty)
-muti-metroo shell --tty agent-id bash
-```
-
-Management commands must be enabled and configured. See [Management Commands](/features/shell).
-
-### Can I transfer files?
-
-Yes:
-
-```bash
-# Upload
-muti-metroo upload agent-id ./local.txt /remote/path.txt
-
-# Download
-muti-metroo download agent-id /remote/path.txt ./local.txt
-```
-
-File transfer must be enabled. See [File Transfer](/features/file-transfer).
-
-### Is there an API for monitoring the mesh?
-
-Yes. Query the dashboard API endpoints:
-
-```bash
-curl http://localhost:8080/api/dashboard | jq
-curl http://localhost:8080/api/topology | jq
-curl http://localhost:8080/api/nodes | jq
-```
-
-See [Dashboard API](/api/dashboard).
+Yes. `/health` and `/healthz` report agent health, and the dashboard endpoints (`/api/dashboard`, `/api/topology`, `/api/nodes`) describe the mesh. See [API - Health](/api/health) and [API - Dashboard](/api/dashboard). For a browser interface, see [Muti Metroo Manager](/muti-metroo-manager).
 
 ## See Also
 
-- [CLI Reference](/cli/overview) - All CLI commands
-- [HTTP API Reference](/api/overview) - API endpoints
-- [Configuration Overview](/configuration/overview) - Full configuration reference
-
-## Next Steps
-
-- [Common Issues](/troubleshooting/common-issues)
-- [Connectivity Troubleshooting](/troubleshooting/connectivity)
-- [Performance Troubleshooting](/troubleshooting/performance)
+- [Common Issues](/troubleshooting/common-issues) - Error messages and fixes
+- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Peers and routes step by step
+- [CLI Overview](/cli/overview) - All commands
+- [Configuration Overview](/configuration/overview) - All config sections

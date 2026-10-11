@@ -1,224 +1,135 @@
-# Hosts Management API
-
-HTTP endpoint for managing the agent's mesh hostname registry at runtime.
-
-The mesh-host registry maps symbolic names like `target-11.mesh` to in-mesh IPs. It is local to each agent and surfaced to Mutiauk's DNS resolver via the `/api/dashboard` poll. Static seed entries live in the agent's `mesh_hosts:` config block; runtime entries added through this endpoint are journalled to `agent.data_dir` and survive restarts.
-
-See [Hosts Configuration](/configuration/hosts) for the YAML schema and [host CLI](/cli/host) for the command-line wrapper.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/hosts/manage` | POST | Manage mesh-host entries on the local agent |
-| `/hosts/suffixes/manage` | POST | Manage the active TLD suffix set on the local agent |
-
-There is **no `/agents/{id}/hosts/manage` remote variant**: the registry is intentionally local-only in v1. Run the request directly against each agent that should serve the names.
-
-Both endpoints require `http.dashboard: true` in configuration.
-
+---
+title: Hosts Management Endpoints
+description: Add, remove, and list mesh hostname entries and their allowed suffixes on the local agent.
+sidebar_position: 10
 ---
 
-## POST /hosts/manage
+# Hosts Management Endpoints
 
-Add, remove, or list mesh-host entries on the local agent.
+The mesh hostname registry maps names such as `db.mesh` to in-mesh addresses. The agent uses it to resolve names for SOCKS connections and route trace, and Mutiauk reads it from [`GET /api/dashboard`](/api/dashboard#get-apidashboard) to answer DNS queries. These endpoints change the registry and the set of allowed suffixes at runtime. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /hosts/manage` | Hostname entries of the local agent |
+| `POST /hosts/suffixes/manage` | Allowed suffixes of the local agent |
+
+The registry is local to each agent. There is no `/agents/{id}/hosts/...` variant; send the request to each agent that should serve the names.
+
+`add` and `remove` are mutations: the agent serving the request must have `management.signing_private_key`, otherwise it returns `403`. Mutations are written to the [dynamic configuration journal](/configuration/dynamic-config-persistence) when `agent.data_dir` is set, so they survive restart. `list` needs no signing key. Unlike the other management endpoints, these are not blocked by the `management.public_key` topology restriction.
+
+See [Mesh Hostnames](/features/mesh-hostnames) for how names are resolved and [Hosts Configuration](/configuration/hosts) for the `mesh_hosts` and `mesh_hosts_suffixes` keys.
+
+## `POST /hosts/manage`
 
 ### Request
 
-Add an IPv4-only entry with a comment:
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `name` | string | `add`, `remove` | Hostname, at most 253 characters. Must end with one of the active suffixes, for example `db.mesh`, and must contain at least two labels. Converted to lowercase. |
+| `ipv4` | string | `add` | IPv4 address |
+| `ipv6` | string | `add` | IPv6 address |
+| `comment` | string | `add` | Free-text note |
 
-```bash
-curl -X POST http://localhost:8080/hosts/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "add", "name": "target-11.mesh", "ipv4": "10.8.0.11", "comment": "edge worker"}'
-```
-
-Add a dual-stack entry:
-
-```bash
-curl -X POST http://localhost:8080/hosts/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "add", "name": "gateway.mesh", "ipv4": "10.0.0.1", "ipv6": "fd00::1"}'
-```
-
-Remove a runtime entry:
-
-```bash
-curl -X POST http://localhost:8080/hosts/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "remove", "name": "target-11.mesh"}'
-```
-
-List all entries (config + dynamic, merged):
-
-```bash
-curl -X POST http://localhost:8080/hosts/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "list"}'
-```
-
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | `add`, `remove`, or `list` |
-| `name` | string | For add/remove | Hostname; must equal one of the active suffixes (e.g. `mesh`) or end with one of them under a label prefix (e.g. `target-11.mesh`) |
-| `ipv4` | string | For add | IPv4 address; at least one of `ipv4` or `ipv6` is required |
-| `ipv6` | string | For add | IPv6 address; at least one of `ipv4` or `ipv6` is required |
-| `comment` | string | No | Free-text comment (add only) |
+`add` requires at least one of `ipv4` and `ipv6`. Entries cannot be edited; remove and add again.
 
 ### Response
 
-Every action returns the merged `{suffixes, hosts[]}` payload, so callers do not need a follow-up `list` request.
+Every action returns the active suffixes and the full list of entries from the configuration and from runtime changes, sorted by name:
 
-**Success (200)**:
+```bash
+curl -X POST http://localhost:8080/hosts/manage \
+  -H "Content-Type: application/json" \
+  -d '{"action": "add", "name": "web.mesh", "ipv4": "10.20.0.30", "ipv6": "fd00::30", "comment": "web"}'
+```
 
 ```json
 {
   "suffixes": ["mesh"],
   "hosts": [
-    {"name": "gateway.mesh", "ipv4": "10.0.0.1", "ipv6": "fd00::1"},
-    {"name": "target-11.mesh", "ipv4": "10.8.0.11", "comment": "edge worker"}
+    {
+      "name": "db.mesh",
+      "ipv4": "10.20.0.20",
+      "comment": "database"
+    },
+    {
+      "name": "web.mesh",
+      "ipv4": "10.20.0.30",
+      "ipv6": "fd00::30",
+      "comment": "web"
+    }
   ]
 }
 ```
 
-The `suffixes` field reports the active TLD set so dashboard clients can validate names client-side.
+| Field | Description |
+| ----- | ----------- |
+| `suffixes` | Active suffixes, without leading dots |
+| `hosts[].name` | Hostname |
+| `hosts[].ipv4`, `hosts[].ipv6` | Addresses; each omitted when not set |
+| `hosts[].comment` | Comment; omitted when empty |
 
-**Bad Request (400)**:
+The response does not mark which entries come from the configuration. Only entries added at runtime can be removed.
 
-```json
-{ "error": "invalid host entry: name \"target-11.lan\" must equal or end with one of .mesh" }
-```
+### Errors
 
-```json
-{ "error": "invalid host entry: at least one of ipv4 or ipv6 is required" }
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"invalid host entry: name \"web.lan\" must equal or end with one of .mesh"}` | Name outside the active suffixes |
+| 400 | `{"error":"invalid host entry: at least one of ipv4 or ipv6 is required"}` | No address |
+| 400 | `{"error":"invalid host entry: ipv4 \"bad\" is not a valid IPv4 address"}` | Invalid address |
+| 400 | `{"error":"invalid host entry: name is required"}` | Missing `name` |
+| 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
+| 403 | `{"error":"config-seeded host, cannot remove dynamically: db.mesh"}` | `remove` of an entry from `mesh_hosts` |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key (plain text) |
+| 404 | `{"error":"host not found: nope.mesh"}` | `remove` of an unknown name |
+| 405 | `method not allowed` | Method other than `POST` |
+| 409 | `{"error":"host already exists: web.mesh"}` | `add` of a name that already exists, from the configuration or added at runtime |
 
-```json
-{ "error": "invalid host entry: ipv4 \"not-an-ip\" is not a valid IPv4 address" }
-```
+## `POST /hosts/suffixes/manage`
 
-**Forbidden (403)**:
-
-```json
-{ "error": "config-seeded host, cannot remove dynamically: gateway.mesh" }
-```
-
-Returned when removal targets an entry that came from the config file. Edit `mesh_hosts:` and restart instead.
-
-**Not Found (404)**:
-
-```json
-{ "error": "host not found: target-99.mesh" }
-```
-
-**Conflict (409)**:
-
-```json
-{ "error": "host already exists: target-11.mesh" }
-```
-
-Returned when `add` collides with either a config seed or an existing dynamic entry.
-
-**Service Unavailable (503)**:
-
-```
-mesh host management not configured
-```
-
-Returned when the agent is built or wired without a mesh-host provider.
-
-### Behavior
-
-When an entry is added:
-1. The name is lowercased and validated (must equal one of the active suffixes or end with one under a label prefix, RFC 1035 labels, 253-char cap).
-2. IPs are parsed and canonicalized; at least one family is required.
-3. If management-key encryption is configured, the request is signed with the management signing key (same gate as `muti-metroo route add` / `muti-metroo peer add`).
-4. The entry is appended to the dynamic-config journal under `agent.data_dir/dynamic-config.log`. Without a writable `data_dir`, the entry remains ephemeral and is lost on restart.
-
-When an entry is removed:
-1. Only dynamic entries can be removed; config-seeded entries return 403.
-2. The removal is journalled so the entry stays gone after restart.
-
-When listing:
-- Both config and dynamic entries are returned, sorted by name.
-- The two sets are not flagged separately in the output; the distinction matters only when removing.
-
----
-
-## POST /hosts/suffixes/manage
-
-Add, remove, or list TLD suffixes the agent accepts when validating mesh hostnames. The active set is the union of `mesh_hosts_suffixes:` from config and any runtime add/remove journalled via this endpoint -- including removals of suffixes that were originally seeded by config.
+The active suffix set starts as `mesh_hosts_suffixes` from the configuration (default `["mesh"]`) and is then changed by runtime `add` and `remove` actions, including removal of configured suffixes.
 
 ### Request
 
-Add a new TLD:
-
-```bash
-curl -X POST http://localhost:8080/hosts/suffixes/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "add", "suffix": "alt"}'
-```
-
-Remove a TLD:
-
-```bash
-curl -X POST http://localhost:8080/hosts/suffixes/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "remove", "suffix": "alt"}'
-```
-
-List the active TLD set:
-
-```bash
-curl -X POST http://localhost:8080/hosts/suffixes/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "list"}'
-```
-
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | `add`, `remove`, or `list` |
-| `suffix` | string | For add/remove | Single RFC 1035 label, no leading dot (e.g. `alt`, not `.alt`) |
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `suffix` | string | `add`, `remove` | Suffix without a leading or trailing dot, for example `lab` or `corp.lan` |
 
 ### Response
 
-Every action returns the post-mutation active set:
+Every action returns the active suffix set after the change:
 
-```json
-{ "suffixes": ["alt", "mesh"] }
+```bash
+curl -X POST http://localhost:8080/hosts/suffixes/manage \
+  -H "Content-Type: application/json" \
+  -d '{"action": "add", "suffix": "lab"}'
 ```
 
-### Status Codes
-
-| Status | Meaning |
-|--------|---------|
-| 200 | Success |
-| 400 | Invalid suffix label (empty, leading dot, bad characters) |
-| 404 | Remove targeted a suffix that is not currently active |
-| 409 | Add: suffix already active. Remove: suffix still has registered hosts (the error body lists them) |
-
-A removal that conflicts with registered hosts looks like:
-
 ```json
-{ "error": "suffix has registered hosts: mesh used by gateway.mesh, target-11.mesh" }
+{
+  "suffixes": ["lab", "mesh"]
+}
 ```
 
-Remove the dependent hosts first, then retry.
+### Errors
 
----
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"invalid host entry: suffix \".bad\" must not start with a dot"}` | Invalid suffix |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key (plain text) |
+| 404 | `{"error":"host not found: zzz"}` | `remove` of a suffix that is not active |
+| 405 | `method not allowed` | Method other than `POST` |
+| 409 | `{"error":"host already exists: lab"}` | `add` of a suffix that is already active |
+| 409 | `{"error":"suffix has registered hosts: mesh used by db.mesh, web.mesh"}` | `remove` of a suffix that registered names still use |
 
-## Dashboard Exposure
+Remove the dependent entries before removing their suffix. Entries from `mesh_hosts` can only be removed by editing the configuration.
 
-The merged registry and the active suffix set are also available through `GET /api/dashboard` under the top-level `mesh_hosts` and `mesh_hosts_suffixes` fields. Mutiauk's autoroutes poller consumes these to populate its in-process DNS server, and the agent itself consults the registry for SOCKS5 dial and `POST /route/trace` hostname resolution -- so registered names work even on agents whose host has no Mutiauk forwarding the suffix. See [Dashboard API Endpoints](/api/dashboard) for the full payload shape.
+## See Also
 
----
-
-## Authorization
-
-When the agent has `http.token_hash` configured, all `/hosts/manage` and `/hosts/suffixes/manage` requests must include `Authorization: Bearer <token>` (or `?token=<token>`); the splash page and `/health` endpoints are the only exemptions.
-
-When the mesh has management-key encryption enabled, mutations (`add`, `remove`) additionally require the management signing key on the agent receiving the request, following the same rules as route and peer management. `list` is a read-only operation and is not gated by management-key signing. Agents without the signing private key reject mutations with HTTP 403.
+- [CLI - host](/cli/host) - The `host` commands that call these endpoints
+- [Mesh Hostnames](/features/mesh-hostnames) - How mesh names are resolved
+- [Hosts Configuration](/configuration/hosts) - Static entries and suffixes
+- [Dashboard Endpoints](/api/dashboard#get-apidashboard) - The `mesh_hosts` and `mesh_hosts_suffixes` fields
+- [Route Trace Endpoints](/api/route-trace) - Trace a registered name

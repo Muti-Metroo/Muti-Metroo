@@ -1,6 +1,7 @@
 ---
 title: Management Commands
-sidebar_position: 5
+description: Run whitelisted commands on remote agents with muti-metroo shell, in streaming mode or with an interactive terminal.
+sidebar_position: 9
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,271 +10,136 @@ sidebar_position: 5
 
 # Management Commands
 
-Run management commands on any agent in your mesh. Check system status, monitor resources, or edit configuration files - all through your encrypted tunnel.
+`muti-metroo shell` runs a command on a remote agent's host and connects its input and output to your terminal. Use it to check a host's state, follow logs, or open an interactive program on an agent you can only reach through the mesh. The session is end-to-end encrypted between your gateway agent and the target agent.
 
 ```bash
-# Run a quick command
-muti-metroo shell abc123 whoami
-
-# Monitor system resources interactively
-muti-metroo shell --tty abc123 htop
-
-# Edit a configuration file with vim
-muti-metroo shell --tty abc123 vim /etc/muti-metroo/config.yaml
+muti-metroo shell 1f743225 uptime
+muti-metroo shell 1f743225 journalctl -u muti-metroo -f
+muti-metroo shell --tty 1f743225 htop
 ```
 
-Two modes are available:
+## Requirements
 
-- **Normal mode**: Run commands and see output (default)
-- **Interactive TTY**: Full terminal for vim, htop, top, and other interactive programs
+Management commands are disabled by default. They need settings on both agents:
 
-:::tip Configuration
-See [Management Commands Configuration](/configuration/shell) for all options including command whitelist and session limits. Authorization is handled mesh-wide by the management signing key -- see [Authentication](/security/authentication).
-:::
+| Agent | Setting |
+| ----- | ------- |
+| Target agent | `shell.enabled: true` |
+| Target agent | `shell.whitelist` listing the commands that may run |
+| Target agent | `management.signing_public_key` |
+| Gateway agent (the one `-a` points at, default `localhost:8080`) | `management.signing_private_key` |
 
-## Modes
+```yaml
+# Target agent
+shell:
+  enabled: true
+  whitelist:
+    - uptime
+    - df
+    - journalctl
+    - htop
+management:
+  signing_public_key: "86d6714fc48cd41afd5051e6ad9523ad889c806001e92bc739913a18c6709a83"
+```
 
-### Normal Mode (Default)
+The gateway agent signs each session request and the target verifies the signature; there is no separate shell password. See [Management Commands Configuration](/configuration/shell) for every key and [Authentication](/security/authentication#management-signing-key) for the signing key pair.
 
-Standard execution without PTY allocation:
+## What the whitelist allows
 
-- Separate stdout and stderr streams
-- Commands run until exit and return an exit code
-- No terminal control characters
-- Supports Unix-style stdin piping: bytes fed to the CLI's stdin are streamed to the remote command, and stdin EOF is propagated so commands that read a full input stream (cat, wc, sort, sha256sum, ...) terminate naturally
+Unless the whitelist is `["*"]`, the target agent checks every request:
+
+- The command must be listed by its bare name. `uptime` is allowed by `uptime`; `/usr/bin/uptime` is always rejected.
+- Arguments must not contain shell metacharacters such as `;`, `|`, `&`, `$`, `*`, or `~`.
+- Arguments must not be absolute paths, so `journalctl -u muti-metroo` works but `tail -f /var/log/syslog` does not.
+
+With `["*"]`, any command runs with any arguments. Commands are started directly, not through a shell, so pipes and redirections in the arguments are not interpreted either way; run them locally instead (see [Piping data](#piping-data)). The rules are described in full in [Access Control](/security/access-control#management-command-whitelist).
+
+## Streaming mode
+
+Without `--tty`, the command runs without a terminal. Standard output and standard error arrive separately, so you can redirect them locally, and the session ends when the command exits.
 
 ```bash
-# Simple commands
-muti-metroo shell abc123 whoami
-muti-metroo shell abc123 ls -la /tmp
-
-# Long-running streaming commands
-muti-metroo shell abc123 journalctl -u muti-metroo -f
-muti-metroo shell abc123 tail -f /var/log/syslog
-
-# Pipe data through the mesh -- stdin EOF signals the remote to finish
-cat largefile.txt | muti-metroo shell abc123 sha256sum
-seq 1 1000 | muti-metroo shell abc123 -- wc -l
-tar cz ./dir | muti-metroo shell abc123 -- tar xzf - -C /tmp/dest
+muti-metroo shell 1f743225 df -h
+muti-metroo shell 1f743225 journalctl -u muti-metroo --since today
 ```
 
-:::tip Flags that collide with commands
-Use `--` to stop `muti-metroo shell` from interpreting the remote command's flags. For example `muti-metroo shell abc123 -- wc -l`; without `--`, cobra would reject `-l` as an unknown muti-metroo flag.
-:::
-
-### Interactive Mode (--tty)
-
-Allocates a PTY (pseudo-terminal) on the remote agent:
-
-- Full terminal emulation
-- Supports terminal resize (SIGWINCH)
-- Works with interactive programs (vim, less, htop)
-- Single combined stdout/stderr stream
+Put `--` before the remote command when its flags would otherwise be read as `muti-metroo` flags:
 
 ```bash
-muti-metroo shell --tty abc123 htop
-muti-metroo shell --tty abc123 vim /etc/muti-metroo/config.yaml
-muti-metroo shell --tty abc123 top
+muti-metroo shell 1f743225 -- wc -l
 ```
 
-## CLI Usage
+### Piping data
+
+In streaming mode, your local standard input is sent to the remote command, and closing it (end of file) closes the remote command's input. Commands that read until end of input finish normally:
 
 ```bash
-muti-metroo shell [flags] <agent-id> [command] [args...]
-
-# Simple command (normal mode, default)
-muti-metroo shell abc123 whoami
-
-# Follow logs (normal mode)
-muti-metroo shell abc123 journalctl -f
-
-# Monitor resources interactively (requires --tty)
-muti-metroo shell --tty abc123 htop
-
-# Interactive vim (requires --tty)
-muti-metroo shell --tty abc123 vim /etc/muti-metroo/config.yaml
-
-# Via different agent
-muti-metroo shell -a 192.168.1.10:8080 --tty abc123 top
-
-# Pipe local data to a remote command
-cat ./build.log | muti-metroo shell abc123 -- grep ERROR
+seq 1 1000 | muti-metroo shell 1f743225 -- wc -l
+cat ./build.log | muti-metroo shell 1f743225 -- grep -c ERROR
 ```
 
-### Flags
+## Interactive mode
 
-- `-a, --agent`: Agent HTTP API address — `host:port` or `http(s)://host[:port][/prefix]` (default: `localhost:8080`)
-- `-t, --timeout`: Session timeout as duration string, e.g., `30s`, `5m` (default: 0 = no timeout)
-- `--tty`: Interactive mode with PTY (for vim, htop, top, etc.)
-
-## WebSocket API
-
-Management command sessions use WebSocket for bidirectional communication.
-
-**Endpoint**: `GET /agents/{agent-id}/shell?mode=tty|stream`
-
-See [API - Management Commands](/api/shell) for protocol details.
-
-## Platform Support
-
-| Platform | Interactive (PTY) | Normal |
-| -------- | ----------------- | ------ |
-| Linux    | Yes               | Yes    |
-| macOS    | Yes               | Yes    |
-| Windows  | Yes (ConPTY)      | Yes    |
-
-:::info Windows PTY
-Windows agents use ConPTY (Windows Pseudo Console) for interactive sessions. ConPTY is available on Windows 10 version 1809 and later.
-:::
-
-### Available Shells
-
-Each agent automatically detects installed shells at startup. When `shell.enabled` is `true`, the agent advertises both the detected shells and a `shell_enabled` flag to the mesh via node info. You can see which shells are available on any agent through the [Dashboard API](/api/dashboard).
-
-When management commands are disabled, neither the shell list nor the `shell_enabled` flag appears in the topology -- making it clear that management commands are not available on that agent.
-
-**Probed shells by platform:**
-
-| Platform    | Shells probed (in preference order) |
-| ----------- | ----------------------------------- |
-| Linux/macOS | bash, sh, zsh, fish, ash, dash, ksh |
-| Windows     | powershell.exe, pwsh.exe, cmd.exe   |
-
-Shell detection is separate from the command whitelist:
-
-- **Detection** reports which shells are installed on the system
-- **Whitelist** controls which commands are allowed to execute
-
-A shell appearing in the detected list does not mean it can be used -- it must also be in the agent's `whitelist` configuration.
-
-### Windows Examples
-
-Run system management commands on Windows agents:
+`--tty` allocates a pseudo-terminal on the target agent. Use it for programs that draw on the screen or read keystrokes, such as `htop`, `top`, `less`, `vim`, or a shell. Window resizes are passed to the remote terminal, and output arrives as one combined stream.
 
 ```bash
-# List running processes
-muti-metroo shell abc123 tasklist
-
-# Get system information
-muti-metroo shell abc123 systeminfo
-
-# View network connections
-muti-metroo shell abc123 netstat -an
+muti-metroo shell --tty 1f743225 htop
+muti-metroo shell --tty 1f743225 bash
 ```
 
-## Common Workflows
+When no command is given, `bash` is started, so `muti-metroo shell --tty 1f743225` opens an interactive Bash session if `bash` is whitelisted.
 
-### System Health Check
+Windows agents use ConPTY for interactive mode, which requires Windows 10 version 1809 or later.
 
-```bash
-# Quick system status
-muti-metroo shell abc123 uptime
-muti-metroo shell abc123 df -h
-muti-metroo shell abc123 free -m
+## Other options
 
-# Check running services
-muti-metroo shell abc123 systemctl status muti-metroo
-```
+| Flag | Default | Description |
+| ---- | ------- | ----------- |
+| `-a`, `--agent` | `localhost:8080` | Gateway agent API address |
+| `-w`, `--timeout` | `0` | End the session after this duration (`30s`, `5m`); `0` means no limit |
+| `--tty` | off | Interactive mode with a pseudo-terminal |
 
-### Log Monitoring
+The target agent ID can be a unique prefix of the full ID. See [shell CLI](/cli/shell) for details and [Management Commands API](/api/shell) for the WebSocket protocol used by the CLI and the web dashboard.
 
-```bash
-# Follow service logs
-muti-metroo shell abc123 journalctl -u muti-metroo -f
+## Available shells
 
-# Search recent logs
-muti-metroo shell abc123 journalctl -u muti-metroo --since "1 hour ago"
-```
-
-### Configuration Management
-
-```bash
-# View config (streaming mode)
-muti-metroo shell abc123 cat /etc/muti-metroo/config.yaml
-
-# Edit config (interactive mode)
-muti-metroo shell --tty abc123 vim /etc/muti-metroo/config.yaml
-
-# Restart service after changes
-muti-metroo shell abc123 systemctl restart muti-metroo
-```
+When management commands are enabled, an agent reports the shells installed on its host (for example `bash`, `zsh`, `sh` on Linux and macOS, or `powershell.exe`, `pwsh.exe`, `cmd.exe` on Windows) in its node information, visible through the [Dashboard API](/api/dashboard). This list is informational: a shell can only be started if it is also in the whitelist.
 
 ## Troubleshooting
 
-### Command Not Allowed
+### command is not allowed
 
-```
-Error: command not in whitelist: vim
-```
-
-**Cause:** The command is not in the agent's `whitelist` configuration.
-
-**Solutions:**
-
-- Use only whitelisted commands
-- Contact the agent administrator to add the command
-- Check available commands in the agent's config
-
-### Authentication Failed
-
-```
-Error: management signature required
-Error: management signing public key not configured on this agent
+```text
+Error: remote error: failed to start session: command 'ls' is not allowed
 ```
 
-**Cause:** The gateway agent cannot sign management operations, or the target has no configured public key to verify against.
+The command is not in the target agent's `shell.whitelist`, or it was given with a path. Use the bare command name, or add it to the whitelist.
 
-**Solution:** Ensure `management.signing_private_key` is set on the gateway you're connecting through (`-a`) and `management.signing_public_key` is set on the target agent. Generate the pair with `muti-metroo signing-key generate`. See [Authentication](/security/authentication).
+### argument rejected
 
-### Session Limit Reached
-
-```
-Error: maximum sessions exceeded
-```
-
-**Cause:** The agent has reached its `max_sessions` limit.
-
-**Solutions:**
-
-- Wait for existing sessions to complete
-- Close unused sessions
-- Contact the agent administrator to increase the limit
-
-### Interactive Program Not Working
-
-```
-# vim appears broken, no colors in htop
+```text
+Error: remote error: failed to start session: argument 0: absolute paths not allowed
+Error: remote error: failed to start session: argument 0 contains dangerous characters
 ```
 
-**Cause:** Running an interactive program without `--tty` flag.
+An argument is an absolute path or contains a shell metacharacter. Change to a relative argument where the command allows it, or ask the agent's administrator whether `["*"]` is acceptable for that agent.
 
-**Solution:** Use `--tty` for interactive programs:
+### Signature or key errors
 
-```bash
-muti-metroo shell --tty abc123 htop
-muti-metroo shell --tty abc123 vim /etc/config.yaml
-```
+"management signing private key not configured on this agent" means the gateway agent cannot sign; point `-a` at an operator agent. "management signing public key not configured on this agent" means the target cannot verify; add `management.signing_public_key` to it. A rejected signature means the key pair does not match or the hosts' clocks differ by more than five minutes.
 
-### Agent Not Reachable
+### max sessions reached
 
-```
-Error: no route to agent abc123
-```
+The target agent has reached `shell.max_sessions`. Wait for other sessions to end or raise the limit.
 
-**Cause:** The target agent is not connected to the mesh.
+### Interactive program misbehaves
 
-**Solutions:**
+Programs such as `vim` or `htop` need `--tty`. Without it, they have no terminal to draw on.
 
-```bash
-# Check if agent is known
-curl http://localhost:8080/agents
+## See Also
 
-# Verify connectivity
-curl http://localhost:8080/healthz | jq '.peer_count'
-```
-
-## Related
-
-- [CLI - shell](/cli/shell) - CLI reference
-- [API - Management Commands](/api/shell) - WebSocket API reference
-- [Configuration - Management Commands](/configuration/shell) - Configuration reference
+- [Management Commands Configuration](/configuration/shell): enable commands, whitelist, and session limit
+- [shell CLI](/cli/shell): command reference
+- [Management Commands API](/api/shell): WebSocket protocol
+- [Authentication](/security/authentication): the signing key pair that authorizes sessions
+- [Access Control](/security/access-control): whitelist rules in detail

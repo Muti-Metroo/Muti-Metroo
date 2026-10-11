@@ -1,335 +1,114 @@
 ---
-title: Management Key
-sidebar_position: 15
+title: Management
+description: Configuration reference for the management section, covering the X25519 topology encryption keys and the Ed25519 signing keys that authorize privileged operations.
+sidebar_position: 17
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-thinking.png" alt="Mole configuring management keys" style={{maxWidth: '180px'}} />
 </div>
 
-# Management Key Configuration
+# Management
 
-Encrypt mesh topology data so only designated management nodes can view the network structure. Field agents see only encrypted blobs - they cannot discover other agents or routes in the mesh.
+The `management` section holds two independent key pairs:
 
-:::info Privacy Feature
-Management key encryption is an optional security feature for sensitive environments. Most deployments don't need it.
-:::
+- **Topology encryption keys** (X25519) encrypt node information, and agents without the private key also withhold route paths from their HTTP API, so only agents with the private key can see the mesh layout. Route paths themselves travel unencrypted, because transit agents need them to forward streams.
+- **Signing keys** (Ed25519) authorize privileged operations: management commands, file transfer, runtime configuration changes, and sleep and wake.
 
-## When to Use
-
-Use management keys when:
-
-- Field agents should not know the mesh topology
-- Compromised hosts should not reveal network structure
-- Multi-tenant environments with compartmentalization needs
-- High-security deployments requiring topology privacy
-
-## How It Works
-
-```
-Field Agent          Management Node
-     |                    |
-     | NodeInfo (encrypted)
-     |------------------>|
-     |                    | (can decrypt)
-     |                    |
-     | Routes (encrypted) |
-     |------------------>|
-     |                    | (can decrypt)
-```
-
-1. **Field agents** have only the public key - they encrypt but cannot decrypt
-2. **Management nodes** have the private key - they can decrypt and view topology
-3. **Encrypted data**: Node info, route paths, topology advertisements
+Either pair can be used without the other. Distribute the public keys to every agent and keep the private keys on operator agents only.
 
 ## Configuration
 
-### Generate Keys
-
-```bash
-# Generate new keypair
-muti-metroo management-key generate
-
-# Output:
-# Private Key: e5f6a7b8c9d012345678901234567890...
-# Public Key:  a1b2c3d4e5f6789012345678901234567890...
-```
-
-### Field Agent (Encrypt Only)
-
-Field agents have only the public key:
-
 ```yaml
 management:
-  public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+  public_key: "2395e1d946cd67ba009d37ad76df8b3ccde5fbb244a79a0d15ae342bd5dd1539"
+  private_key: "782996f369d28e2da0780a6d712a292010562e4d629eb0e35c3b85b9f2c4305f"         # Operator agents only
+  signing_public_key: "91ec6f66440771f9a68f2d65adb835faccdff429e97f9e4be1ce5ac10eec158f"
+  signing_private_key: "2a848e10f76d1e876127904d60eb7da4a0d5d72710f3a746e778b9d0a06ab92f91ec6f66440771f9a68f2d65adb835faccdff429e97f9e4be1ce5ac10eec158f" # Operator agents only
 ```
 
-These agents:
+## Keys
 
-- Encrypt their node info before advertising
-- Cannot decrypt other agents' node info
-- Cannot see the mesh topology in their dashboard
+| Key                   | Type   | Default | Description                                                                                                       |
+| --------------------- | ------ | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `public_key`          | string | `""`    | X25519 topology encryption public key, 64 hexadecimal characters. Enables topology encryption.                   |
+| `private_key`         | string | `""`    | X25519 topology encryption private key, 64 hexadecimal characters. Lets this agent decrypt topology. Requires `public_key`. Redacted by `config show`. |
+| `signing_public_key`  | string | `""`    | Ed25519 public key, 64 hexadecimal characters. Lets this agent verify and execute signed privileged operations.  |
+| `signing_private_key` | string | `""`    | Ed25519 private key, 128 hexadecimal characters. Lets this agent sign privileged operations. Requires `signing_public_key`. Redacted by `config show`. |
 
-### Management Node (Can Decrypt)
+Validation checks the hex encoding and length of each key and that a private key is not set without its public key. It does not check that a private key belongs to the configured public key.
 
-Management nodes have both keys:
+Generate the pairs with [`muti-metroo management-key generate`](/cli/management-key) and [`muti-metroo signing-key generate`](/cli/signing-key). Both print ready-to-paste snippets for field and operator agents.
+
+## Topology encryption keys
+
+With `public_key` set, the agent encrypts its node information (display name, system details, peer list, advertised listeners) and the agent path of its route advertisements before flooding them. Destinations (CIDRs, domain patterns, forward keys) stay readable, so routing works on every agent.
+
+| Agent has                      | Effect                                                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| no keys                        | Sends and reads topology in the clear.                                                                                                      |
+| `public_key` only              | Encrypts its own topology data and cannot read anyone else's. Its HTTP API limits the `/agents/` endpoints, mesh test, and route trace to the local agent, and refuses requests aimed at other agents with HTTP 403 and a message ending in `restricted: management key decryption unavailable`. |
+| `public_key` and `private_key` | Encrypts its own data and decrypts everyone's; shows the full topology.                                                                      |
+
+All agents in a mesh need the same `public_key`. An agent without it sends its topology unencrypted, which other agents can read.
 
 ```yaml
+# Field agent
 management:
-  public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-  private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
+  public_key: "2395e1d946cd67ba009d37ad76df8b3ccde5fbb244a79a0d15ae342bd5dd1539"
 ```
 
-These nodes:
+## Command signing keys
 
-- Encrypt their own node info (using public key)
-- Decrypt other agents' node info (using private key)
-- Can view full mesh topology in dashboard
+Each privileged request carries an Ed25519 signature that binds the requesting agent, the target agent, a timestamp, and the operation type; runtime configuration changes also bind the request body. The target rejects requests that are unsigned, signed with another key, or more than 5 minutes off its clock.
 
-## Options
+| Operation                                                      | Signed |
+| -------------------------------------------------------------- | ------ |
+| Management commands ([`shell`](/configuration/shell))          | Always |
+| File upload, download, and browse ([`file_transfer`](/configuration/file-transfer)) | Always |
+| Runtime changes to routes, peers, listeners, forwards, mesh hosts, and display name | Always |
+| Sleep and wake commands                                        | When the receiving agent has `signing_public_key` |
 
-### Topology Encryption Keys
+What each agent needs:
 
-| Option        | Type   | Description                         |
-| ------------- | ------ | ----------------------------------- |
-| `public_key`  | string | 64-character hex X25519 public key  |
-| `private_key` | string | 64-character hex X25519 private key |
-
-### Command Signing Keys
-
-| Option                | Type   | Description                                      |
-| --------------------- | ------ | ------------------------------------------------ |
-| `signing_public_key`  | string | 64-character hex Ed25519 public key (32 bytes)   |
-| `signing_private_key` | string | 128-character hex Ed25519 private key (64 bytes) |
-
-## Key Distribution
-
-### All Agents Need Same Public Key
-
-For encryption to work across the mesh, all agents must use the **same public key**:
+- **The agent whose HTTP API receives the request** signs it, so it needs `signing_private_key`. Without it, mutation requests through its API are refused with HTTP 403 (`management signing private key not configured on this agent`), also for changes to the agent itself.
+- **The target agent** verifies the signature, so it needs `signing_public_key`. Without it, management commands, file transfer, and runtime configuration changes are refused. Sleep and wake commands are then accepted without a signature.
 
 ```yaml
-# Agent A (field)
+# Field agent: executes signed operations
 management:
-  public_key: "a1b2c3d4..."
+  signing_public_key: "91ec6f66440771f9a68f2d65adb835faccdff429e97f9e4be1ce5ac10eec158f"
+```
 
-# Agent B (field)
+```yaml
+# Operator agent: issues signed operations
 management:
-  public_key: "a1b2c3d4..." # Same key
-
-# Agent C (management)
-management:
-  public_key: "a1b2c3d4..." # Same key
-  private_key: "e5f6a7b8..." # Only on management nodes
+  signing_public_key: "91ec6f66440771f9a68f2d65adb835faccdff429e97f9e4be1ce5ac10eec158f"
+  signing_private_key: "2a848e10f76d1e876127904d60eb7da4a0d5d72710f3a746e778b9d0a06ab92f91ec6f66440771f9a68f2d65adb835faccdff429e97f9e4be1ce5ac10eec158f"
 ```
 
-### Never Distribute Private Key
+The signing key authorizes requests between agents. It does not authenticate callers of the local HTTP API; use [`http.token_hash`](/configuration/http#authentication) or a loopback bind address for that.
 
-The private key should only exist on management nodes. Never:
+`/healthz` reports `can_sign_management` (this agent has `signing_private_key`) and `accepts_signed_management` (it has `signing_public_key`), which clients such as Muti Metroo Manager use to show or hide management actions.
 
-- Include private key in field agent configs
-- Store private key in shared repositories
-- Transmit private key over untrusted channels
+## Key rotation
 
-## What Gets Encrypted
-
-| Data                            | Encrypted | Effect                                 |
-| ------------------------------- | --------- | -------------------------------------- |
-| Node info (display name, roles) | Yes       | Field agents see encrypted blobs       |
-| Route paths                     | Yes       | Field agents can't trace routes        |
-| Agent IDs in advertisements     | Yes       | Topology hidden from field agents      |
-| Actual stream data              | No        | E2E encryption handles this separately |
-| CIDR routes                     | No        | Routing still works for field agents   |
-
-## Dashboard Behavior
-
-### Without Management Key
-
-Dashboard shows full topology - all agents, names, connections.
-
-### Field Agent (Public Key Only)
-
-Dashboard shows:
-
-- Own agent info
-- Connected peers (as encrypted IDs)
-- Routes (destinations only, not paths)
-
-Cannot see:
-
-- Other agent names
-- Full mesh topology
-- Route paths through mesh
-
-### Management Node (Both Keys)
-
-Dashboard shows complete topology - same as without management keys.
-
-## Deployment Patterns
-
-### Centralized Management
-
-```
-        Management Server
-        (has private key)
-              |
-    +---------+---------+
-    |         |         |
-  Field A   Field B   Field C
-  (public)  (public)  (public)
-```
-
-### Distributed Management
-
-```
-  Management A          Management B
-  (both keys)           (both keys)
-       |                     |
-   +---+---+             +---+---+
-   |       |             |       |
- Field   Field         Field   Field
-```
+There is no in-band rotation. To replace a key pair, generate a new one, update the configuration of every agent, and restart them. Agents with different keys cannot read each other's topology or accept each other's signed requests in the meantime.
 
 ## Examples
 
-### Field Agent
-
-```yaml
-agent:
-  display_name: "Field-Alpha"
-
-management:
-  public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-
-# No private_key - cannot decrypt topology
-```
-
-### Management Node
-
-```yaml
-agent:
-  display_name: "Management-Central"
-
-management:
-  public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-  private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
-
-http:
-  enabled: true
-  dashboard: true # Can view full topology
-```
-
-### No Encryption (Default)
-
-```yaml
-# No management section = no topology encryption
-# All agents can see full mesh topology
-```
-
-## Command Signing Keys
-
-Signing keys authenticate **every privileged operation** in the mesh using Ed25519 signatures. Authorization is unified across:
-
-- **Management commands** (`/agents/{id}/shell`)
-- **File transfer** (`/agents/{id}/file/upload`, `/file/download`, `/file/browse`)
-- **Dynamic config mutations** -- routes, peers, forward listeners, forward endpoints, hosts, and display name (every `add` / `remove` / `set_comment` action on `/{routes,peers,forward,forward/endpoints,hosts,display-name}/manage` and the `/agents/{id}/...` variants)
-- **Sleep / wake** (`/sleep`, `/wake`)
-
-Each operation type has its own opaque op tag (`shell`, `file`, `route.add`, `peer.remove`, ...) bound into the signed envelope, so a captured signature for one operation cannot be replayed as another. Mutation envelopes additionally bind the body hash, so `add X` cannot be replayed as `remove Y`.
-
-There is no separate per-feature password for any of these operations.
-
-:::info Separate from Topology Encryption
-Signing keys (Ed25519) are independent from topology encryption keys (X25519). You can use one, both, or neither depending on your security requirements.
-:::
-
-### Generate Signing Keys
-
-```bash
-# Generate new Ed25519 keypair
-muti-metroo signing-key generate
-
-# Output:
-# Signing Private Key: e5f6a7b8c9d012345678901234567890...
-# Signing Public Key:  a1b2c3d4e5f6789012345678901234567890...
-```
-
-### All Agents (Verify Only)
-
-All agents that should accept signed commands need the public key:
+### Keys from the environment
 
 ```yaml
 management:
-  signing_public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+  public_key: "${MGMT_PUBLIC_KEY}"
+  signing_public_key: "${MGMT_SIGNING_PUBLIC_KEY}"
 ```
 
-These agents:
+## See Also
 
-- Verify signatures on incoming privileged commands (shell, file, mutations, sleep/wake)
-- Reject unsigned, expired (outside the 5-minute timestamp window), or incorrectly signed commands
-- Cannot issue privileged commands themselves
-
-### Operator Nodes (Can Sign)
-
-Operator nodes need both keys to issue signed commands:
-
-```yaml
-management:
-  signing_public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-  signing_private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890efe5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
-```
-
-These nodes:
-
-- Sign every outgoing privileged command before forwarding to the target
-- Are gated locally too: the HTTP API on an operator node refuses mutations (403 with `... restricted: management key decryption unavailable`) when no signing private key is configured -- you cannot accidentally issue an unsigned mutation through your own dashboard
-- Should be limited to authorized operators
-
-### Combined Configuration
-
-You can use both topology encryption and command signing:
-
-```yaml
-management:
-  # Topology encryption (X25519)
-  public_key: "a1b2c3d4..."
-  private_key: "e5f6a7b8..." # Only on management nodes
-
-  # Command signing (Ed25519)
-  signing_public_key: "1234abcd..."
-  signing_private_key: "5678efgh..." # Only on operators
-```
-
-### Capability Reporting
-
-The `/healthz` endpoint reports two boolean flags so dashboards can enable or disable the management UI:
-
-- `can_sign_management` -- this agent has a signing private key, so it can issue signed commands
-- `accepts_signed_management` -- this agent has a signing public key, so it can verify and execute signed commands
-
-Web clients (Muti Metroo Manager in particular) use these flags to hide management actions on agents that cannot sign or cannot verify, so the operator does not see actions that would always 403.
-
-### Backward Compatibility
-
-:::warning
-Agents without `signing_public_key` configured fall through to legacy unsigned acceptance for sleep/wake. Every other privileged operation (shell, file, mutations) requires the public key to be present on the target -- without it, the request is rejected. For full protection, deploy the public key to every agent in your mesh.
-:::
-
-## Security Considerations
-
-1. **Key compromise**: If private key is compromised, generate new keypair and redeploy
-2. **Key rotation**: No built-in rotation - requires config update across all agents
-3. **Mixed deployments**: Agents without management keys will not encrypt, breaking topology privacy
-
-## Environment Variables
-
-```yaml
-management:
-  public_key: "${MANAGEMENT_PUBLIC_KEY}"
-  private_key: "${MANAGEMENT_PRIVATE_KEY}" # Only on management nodes
-```
-
-## Related
-
-- [Security Overview](/security/overview) - Security architecture
-- [Deployment Scenarios](/deployment/scenarios) - Deployment patterns
+- [management-key CLI](/cli/management-key) and [signing-key CLI](/cli/signing-key) to generate key pairs
+- [Authentication](/security/authentication) for how signing keys, bearer tokens, and SOCKS credentials fit together
+- [Shell](/configuration/shell) and [File Transfer](/configuration/file-transfer) for the operations the signing keys authorize
+- [Sleep](/configuration/sleep) for signed sleep and wake commands
+- [HTTP API](/configuration/http) for protecting the local API with a bearer token

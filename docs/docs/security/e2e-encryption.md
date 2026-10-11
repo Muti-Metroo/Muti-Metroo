@@ -1,5 +1,6 @@
 ---
 title: End-to-End Encryption
+description: How Muti Metroo encrypts traffic between the ingress and exit agents, what transit agents can still see, and the limits of that protection.
 sidebar_position: 2
 ---
 
@@ -9,154 +10,99 @@ sidebar_position: 2
 
 # End-to-End Encryption
 
-Even if a transit node is compromised or the network is monitored, your traffic stays private. Only the ingress and exit can read your data - everything in between sees encrypted bytes.
+Traffic that crosses the mesh is encrypted twice: once on every peer link by TLS, and once end to end between the two agents that terminate the session (for a SOCKS connection, the ingress and the exit). Transit agents in between forward the end-to-end ciphertext without holding the keys for it.
 
-**This protects you when:**
+End-to-end encryption is always on. There is nothing to configure.
 
-- Traffic passes through untrusted networks
-- A transit agent you don't control is in the path
-- Someone captures packets between agents
+## What is encrypted
 
-## What Gets Encrypted
+Every session that carries user data gets its own end-to-end keys:
 
-| Data                                    | Encrypted? | Why                          |
-| --------------------------------------- | ---------- | ---------------------------- |
-| Your application data (HTTP, SSH, etc.) | Yes        | Protected from transit nodes |
-| Destination address/port                | No         | Needed for routing           |
+| Session type | Endpoints |
+| ------------ | --------- |
+| SOCKS TCP connections | Ingress agent and exit agent |
+| Port forwards | Listener agent and endpoint agent |
+| UDP relay datagrams | Ingress agent and exit agent |
+| ICMP echo (ping) | Ingress agent and target agent |
+| Management commands (shell) | Gateway agent and target agent |
+| File transfer and file browsing | Gateway agent and target agent |
 
-## Security Properties
+## How it works
 
-| What You Get        | What It Means                                               |
-| ------------------- | ----------------------------------------------------------- |
-| **Confidentiality** | Transit nodes can't read your traffic                       |
-| **Integrity**       | If someone modifies data, it's detected and rejected        |
-| **Forward Secrecy** | Even if keys are later compromised, past traffic stays safe |
+1. When a session opens, the initiating agent generates a fresh X25519 key pair and sends its public key in the open request.
+2. The responding agent generates its own fresh X25519 key pair and returns its public key in the reply.
+3. Both sides compute the X25519 shared secret and derive a session key with HKDF-SHA256.
+4. Every data frame is sealed with ChaCha20-Poly1305 using a nonce built from a direction marker and a counter. A frame that fails authentication, arrives out of order, or repeats an earlier counter is rejected.
+5. Transit agents forward the sealed frames unchanged.
 
-## No Configuration Required
+Because the key pairs are generated per session and discarded when the session ends, recorded ciphertext cannot be decrypted later by stealing an agent's configuration or data directory (forward secrecy).
 
-End-to-end encryption is enabled automatically. There is no configuration to set up - it just works.
+Each sealed frame is 28 bytes larger than the plaintext (a 12-byte nonce and a 16-byte authentication tag).
 
-### Key Generation
+:::note Agent key pair
+Each agent also has a persistent X25519 key pair (`agent_key` in the data directory, or `agent.private_key` in the configuration; see [Agent Configuration](/configuration/agent)). Session keys are not derived from it, so losing or rotating it does not affect past or future session encryption.
+:::
 
-Each agent has an X25519 keypair for E2E encryption. Keys can be stored in files or in the config.
+## What transit agents can see
 
-#### File-Based Keys (Default)
+End-to-end encryption hides payloads, not routing information. A transit agent, or anyone who can read a peer link, can observe:
 
-By default, keys are generated on first start and stored in `data_dir`:
+| Information | Visible to transit |
+| ----------- | ------------------ |
+| Application payload (HTTP bodies, SSH sessions, file contents, command output) | No |
+| Destination IP address and port | Yes |
+| Destination hostname, when a [domain route](/features/exit-routing#route-types) is used | Yes |
+| The remaining path of agent IDs toward the exit | Yes |
+| Session type (TCP, UDP, ICMP, shell, file transfer, port forward key) | Yes |
+| Per-datagram UDP destinations, and ICMP sequence numbers | Yes |
+| Timing and volume of traffic | Yes |
 
-| File                       | Purpose                           | Permissions           |
-| -------------------------- | --------------------------------- | --------------------- |
-| `{data_dir}/agent_key`     | Private key (never shared)        | 0600 (owner only)     |
-| `{data_dir}/agent_key.pub` | Public key (distributed to peers) | 0644 (world readable) |
+Peer-link TLS hides all of this from observers on the network between two agents, but not from the agents themselves.
 
-The keypair is persistent - once generated, it's reused on subsequent starts.
+## Limits of the protection
 
-#### Config-Based Keys
+The session key exchange is not authenticated: the public keys in the open request and reply are not signed or tied to an agent identity. The protection therefore depends on the position of the attacker:
 
-For single-file deployments, keys can be specified directly in config:
+| Attacker | Can read payloads? |
+| -------- | ------------------ |
+| Passive observer on a peer link | No. TLS and end-to-end encryption both apply. |
+| Transit agent that relays traffic as designed, or an attacker who later obtains its logs or memory dumps | No. It never holds session keys. |
+| Transit agent under an attacker's control that rewrites session setup messages | Yes. It can substitute its own keys toward both ends and decrypt and re-encrypt the session. |
+| Active attacker on a peer link where certificates are not verified (`tls.strict: false`, the default) | Yes. It can terminate TLS with its own certificate and then act like a malicious transit. |
+| Compromised ingress or exit agent | Yes. It is a session endpoint. |
 
-```yaml
-agent:
-  id: "a1b2c3d4e5f6789012345678901234ab"
-  private_key: "48bbea6c0c9be254bde983c92c8a53db759f27e51a6ae77fd9cca81895a5d57c"
-  # public_key is optional - derived automatically from private_key
-```
+To narrow these risks:
 
-When `private_key` is set in config:
+- Enable certificate verification (`tls.strict: true`) and mutual TLS (`tls.mtls: true`) so that only holders of certificates from your CA can sit on a peer link. See [TLS and mTLS](/security/tls-mtls).
+- Only connect peers and transit agents that you operate or trust.
+- Use an application-layer protocol with its own authentication (HTTPS with certificate checks, SSH with host keys) for traffic that must stay confidential even if a transit agent is compromised.
 
-- Keys are loaded from config instead of data_dir files
-- The `data_dir` field becomes optional
-- Enables true single-file deployment (no external files needed)
+## End-to-end versus management encryption
 
-Config-based keys take precedence over file-based keys.
+Muti Metroo has a second, optional encryption system that protects topology information rather than traffic:
 
-The public key is automatically distributed to other agents via NodeInfo advertisements, so peers can encrypt data destined for this agent.
+| | End-to-end encryption | Management encryption |
+| - | --------------------- | --------------------- |
+| Protects | Session payloads | Node information advertisements (hostnames, OS, IPs, display names) |
+| Keys | Generated per session | One X25519 key pair shared by the mesh, configured by the operator |
+| Enabled | Always | When `management.public_key` is set |
 
-### Stream Encryption Flow
-
-When a stream is opened:
-
-1. Ingress and exit agents exchange ephemeral public keys
-2. Both derive a shared secret using X25519 ECDH
-3. All stream data is encrypted with ChaCha20-Poly1305
-4. Transit agents forward encrypted data unchanged
-
-## Performance Impact
-
-| Metric    | Impact                          |
-| --------- | ------------------------------- |
-| CPU       | Minimal (~5-10% for encryption) |
-| Latency   | Negligible                      |
-| Bandwidth | +28 bytes per frame             |
-
-ChaCha20-Poly1305 is highly optimized and runs at several GB/s on modern CPUs.
-
-## E2E vs Management Encryption
-
-Muti Metroo uses two separate encryption systems:
-
-| Feature              | E2E Encryption               | Management Encryption                     |
-| -------------------- | ---------------------------- | ----------------------------------------- |
-| **Purpose**          | Protect stream payload data  | Protect mesh topology metadata            |
-| **What's encrypted** | Application data in streams  | NodeInfo (hostnames, IPs, OS)             |
-| **Key type**         | Per-agent persistent keypair | Shared across all agents                  |
-| **Automatic**        | Yes, always on               | No, requires configuration                |
-| **Algorithm**        | X25519 + ChaCha20-Poly1305   | X25519 + ChaCha20-Poly1305 (sealed boxes) |
-
-Both systems use the same cryptographic primitives but serve different purposes. E2E encryption protects your traffic; management encryption protects your infrastructure topology.
-
-See [management-key command](/cli/management-key) for management encryption details.
-
-## What E2E Protects (and Doesn't)
-
-### You're Protected Against
-
-- Someone monitoring traffic at a transit node
-- A compromised transit agent trying to read your data
-- Replay attacks (sending captured traffic again)
-- Traffic modification (changing data in transit)
-
-### You're NOT Protected Against
-
-- Compromised ingress or exit agent - they see your data (secure your endpoints!)
-- Connection metadata - timing and volume patterns remain visible
-- Destination visibility - routing requires knowing where traffic goes
+Route advertisements themselves (prefixes, domain patterns, paths, forward keys) are not encrypted by management encryption. See [Management Key Configuration](/configuration/management).
 
 ## Troubleshooting
 
-### Decryption Failures
+### Sessions fail after an upgrade
 
-If streams fail with decryption errors:
+Session encryption is negotiated per session by both endpoints. If sessions fail with decryption or "encryption required" errors after upgrading only some agents, upgrade every agent on the path to the same release.
 
-1. **Version mismatch**: Ensure all agents are running the same version
-2. **Corrupted frames**: Check network reliability
-3. **Clock skew**: Verify system time is synchronized
+### Agent identity files are missing
 
-### Key Issues
+The persistent agent key pair and agent ID are created by `muti-metroo init`. If `agent_key` was deleted, the agent creates a new key pair on the next start. See [init](/cli/init) and [Agent Configuration](/configuration/agent).
 
-For file-based keys:
+## See Also
 
-```bash
-# Verify keypair exists
-ls -la {data_dir}/agent_key*
-
-# Regenerate if corrupted (will change agent identity)
-rm {data_dir}/agent_key*
-muti-metroo init -d {data_dir}
-```
-
-For config-based keys:
-
-```bash
-# Generate new keys
-muti-metroo init -d /tmp/newkeys
-
-# Copy the values to your config
-cat /tmp/newkeys/agent_key       # -> agent.private_key
-cat /tmp/newkeys/agent_id        # -> agent.id
-```
-
-## Next Steps
-
-- [TLS/mTLS Configuration](/security/tls-mtls) - Transport-layer security between peers
-- [Authentication](/security/authentication) - SOCKS5 and shell authentication
+- [TLS and mTLS](/security/tls-mtls): protect peer links and restrict who can join the mesh
+- [Security Overview](/security/overview): the full set of security controls
+- [Management Key Configuration](/configuration/management): encrypt topology information
+- [Streams](/concepts/streams): how sessions are carried across the mesh
+- [Best Practices](/security/best-practices): production hardening

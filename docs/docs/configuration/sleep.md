@@ -1,13 +1,14 @@
 ---
 title: Sleep
-sidebar_position: 14
+description: Configuration reference for the sleep section, covering mesh hibernation, poll timing, state persistence, message queueing, and deterministic listening windows.
+sidebar_position: 20
 ---
 
-# Sleep Configuration
+# Sleep
 
-The `sleep` section configures mesh hibernation mode.
+The `sleep` section controls mesh hibernation. A sleeping agent closes its peer connections and stops its listeners and SOCKS proxy, then reconnects briefly at intervals (polls) to receive queued updates and wake commands. Sleep and wake commands are flooded to every agent in the mesh with [`muti-metroo sleep`](/cli/sleep) and [`muti-metroo wake`](/cli/sleep).
 
-## Basic Configuration
+## Configuration
 
 ```yaml
 sleep:
@@ -18,169 +19,42 @@ sleep:
   persist_state: true
   max_queued_messages: 1000
   auto_sleep_on_start: false
+  deterministic_windows:
+    enabled: false
+    window_length: 30s
+    clock_tolerance: 5s
+    epoch: ""
 ```
 
-## Options
+## Keys
 
-### enabled
+| Key                                     | Type     | Default | Description                                                                                                                      |
+| --------------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                               | bool     | `false` | Allow this agent to sleep. When false, the agent ignores sleep commands and the sleep API endpoints return errors.             |
+| `poll_interval`                         | duration | `5m`    | Base time between polls while sleeping.                                                                                          |
+| `poll_interval_jitter`                  | float    | `0.3`   | Random variation applied to each poll interval, as a fraction (0.3 = 70% to 130% of `poll_interval`). `0` disables jitter.     |
+| `poll_duration`                         | duration | `30s`   | How long the agent stays connected during each poll.                                                                            |
+| `persist_state`                         | bool     | `true`  | Save the sleep state to `data_dir/sleep_state.json` on every transition.                                                        |
+| `max_queued_messages`                   | int      | `1000`  | Maximum route and node info updates queued for each sleeping peer; the oldest are dropped first. `0` or less uses `1000`.       |
+| `auto_sleep_on_start`                   | bool     | `false` | Enter sleep mode as soon as the agent has started.                                                                               |
+| `deterministic_windows.enabled`         | bool     | `false` | Poll at times derived from the agent ID instead of random jitter.                                                               |
+| `deterministic_windows.window_length`   | duration | `30s`   | Length of each listening window. A value not shorter than `poll_interval` is replaced with one sixth of `poll_interval`.        |
+| `deterministic_windows.clock_tolerance` | duration | `5s`    | Allowance for clock differences between agents.                                                                                  |
+| `deterministic_windows.epoch`           | string   | `""`    | Reference time for window calculation in RFC 3339 format, for example `2026-01-01T00:00:00Z`. Empty or unparseable uses the Unix epoch. |
 
-Whether sleep mode is available on this agent.
+## Poll timing
 
-```yaml
-sleep:
-  enabled: true # Enable sleep mode
-```
+While sleeping, the agent waits `poll_interval` (varied by `poll_interval_jitter`), reconnects to its peers for `poll_duration`, then disconnects again. A wake command reaches a sleeping agent at its next poll at the latest, so `poll_interval` bounds how long waking takes. `poll_duration` must be long enough to connect and receive queued state.
 
-- **Type**: boolean
-- **Default**: `false`
+| Goal                     | `poll_interval` | `poll_duration` |
+| ------------------------ | --------------- | --------------- |
+| Faster wake              | `1m`            | `15s`           |
+| Default                  | `5m`            | `30s`           |
+| Less network activity    | `30m`           | `20s`           |
 
-When disabled, sleep/wake commands are ignored and CLI/API endpoints return errors.
+## State file
 
-### poll_interval
-
-Base interval between poll cycles while sleeping.
-
-```yaml
-sleep:
-  poll_interval: 5m
-```
-
-- **Type**: duration
-- **Default**: `5m`
-
-Actual interval varies by +/- `poll_interval_jitter`. Shorter intervals mean more frequent connectivity checks but more network activity.
-
-### poll_interval_jitter
-
-Timing jitter fraction applied to poll interval.
-
-```yaml
-sleep:
-  poll_interval_jitter: 0.3 # +/- 30%
-```
-
-- **Type**: float (0.0 - 1.0)
-- **Default**: `0.3`
-
-A value of 0.3 means the actual poll interval will be anywhere from 70% to 130% of `poll_interval`. This helps avoid predictable traffic patterns.
-
-### poll_duration
-
-How long to stay connected during each poll cycle.
-
-```yaml
-sleep:
-  poll_duration: 30s
-```
-
-- **Type**: duration
-- **Default**: `30s`
-
-Must be long enough to:
-
-- Establish connections to peers
-- Receive queued state updates
-- Check for wake commands
-
-Too short may result in missed messages; too long increases exposure.
-
-### persist_state
-
-Save sleep state to disk for restart recovery.
-
-```yaml
-sleep:
-  persist_state: true
-```
-
-- **Type**: boolean
-- **Default**: `true`
-
-When enabled, sleep state is saved to `sleep_state.json` in the data directory. The agent resumes its previous sleep state after restart.
-
-### max_queued_messages
-
-Maximum number of messages queued per sleeping peer.
-
-```yaml
-sleep:
-  max_queued_messages: 1000
-```
-
-- **Type**: integer
-- **Default**: `1000`
-
-When a peer is sleeping, route advertisements and node info updates are queued. Older messages are evicted when this limit is exceeded. Set higher for meshes with frequent route changes.
-
-### auto_sleep_on_start
-
-Start the agent in sleep mode automatically.
-
-```yaml
-sleep:
-  auto_sleep_on_start: true
-```
-
-- **Type**: boolean
-- **Default**: `false`
-
-Useful for on-demand deployments. The agent will:
-
-1. Initialize and connect briefly
-2. Wait 5 seconds
-3. Enter sleep mode automatically
-4. Remain idle until explicitly woken
-
-## Example Configurations
-
-### Standard Sleep Mode
-
-```yaml
-sleep:
-  enabled: true
-  poll_interval: 5m
-  poll_interval_jitter: 0.3
-  poll_duration: 30s
-```
-
-### High-Frequency Polling
-
-For environments where timely responsiveness matters:
-
-```yaml
-sleep:
-  enabled: true
-  poll_interval: 1m
-  poll_interval_jitter: 0.2
-  poll_duration: 15s
-```
-
-### Low-Activity Mode
-
-Minimize network activity:
-
-```yaml
-sleep:
-  enabled: true
-  poll_interval: 30m
-  poll_interval_jitter: 0.5
-  poll_duration: 20s
-  auto_sleep_on_start: true
-```
-
-### No Persistence
-
-For ephemeral deployments where state shouldn't survive restarts:
-
-```yaml
-sleep:
-  enabled: true
-  persist_state: false
-```
-
-## State File
-
-When `persist_state` is enabled, state is saved to `{data_dir}/sleep_state.json`:
+With `persist_state: true` and `agent.data_dir` set, the agent writes its state to `sleep_state.json` on every transition and reads it back at startup:
 
 ```json
 {
@@ -191,54 +65,43 @@ When `persist_state` is enabled, state is saved to `{data_dir}/sleep_state.json`
 }
 ```
 
-State values:
+`state` is `0` (awake), `1` (sleeping), or `2` (polling). The file is not encrypted.
 
-- `0`: AWAKE
-- `1`: SLEEPING
-- `2`: POLLING
+## Deterministic windows
 
-## Security Considerations
+With `deterministic_windows.enabled: true`, each sleeping agent polls in a window whose position within every `poll_interval` cycle is derived from its agent ID and `epoch`. Other agents can compute when it will be reachable. All agents in a mesh need the same `poll_interval` and `epoch` for the windows to line up.
 
-- Sleep/wake commands flood to all mesh agents
-- Only enable in trusted meshes or with proper access controls
-- State file is unencrypted - protect the data directory
-- Poll timing determines how quickly sleeping agents notice wake commands
+## Command signing
 
-### Command Signing
+Sleep and wake commands are verified with `management.signing_public_key` when it is set; without it, unsigned commands are accepted. See [Management](/configuration/management#command-signing-keys).
 
-For untrusted environments, configure signing keys to authenticate sleep/wake commands. This prevents unauthorized parties from hibernating your mesh.
+## Examples
 
-```yaml
-management:
-  signing_public_key: "a1b2c3d4..." # ALL agents - verify signatures
-  signing_private_key: "e5f6a7b8..." # OPERATORS ONLY - sign commands
-```
-
-See [Management Configuration](/configuration/management) for details on signing key setup, or [signing-key CLI](/cli/signing-key) for key generation.
-
-## Deterministic Windows
-
-For more predictable reconnection timing, configure deterministic listening windows:
+### On-demand agent
 
 ```yaml
 sleep:
   enabled: true
-  deterministic_windows:
-    enabled: true # Use predictable windows derived from AgentID
-    window_length: 30s # Duration of each listening window (max 30s)
-    clock_tolerance: 5s # Clock drift tolerance
-    epoch: "" # Reference point for calculations (RFC3339, default: Unix epoch)
+  auto_sleep_on_start: true
+  poll_interval: 15m
+  poll_duration: 20s
 ```
 
-When enabled, sleeping agents listen at predictable times derived from their AgentID, allowing peers to calculate when a sleeping agent will be available and time reconnection attempts efficiently.
+### Predictable polling windows
 
-### Options
+```yaml
+sleep:
+  enabled: true
+  poll_interval: 10m
+  deterministic_windows:
+    enabled: true
+    window_length: 30s
+    epoch: "2026-01-01T00:00:00Z"
+```
 
-| Option            | Type     | Default | Description                                                                   |
-| ----------------- | -------- | ------- | ----------------------------------------------------------------------------- |
-| `enabled`         | bool     | `false` | Use deterministic windows instead of random jitter                            |
-| `window_length`   | duration | `30s`   | Duration of each listening window (max 30s)                                   |
-| `clock_tolerance` | duration | `5s`    | Clock drift tolerance between agents                                          |
-| `epoch`           | string   | `""`    | Reference point for window calculations (RFC3339 format, default: Unix epoch) |
+## See Also
 
-All agents should use the same `epoch` for interoperability.
+- [Sleep Mode usage](/features/sleep-mode) for the sleep and wake workflow
+- [sleep CLI](/cli/sleep) for `sleep`, `wake`, and `sleep-status`
+- [Sleep API](/api/sleep) for the HTTP endpoints
+- [Management](/configuration/management) for signing sleep and wake commands

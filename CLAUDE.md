@@ -46,6 +46,8 @@ The project documentation is built with Docusaurus and lives in the `docs/` fold
 4. **Configuration changes**: Update `docs/docs/configuration/`
 5. **Protocol/internals changes**: Update `Architecture.md` only (not Docusaurus)
 
+**Editorial rules:** follow `docs/STYLE.md` (MDN editorial model: verify every claim against the source, reference before narrative, one canonical page per concept, ASCII only, every page ends with `## See Also`). Screenshots come only from `docs/scripts/capture-screenshots.sh`, which boots a throwaway Docker fixture mesh plus Muti Metroo Manager and captures every image; never commit a hand-made screenshot.
+
 **Blend new material in; do not emphasize it.** A new feature sits at the same level of importance as its peers, not above them. Find the section(s) where sibling features are already documented and extend those in the same tone, length, and depth. Do not hoist a minor addition into top-level summaries, overview paragraphs, or feature taglines where it does not belong. Before writing, read how a comparable existing feature is documented and match it: same heading depth, same level of detail, same placement relative to the rest of the page.
 
 The site is deployed to GitHub Pages (custom domain `mutimetroo.com`, set by `docs/static/CNAME`) by `.github/workflows/docs.yml` on every push to `master` that touches `docs/`.
@@ -112,7 +114,7 @@ docker compose down                           # Stop all containers
 docker compose run test                       # Run tests in container
 ```
 
-**Certificate Management:** `muti-metroo cert {ca|agent|client} -n "name"` generates the corresponding cert; `muti-metroo cert info <file>` displays info.
+**Certificate Management:** `muti-metroo cert {ca|agent|client} --cn "name"` generates the corresponding cert; `muti-metroo cert info <file>` displays info.
 
 **Password Hash Generation** (for SOCKS5 auth and HTTP API bearer tokens): `muti-metroo hash` (interactive), `muti-metroo hash "password"` (arg), `--cost 12` for custom bcrypt cost.
 
@@ -280,7 +282,7 @@ Example config in `configs/example.yaml`. Key sections:
 - `shell`: Management commands (disabled by default; `whitelist: ["*"]` to allow all)
 - `file_transfer`: File upload/download (disabled by default; `allowed_paths` works like shell whitelist)
 - `icmp`: ICMP echo (ping) settings - allowed CIDRs, session limits
-- `management`: Two independent key pairs. `public_key` / `private_key` (X25519, hex 32 bytes each) encrypt NodeInfo and route paths so only operators with the private key can decrypt the topology. `signing_public_key` / `signing_private_key` (Ed25519, hex 32 / 64 bytes) authorize every privileged operation -- shell, file transfer, dynamic config mutations, and sleep/wake. Agents with only the signing public key verify and execute signed requests; only operators with the signing private key can initiate them. When `public_key` is set without `private_key`, the agent restricts `/agents/...`, mesh-test fan-out, and route-trace fan-out to local-only.
+- `management`: Two independent key pairs. `public_key` / `private_key` (X25519, hex 32 bytes each) encrypt NodeInfo so only operators with the private key can decrypt the topology (route paths travel in plaintext because transit agents need them; agents without the private key only hide them at the API layer). `signing_public_key` / `signing_private_key` (Ed25519, hex 32 / 64 bytes) authorize every privileged operation -- shell, file transfer, dynamic config mutations, and sleep/wake. Agents with only the signing public key verify and execute signed requests; only operators with the signing private key can initiate them. When `public_key` is set without `private_key`, the agent restricts `/agents/...`, mesh-test fan-out, and route-trace fan-out to local-only.
 - `sleep`: Sleep mode settings (enabled, poll_interval, poll_duration, auto_sleep_on_start)
 - `udp`: SOCKS5 UDP ASSOCIATE relay settings (enabled by default; max_associations, idle_timeout, max_datagram_size)
 - `forward`: Port forwarding - `endpoints` (exit side: key + target) and `listeners` (ingress side: key + address)

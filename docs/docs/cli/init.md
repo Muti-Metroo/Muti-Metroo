@@ -1,5 +1,8 @@
 ---
-title: init
+title: muti-metroo init
+sidebar_label: init
+sidebar_position: 3
+description: Create an agent data directory and generate its agent ID ahead of the first run.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,51 +11,50 @@ title: init
 
 # muti-metroo init
 
-Create a unique identity for an agent. This generates the AgentID that other agents use to identify and route traffic to this agent.
+Create the data directory and generate the agent ID, the 128-bit identifier other agents use to address this agent. Running `init` is optional: [`run`](run.md) creates the identity on first start. Use `init` when you need to know the agent ID before the agent runs, for example to put it in another agent's configuration.
 
-**Note:** You usually don't need to run this manually - `muti-metroo run` creates the identity automatically if it doesn't exist. Use this command when you need to generate the identity ahead of time (e.g., to configure peers before the agent runs).
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-## Usage
+## Synopsis
 
 ```bash
-muti-metroo init -d <data-dir>
+muti-metroo init [flags]
 ```
 
 ## Flags
 
-- `-d, --data-dir <dir>`: Data directory path (default: `./data`)
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-d`, `--data-dir` | `./data` | Data directory to create. Use the same path as `agent.data_dir` in the configuration. |
+
+## Description
+
+`init` creates the data directory (mode `0700`) if needed, writes a random agent ID to the `agent_id` file in it (mode `0600`), and prints the ID.
+
+If `agent_id` already exists, `init` changes nothing and prints the existing ID. Either way it exits with status 0.
+
+`init` does not create the end-to-end encryption keypair (`agent_key`, `agent_key.pub`); the agent generates it on first start.
 
 ## Examples
 
 ```bash
-# Initialize in current directory
-muti-metroo init -d ./data
-
-# Initialize in /var/lib
 muti-metroo init -d /var/lib/muti-metroo
 ```
 
-## What It Does
-
-1. Creates data directory if it doesn't exist
-2. Generates a unique 128-bit AgentID
-3. Generates an X25519 keypair for end-to-end encryption
-4. Saves identity files to data directory:
-   - `agent_id` - The 128-bit AgentID
-   - `agent_key` - X25519 private key (for E2E encryption)
-   - `agent_key.pub` - X25519 public key (advertised to peers)
-5. Outputs the AgentID to stdout
-
-## Output
-
-When creating a new identity:
-```
-Agent initialized in ./data
+```text
+Agent initialized in /var/lib/muti-metroo
 Agent ID: abc123def456789012345678901234ab
 ```
 
-When the identity already exists:
-```
-Agent already initialized in ./data
+Running it again on the same directory:
+
+```text
+Agent already initialized in /var/lib/muti-metroo
 Agent ID: abc123def456789012345678901234ab
 ```
+
+## See Also
+
+- [run](run.md): start the agent, which creates any missing identity files
+- [Agent configuration](../configuration/agent.md): `agent.data_dir`, `agent.id`, and inline identity keys
+- [setup](setup.md): create a configuration and identity interactively

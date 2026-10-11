@@ -1,391 +1,173 @@
 ---
 title: PM2 Process Manager
-sidebar_position: 5
+description: Supervise Muti Metroo with PM2 for automatic restarts, log files, and startup at boot, including on hosts without root access.
+sidebar_position: 3
 ---
 
 # PM2 Process Manager
 
-Run Muti Metroo with [PM2](https://pm2.keymetrics.io/), a production process manager that provides automatic restarts, log management, and cluster mode support.
+[PM2](https://pm2.keymetrics.io/) is a Node.js process manager that can supervise any executable. It restarts the agent when it exits, captures its output to log files, and can restore the process list at boot. PM2 runs as an ordinary user, which makes it an option on hosts where you cannot install a system service, such as shared hosting accounts.
 
-**When to use PM2:**
-- You already use PM2 for other applications
-- You want unified process management across Node.js and non-Node.js apps
-- You need built-in log rotation and monitoring
-- Cross-platform support (Linux, macOS, Windows)
+If you have root access and no other use for PM2, a [system service](/deployment/system-service) needs no extra software.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Install PM2 globally
 npm install -g pm2
 
-# Start Muti Metroo with PM2
-pm2 start muti-metroo -- run -c /etc/muti-metroo/config.yaml
+pm2 start /usr/local/bin/muti-metroo --name muti-metroo --interpreter none \
+  --kill-timeout 12000 -- run -c /etc/muti-metroo/config.yaml
 
-# Save process list for automatic restart on reboot
 pm2 save
-
-# Setup PM2 to start on boot
-pm2 startup
 ```
 
-## Ecosystem File
+- `--interpreter none` runs the binary directly instead of through Node.js.
+- `--kill-timeout 12000` gives the agent time to shut down. On `pm2 stop` and `pm2 restart`, PM2 sends `SIGINT` and then `SIGKILL` after the timeout (1.6 seconds by default). The agent drains streams for up to 10 seconds after `SIGINT`.
+- Arguments after `--` are passed to `muti-metroo`.
 
-For production deployments, use an ecosystem file for reproducible configuration.
+## Ecosystem file
 
-### Basic Configuration
+An ecosystem file keeps the settings in one place:
 
 ```javascript
-// ecosystem.config.js
+// /etc/muti-metroo/ecosystem.config.js
 module.exports = {
   apps: [{
     name: 'muti-metroo',
     script: '/usr/local/bin/muti-metroo',
     args: 'run -c /etc/muti-metroo/config.yaml',
     cwd: '/etc/muti-metroo',
+    interpreter: 'none',
 
-    // Restart policy
     autorestart: true,
-    max_restarts: 10,
     min_uptime: '10s',
+    max_restarts: 10,
     restart_delay: 5000,
+    kill_timeout: 12000,
 
-    // Logging
-    error_file: '/var/log/muti-metroo/error.log',
     out_file: '/var/log/muti-metroo/out.log',
-    merge_logs: true,
-    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-
-    // Environment
-    env: {
-      NODE_ENV: 'production'
-    }
+    error_file: '/var/log/muti-metroo/error.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
   }]
 };
 ```
 
-### Advanced Configuration
-
-```javascript
-// ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'muti-metroo',
-    script: '/usr/local/bin/muti-metroo',
-    args: 'run -c /etc/muti-metroo/config.yaml',
-    cwd: '/etc/muti-metroo',
-
-    // Process settings
-    instances: 1,
-    exec_mode: 'fork',
-    autorestart: true,
-    watch: false,
-
-    // Restart policy
-    max_restarts: 10,
-    min_uptime: '10s',
-    restart_delay: 5000,
-    exp_backoff_restart_delay: 100,
-
-    // Resource limits
-    max_memory_restart: '500M',
-
-    // Logging
-    error_file: '/var/log/muti-metroo/error.log',
-    out_file: '/var/log/muti-metroo/out.log',
-    merge_logs: true,
-    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-
-    // Log rotation (requires pm2-logrotate)
-    // pm2 install pm2-logrotate
-    // pm2 set pm2-logrotate:max_size 10M
-    // pm2 set pm2-logrotate:retain 7
-
-    // Graceful shutdown
-    kill_timeout: 10000,
-    listen_timeout: 5000,
-    shutdown_with_message: false,
-
-    // Environment
-    env: {
-      NODE_ENV: 'production'
-    },
-    env_development: {
-      NODE_ENV: 'development'
-    }
-  }]
-};
+```bash
+sudo mkdir -p /var/log/muti-metroo
+sudo chown "$USER" /var/log/muti-metroo
+pm2 start /etc/muti-metroo/ecosystem.config.js
+pm2 save
 ```
 
-### Multiple Agents
+The agent writes its log lines to stderr, so they appear in `error_file`. Startup messages such as the agent ID go to `out_file`.
 
-Run multiple agents on the same host:
+`cwd` sets the working directory; relative paths in the config, such as `data_dir: "./data"`, resolve against it.
+
+### Several agents on one host
+
+Give each agent its own config file, data directory, and ports:
 
 ```javascript
-// ecosystem.config.js
 module.exports = {
   apps: [
     {
-      name: 'muti-metroo-ingress',
+      name: 'mm-ingress',
       script: '/usr/local/bin/muti-metroo',
       args: 'run -c /etc/muti-metroo/ingress.yaml',
-      cwd: '/etc/muti-metroo',
-      autorestart: true,
-      error_file: '/var/log/muti-metroo/ingress-error.log',
-      out_file: '/var/log/muti-metroo/ingress-out.log',
-      merge_logs: true
+      interpreter: 'none',
+      kill_timeout: 12000
     },
     {
-      name: 'muti-metroo-exit',
+      name: 'mm-exit',
       script: '/usr/local/bin/muti-metroo',
       args: 'run -c /etc/muti-metroo/exit.yaml',
-      cwd: '/etc/muti-metroo',
-      autorestart: true,
-      error_file: '/var/log/muti-metroo/exit-error.log',
-      out_file: '/var/log/muti-metroo/exit-out.log',
-      merge_logs: true
+      interpreter: 'none',
+      kill_timeout: 12000
     }
   ]
 };
 ```
 
-## Installation
-
-### Setup Directories
+## Start at boot
 
 ```bash
-# Create directories
-sudo mkdir -p /etc/muti-metroo
-sudo mkdir -p /var/log/muti-metroo
-
-# Copy binary
-sudo cp muti-metroo /usr/local/bin/
-
-# Copy configuration
-sudo cp config.yaml /etc/muti-metroo/
-sudo cp -r certs /etc/muti-metroo/
-
-# Copy ecosystem file
-sudo cp ecosystem.config.js /etc/muti-metroo/
-```
-
-### Start with PM2
-
-```bash
-# Start from ecosystem file
-pm2 start /etc/muti-metroo/ecosystem.config.js
-
-# Or start directly
-pm2 start muti-metroo --name muti-metroo -- run -c /etc/muti-metroo/config.yaml
-
-# Save process list
-pm2 save
-```
-
-### Enable Startup
-
-```bash
-# Generate startup script (run the command it outputs)
 pm2 startup
+```
 
-# Example output:
-# sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u youruser --hp /home/youruser
+`pm2 startup` prints a command that registers PM2 itself with the init system. Run that command, then save the current process list so PM2 restores it at boot:
 
-# After running the startup command, save the process list
+```bash
 pm2 save
 ```
 
-## Management Commands
-
-### Process Control
+On hosts where you cannot run the printed command (it needs root), add a crontab entry instead:
 
 ```bash
-# Status
+(crontab -l 2>/dev/null; echo "@reboot $(command -v pm2) resurrect") | crontab -
+```
+
+On Windows, `pm2 startup` is not supported. Use [pm2-installer](https://github.com/jessety/pm2-installer) to run PM2 as a Windows Service, or use the agent's own [Windows Service or Registry Run installation](/deployment/system-service#windows-service) instead.
+
+## Day-to-day commands
+
+```bash
 pm2 status
-pm2 list
-
-# Detailed info
-pm2 show muti-metroo
-pm2 describe muti-metroo
-
-# Start/Stop/Restart
-pm2 start muti-metroo
-pm2 stop muti-metroo
+pm2 logs muti-metroo --lines 100
 pm2 restart muti-metroo
-
-# Reload (graceful restart)
-pm2 reload muti-metroo
-
-# Delete from PM2
+pm2 stop muti-metroo
 pm2 delete muti-metroo
 ```
 
-### Logs
+PM2 does not rotate its log files. Install the `pm2-logrotate` module to do so:
 
 ```bash
-# Stream all logs
-pm2 logs
-
-# Stream specific app logs
-pm2 logs muti-metroo
-
-# Show last 100 lines
-pm2 logs muti-metroo --lines 100
-
-# Clear logs
-pm2 flush muti-metroo
-```
-
-### Monitoring
-
-```bash
-# Real-time dashboard
-pm2 monit
-
-# Process metrics
-pm2 show muti-metroo
-```
-
-## Log Rotation
-
-Install the PM2 log rotation module:
-
-```bash
-# Install module
 pm2 install pm2-logrotate
-
-# Configure rotation
 pm2 set pm2-logrotate:max_size 10M
 pm2 set pm2-logrotate:retain 7
-pm2 set pm2-logrotate:compress true
-pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
 ```
 
-## Windows
+### Upgrade the binary
 
-PM2 works on Windows but requires additional setup for startup persistence.
-
-### Basic Usage
-
-```powershell
-# Install PM2
-npm install -g pm2
-
-# Start Muti Metroo
-pm2 start C:\ProgramData\muti-metroo\muti-metroo.exe -- run -c C:\ProgramData\muti-metroo\config.yaml
-
-# Save process list
-pm2 save
+```bash
+pm2 stop muti-metroo
+cp ./muti-metroo-linux-amd64 /usr/local/bin/muti-metroo
+chmod +x /usr/local/bin/muti-metroo
+pm2 start muti-metroo
 ```
 
-### Windows Service (Recommended)
+## Running without root
 
-The `pm2 startup` command does not work natively on Windows. For production deployments, use [pm2-installer](https://github.com/jessety/pm2-installer) to run PM2 as a proper Windows Service:
+PM2 and the agent both run as an unprivileged user, so the whole setup can live in a home directory. Keep the binary, config, and data directory outside any directory a web server serves; the config file and data directory hold private keys.
 
-```powershell
-# Clone the installer
-git clone https://github.com/jessety/pm2-installer
-cd pm2-installer
-
-# Run PowerShell installer (as Administrator)
-powershell -ExecutionPolicy Bypass -File install.ps1
+```text
+~/muti-metroo/
+  muti-metroo        binary
+  config.yaml        configuration
+  data/              agent identity and persisted runtime changes
+  ecosystem.config.js
 ```
-
-This creates a Windows Service that:
-- Starts automatically on boot without requiring user login
-- Runs as Local Service user
-- Persists across reboots and user logouts
-
-After installation, manage your app normally:
-
-```powershell
-pm2 start C:\ProgramData\muti-metroo\muti-metroo.exe -- run -c C:\ProgramData\muti-metroo\config.yaml
-pm2 save
-```
-
-### Windows Ecosystem File
 
 ```javascript
-// ecosystem.config.js
+// ~/muti-metroo/ecosystem.config.js
 module.exports = {
   apps: [{
     name: 'muti-metroo',
-    script: 'C:\\ProgramData\\muti-metroo\\muti-metroo.exe',
-    args: 'run -c C:\\ProgramData\\muti-metroo\\config.yaml',
-    cwd: 'C:\\ProgramData\\muti-metroo',
+    script: '/home/alice/muti-metroo/muti-metroo',
+    args: 'run -c /home/alice/muti-metroo/config.yaml',
+    cwd: '/home/alice/muti-metroo',
+    interpreter: 'none',
     autorestart: true,
-    error_file: 'C:\\ProgramData\\muti-metroo\\logs\\error.log',
-    out_file: 'C:\\ProgramData\\muti-metroo\\logs\\out.log',
-    merge_logs: true
+    restart_delay: 5000,
+    kill_timeout: 12000
   }]
 };
 ```
 
-## Comparison with System Services
+Without root, listeners must use ports above 1023. To accept peers on a web host's existing HTTPS port, run a plaintext WebSocket listener on loopback and forward to it from the web server, as described in [Reverse Proxy - Apache without server access](/deployment/reverse-proxy#apache-without-server-access-htaccess).
 
-| Feature | PM2 | systemd | Windows Service |
-|---------|-----|---------|-----------------|
-| Cross-platform | Yes | Linux only | Windows only |
-| Log rotation | Via pm2-logrotate module | journald | Event Log |
-| Monitoring UI | pm2 monit | journalctl | Event Viewer |
-| Cluster mode | Yes | Manual | Manual |
-| Memory limits | Yes | Yes | Limited |
-| Root required | No | Yes (for install) | Yes (for install) |
-| Node.js required | Yes | No | No |
+## See Also
 
-**Choose PM2 when:**
-- Managing multiple applications with a single tool
-- Need cross-platform consistency
-- Want built-in monitoring dashboard
-- Already using PM2 for Node.js apps
-
-**Choose system services when:**
-- Minimal dependencies preferred
-- Native OS integration important
-- Security hardening required (systemd sandboxing)
-
-## Troubleshooting
-
-### Process Not Starting
-
-```bash
-# Check PM2 logs
-pm2 logs muti-metroo --lines 50
-
-# Check if binary is executable
-ls -la /usr/local/bin/muti-metroo
-
-# Test manually
-/usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
-```
-
-### Startup Script Not Working
-
-```bash
-# Regenerate startup script
-pm2 unstartup
-pm2 startup
-
-# Verify saved processes
-pm2 save
-cat ~/.pm2/dump.pm2
-```
-
-### High Memory Usage
-
-```bash
-# Check memory
-pm2 show muti-metroo | grep memory
-
-# Set memory limit in ecosystem file
-# max_memory_restart: '500M'
-
-# Or restart with limit
-pm2 start muti-metroo --max-memory-restart 500M
-```
-
-## Next Steps
-
-- [System Service](/deployment/system-service) - Native OS service installation
-- [Docker](/deployment/docker) - Container deployment
-- [High Availability](/deployment/high-availability) - Redundancy setup
+- [System Service](/deployment/system-service) - systemd, launchd, and Windows Service installation
+- [Reverse Proxy](/deployment/reverse-proxy) - Accept peers through Nginx, Caddy, or Apache
+- [CLI - run](/cli/run) - Options for `muti-metroo run`
+- [Common Issues](/troubleshooting/common-issues) - Startup errors and their fixes

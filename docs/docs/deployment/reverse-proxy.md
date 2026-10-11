@@ -1,6 +1,7 @@
 ---
 title: Reverse Proxy Deployment
-sidebar_position: 6
+description: Accept peer connections through Nginx, Caddy, or Apache by running a plaintext WebSocket listener behind a TLS-terminating reverse proxy.
+sidebar_position: 7
 ---
 
 import Tabs from '@theme/Tabs';
@@ -12,35 +13,19 @@ import TabItem from '@theme/TabItem';
 
 # Reverse Proxy Deployment
 
-Put agents behind Nginx, Caddy, or Apache to use your existing certificate infrastructure and share a public endpoint with other services.
-
-**When to use this:**
-
-- You have an existing reverse proxy infrastructure
-- You want centralized certificate management (e.g., Let's Encrypt via Certbot)
-- You need to consolidate multiple services behind a single public endpoint
-- Corporate security policies require all traffic to pass through a proxy
-
-### Architecture
+An agent can accept peers through an existing web server. The web server terminates TLS on port 443 with its own certificate and forwards WebSocket upgrade requests on one path to a plaintext WebSocket listener on loopback. Use this to share a public HTTPS endpoint with other sites, to reuse certificates managed by the web server, or to run an agent on a host where you can only change web server settings.
 
 ```mermaid
 flowchart LR
-    subgraph Internet
-        Client[Remote Agent]
-    end
-
-    subgraph Server
-        Proxy[Reverse Proxy<br/>TLS termination]
-        Agent[Muti Metroo Agent<br/>plaintext: true]
-    end
-
-    Client -->|wss://mesh.example.com:443| Proxy
-    Proxy -->|ws://127.0.0.1:8080| Agent
+    Remote[Remote agent] -->|wss://mesh.example.com/mesh| Proxy[Reverse proxy<br/>TLS termination]
+    Proxy -->|ws://127.0.0.1:3001/mesh| Agent[Muti Metroo<br/>plaintext ws listener]
 ```
 
-## Muti Metroo Configuration
+Only the WebSocket transport supports this mode. QUIC and HTTP/2 listeners always terminate TLS themselves.
 
-Configure the agent to listen on plaintext WebSocket. The `plaintext: true` option disables TLS on the listener since the proxy handles encryption.
+## Agent configuration
+
+Add a WebSocket listener with `plaintext: true`, bound to loopback:
 
 ```yaml
 agent:
@@ -48,89 +33,75 @@ agent:
   data_dir: "/var/lib/muti-metroo"
 
 listeners:
-  # Plaintext WebSocket listener for reverse proxy
   - transport: ws
-    address: "127.0.0.1:8080"
+    address: "127.0.0.1:3001"
     path: "/mesh"
     plaintext: true
 
-exit:
-  enabled: true
-  routes:
-    - "10.0.0.0/8"
-
 http:
   enabled: true
-  address: "127.0.0.1:8081"
+  address: "127.0.0.1:8080"
 ```
 
-**Important notes:**
+- `plaintext` is accepted only for `transport: ws`. The listener needs no certificate.
+- `path` must match the path the proxy forwards to. The listener answers WebSocket upgrades on exactly that path and returns `404 Not Found` for any other path.
+- Bind to `127.0.0.1` so the unencrypted port is reachable only from the proxy on the same host.
 
-- Bind to `127.0.0.1` (localhost) to prevent direct external access
-- The proxy connects to the agent over the local network
-- mTLS (mutual TLS) is not available in this mode since TLS terminates at the proxy
-- Peer authentication still works via the PEER_HELLO handshake
-- End-to-end encryption (X25519 + ChaCha20-Poly1305) still protects stream payloads
+To open the listener on a running agent instead of editing the config, use [`muti-metroo listener add`](/cli/listener):
 
-## Reverse Proxy Configuration
+```bash
+muti-metroo listener add ws 127.0.0.1:3001 --path /mesh --plaintext
+```
+
+Check the backend before configuring the proxy:
+
+```bash
+muti-metroo probe --transport ws --plaintext 127.0.0.1:3001 --path /mesh
+```
+
+```text
+Probing ws (plaintext)://127.0.0.1:3001...
+
+[OK] Connection successful!
+  Transport:    ws
+  Address:      127.0.0.1:3001
+  Remote ID:    ed65187723415eea4de1ea73e3a540fc
+  RTT:          0ms
+```
+
+## Proxy configuration
+
+The proxy must:
+
+- Offer TLS 1.3. Agents refuse to connect with older TLS versions.
+- Pass the `Upgrade` and `Connection` headers so the WebSocket handshake reaches the agent.
+- Keep idle connections open longer than the agent's keepalive interval, `connections.idle_threshold` (5 minutes by default). If the proxy closes idle connections sooner, raise its timeout or lower `idle_threshold`.
 
 <Tabs>
   <TabItem value="nginx" label="Nginx" default>
 
-### Nginx Configuration
-
 ```nginx
 # /etc/nginx/sites-available/muti-metroo
-
-upstream muti-metroo {
-    server 127.0.0.1:8080;
-}
-
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name mesh.example.com;
 
-    # TLS certificates (e.g., from Let's Encrypt)
-    ssl_certificate /etc/letsencrypt/live/mesh.example.com/fullchain.pem;
+    ssl_certificate     /etc/letsencrypt/live/mesh.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/mesh.example.com/privkey.pem;
-
-    # Modern TLS configuration
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
-    ssl_prefer_server_ciphers off;
 
-    location /mesh {
-        proxy_pass http://muti-metroo;
+    location = /mesh {
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
-
-        # WebSocket upgrade headers
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-
-        # Pass client info
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Long-lived connections (24 hours)
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-
-        # Disable buffering for real-time communication
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
         proxy_buffering off;
     }
 }
-
-# Optional: redirect HTTP to HTTPS
-server {
-    listen 80;
-    server_name mesh.example.com;
-    return 301 https://$server_name$request_uri;
-}
 ```
-
-Enable the site:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/muti-metroo /etc/nginx/sites-enabled/
@@ -141,30 +112,14 @@ sudo systemctl reload nginx
   </TabItem>
   <TabItem value="caddy" label="Caddy">
 
-### Caddy Configuration
+Caddy obtains the certificate automatically and proxies WebSocket upgrades without extra settings.
 
-Caddy automatically provisions TLS certificates via Let's Encrypt.
-
-```
+```text
 # /etc/caddy/Caddyfile
-
 mesh.example.com {
-    # Automatic HTTPS with Let's Encrypt
-
-    # WebSocket proxy to Muti Metroo
-    reverse_proxy /mesh 127.0.0.1:8080 {
-        # WebSocket support is automatic in Caddy
-
-        # Long connection timeout (24 hours)
-        transport http {
-            read_timeout 24h
-            write_timeout 24h
-        }
-    }
+    reverse_proxy /mesh 127.0.0.1:3001
 }
 ```
-
-Reload Caddy:
 
 ```bash
 sudo systemctl reload caddy
@@ -173,54 +128,31 @@ sudo systemctl reload caddy
   </TabItem>
   <TabItem value="apache" label="Apache">
 
-### Apache Configuration
-
-Requires `mod_proxy` and `mod_proxy_wstunnel` modules.
+Requires `mod_ssl`, `mod_rewrite`, `mod_proxy`, `mod_proxy_http`, and `mod_proxy_wstunnel`:
 
 ```bash
-sudo a2enmod proxy proxy_wstunnel proxy_http ssl
+sudo a2enmod ssl rewrite proxy proxy_http proxy_wstunnel
 ```
 
 ```apacheconf
 # /etc/apache2/sites-available/muti-metroo.conf
-
 <VirtualHost *:443>
     ServerName mesh.example.com
 
-    # TLS certificates
     SSLEngine on
     SSLCertificateFile /etc/letsencrypt/live/mesh.example.com/fullchain.pem
     SSLCertificateKeyFile /etc/letsencrypt/live/mesh.example.com/privkey.pem
+    SSLProtocol -all +TLSv1.2 +TLSv1.3
 
-    # Modern TLS configuration
-    SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
-
-    # WebSocket proxy
     ProxyPreserveHost On
-    ProxyRequests Off
+    ProxyTimeout 3600
 
-    # WebSocket upgrade for /mesh path
     RewriteEngine On
     RewriteCond %{HTTP:Upgrade} websocket [NC]
     RewriteCond %{HTTP:Connection} upgrade [NC]
-    RewriteRule ^/mesh(.*)$ ws://127.0.0.1:8080/mesh$1 [P,L]
-
-    # Fallback for non-WebSocket requests
-    ProxyPass /mesh http://127.0.0.1:8080/mesh
-    ProxyPassReverse /mesh http://127.0.0.1:8080/mesh
-
-    # Long timeout for WebSocket connections
-    ProxyTimeout 86400
-</VirtualHost>
-
-# Optional: redirect HTTP to HTTPS
-<VirtualHost *:80>
-    ServerName mesh.example.com
-    Redirect permanent / https://mesh.example.com/
+    RewriteRule ^/mesh$ ws://127.0.0.1:3001/mesh [P,L]
 </VirtualHost>
 ```
-
-Enable the site:
 
 ```bash
 sudo a2ensite muti-metroo
@@ -231,70 +163,85 @@ sudo systemctl reload apache2
   </TabItem>
 </Tabs>
 
-## Connecting to the Proxied Agent
+## Apache without server access (.htaccess)
 
-Remote agents connect using the public `wss://` URL. From their perspective, it looks like a standard TLS-secured WebSocket connection.
+On shared hosting, or any host where you cannot edit the Apache configuration, an `.htaccess` file can forward one URL path to the agent. Apache must already serve the domain over HTTPS, `mod_proxy`, `mod_proxy_http`, and `mod_proxy_wstunnel` must be enabled, and the host must allow `RewriteRule` with the `[P]` flag in `.htaccess` files. Ask the hosting provider if unsure.
+
+Run the agent under [PM2](/deployment/pm2#running-without-root) or another user-level supervisor, with its files outside the document root. Configure the listener on loopback with a trailing slash in the path:
 
 ```yaml
-# Remote agent configuration
-agent:
-  display_name: "Remote Agent"
-
-peers:
-  - id: "${BACKEND_AGENT_ID}"
-    transport: ws
-    address: "wss://mesh.example.com/mesh"
-    tls:
-      strict: true
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
+listeners:
+  - transport: ws
+    address: "127.0.0.1:3001"
+    path: "/mesh/"
+    plaintext: true
 ```
 
-## Security Considerations
+Create the directory `public_html/mesh/` and place this `.htaccess` file in it. Put nothing else in that directory.
 
-### What still works
+```apacheconf
+RewriteEngine On
+RewriteCond %{HTTP:Upgrade} websocket [NC]
+RewriteCond %{HTTP:Connection} upgrade [NC]
+RewriteRule ^(.*)$ ws://127.0.0.1:3001/mesh/$1 [P,L]
+```
 
-- **Peer authentication**: The PEER_HELLO handshake validates agent identities regardless of TLS
-- **End-to-end encryption**: Stream payloads are encrypted with ChaCha20-Poly1305; transit nodes (including the proxy) cannot read them
-- **Certificate verification**: Remote agents verify the proxy's TLS certificate
+Only WebSocket upgrade requests are forwarded. Other requests to `/mesh/` are handled by Apache as usual.
 
-### What does not work
+Some shared hosts block `127.0.0.1` and assign each account its own loopback address. If binding to `127.0.0.1` fails, use the address the provider documents in both the listener and the `RewriteRule`.
 
-- **mTLS (mutual TLS)**: Client certificates cannot be used since TLS terminates at the proxy
-- **Certificate pinning**: Agents pin the proxy's certificate, not the backend agent's
+Remote agents dial `wss://example.com/mesh/`, with the trailing slash.
 
-### Best practices
+## Connect peers through the proxy
 
-1. **Bind to localhost**: Always bind the plaintext listener to `127.0.0.1` to prevent direct access
-2. **Firewall rules**: Block external access to the plaintext port (e.g., 8080)
-3. **Use TLS 1.3**: Configure the proxy to prefer TLS 1.3 for better security
-4. **Enable HSTS**: Consider adding HTTP Strict Transport Security headers
-5. **Monitor logs**: Watch proxy access logs for unusual connection patterns
+Remote agents use the WebSocket transport and the full `wss://` URL, including the path:
+
+```yaml
+peers:
+  - id: "f49038d87149b6c548ef6d8192a59106"
+    transport: ws
+    address: "wss://mesh.example.com/mesh"
+```
+
+The peer `id` is the backend agent's ID (the `agent_id` file in its data directory, or the `Agent ID` line printed at startup). The connection is rejected if a different agent answers.
+
+Test the public endpoint from the remote side:
+
+```bash
+muti-metroo probe --transport ws mesh.example.com:443 --path /mesh
+```
+
+By default, agents do not verify the proxy's certificate; the peer ID check and [end-to-end encryption](/security/e2e-encryption) protect the connection. To verify it, set `tls.strict: true` and `tls.ca` on the peer to the CA certificate that issued the proxy's certificate. Verification uses only that CA, not the system trust store, and the CA certificate must use an ECDSA key. See [TLS Certificates](/configuration/tls-certificates).
+
+To let other agents discover this agent's public address automatically, add an `advertise` block to the listener with the public host, port, and path. See [Configuration - Listeners](/configuration/listeners).
+
+## What changes behind a proxy
+
+- **mTLS is not available.** TLS ends at the proxy, so the agent never sees a client certificate.
+- **Peer identity and end-to-end encryption are unchanged.** The handshake still checks agent IDs, and stream payloads are encrypted between ingress and exit. The proxy cannot read them.
+- **The proxy sees connection metadata**: client IP addresses, connection times, and traffic volume.
 
 ## Troubleshooting
 
-### Connection refused
+**`probe` reports `expected handshake response status code 101 but got 404`.** The path does not match. The path in the proxy rule, the listener `path`, and the path in the peer's `wss://` URL must be identical, including any trailing slash.
 
-- Verify the agent is running: `systemctl status muti-metroo`
-- Check the listener is bound: `ss -tlnp | grep 8080`
-- Verify the proxy can reach the agent: `curl -v http://127.0.0.1:8080/mesh`
+**`probe` reports `got 502` or `got 503`.** The proxy cannot reach the agent. Check that the agent is running and listening:
 
-### WebSocket upgrade failed
+```bash
+ss -tlnp | grep 3001
+curl -i http://127.0.0.1:3001/mesh
+```
 
-- Ensure WebSocket headers are passed correctly
-- Check for conflicting `Connection` or `Upgrade` header handling
-- Verify the path matches (`/mesh` in both proxy and agent config)
+A plain HTTP request to the listener path returns `426 Upgrade Required`, which confirms the listener is up.
 
-### Connection drops after timeout
+**Peers connect and drop after a fixed time.** The proxy's idle or read timeout is shorter than the agent's keepalive interval. Raise the proxy timeout, or lower `connections.idle_threshold` on the agents.
 
-- Increase `proxy_read_timeout` (Nginx) or equivalent
-- Consider implementing keepalives at the application level
-- Check for intermediate firewalls with connection timeouts
+**TLS errors on the remote side.** The proxy does not offer TLS 1.3, or strict verification is enabled with a CA that did not issue the proxy's certificate.
 
-## Related
+## See Also
 
-- [Concepts - Transports](/concepts/transports) - Transport protocol details
-- [Configuration - Listeners](/configuration/listeners) - Listener configuration reference
-- [Deployment - Scenarios](/deployment/scenarios) - Other deployment patterns
+- [Configuration - Listeners](/configuration/listeners) - `plaintext`, `path`, and `advertise` reference
+- [Transports](/concepts/transports) - QUIC, HTTP/2, and WebSocket compared
+- [CLI - probe](/cli/probe) - Testing listeners and endpoints
+- [PM2 Process Manager](/deployment/pm2) - Running the agent without root
+- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Diagnosing peers that do not connect

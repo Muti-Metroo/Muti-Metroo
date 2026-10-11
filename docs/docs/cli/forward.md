@@ -1,152 +1,139 @@
-# Forward Commands
+---
+title: muti-metroo forward
+sidebar_label: forward
+sidebar_position: 16
+description: Add, remove, and list port forward listeners and endpoints on a running agent.
+---
 
-Commands for managing dynamic forward listeners and endpoints.
+# muti-metroo forward
+
+Manage [port forwarding](../features/port-forwarding.md) on a running agent without editing its configuration. Port forwarding has two halves, joined by a routing key:
+
+- A **listener** (`forward add`, `forward remove`, `forward list`) runs on the ingress side. It accepts TCP connections on a local address and sends them through the mesh to whichever agent advertises the same key.
+- An **endpoint** (`forward endpoint add`, `forward endpoint remove`, `forward endpoint list`) runs on the exit side. It advertises the key to the mesh and connects incoming streams to a local `host:port` target.
+
+The commands talk to the agent's HTTP API. Pass `-t` to act on another agent in the mesh, reached through the agent at `--agent`.
+
+Listeners and endpoints defined in the `forward` section of the configuration appear in the lists as `static` and cannot be replaced or removed at runtime. Runtime entries appear as `dynamic`. When `agent.data_dir` is set, each runtime change is recorded in the [dynamic config journal](../configuration/dynamic-config-persistence.md) and replayed on the next start. Without a `data_dir`, or if the journal cannot be written, runtime entries last until the agent restarts.
+
+`add` and `remove` are privileged operations: the agent at `--agent` must have `management.signing_private_key` configured. For a remote target, the entry agent signs the request and the target verifies it with its `management.signing_public_key`. An agent that has `management.public_key` configured without `management.private_key` refuses all `forward` commands, including `list`. See [management configuration](../configuration/management.md).
+
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
 ## forward add
-
-Add a dynamic forward listener.
 
 ```bash
 muti-metroo forward add <key> <address> [flags]
 ```
 
-### Description
+Start a forward listener on `<address>` (for example `:9090` or `127.0.0.1:9090`) that forwards connections to the endpoint advertising `<key>`. The new listener is advertised to peers right away.
 
-Adds a new forward listener that accepts TCP connections and forwards them through the mesh to port forward endpoints matching the given routing key.
+Adding a key that already exists as a dynamic listener stops the old listener and starts a new one with the new address and settings. Adding a key that exists in the configuration fails.
 
-Dynamic listeners persist across restarts when `agent.data_dir` is configured (see [Dynamic Config Persistence](/configuration/dynamic-config-persistence)); when no `data_dir` is set they remain ephemeral. For always-on listeners, use the `forward.listeners` configuration.
+The journal stores the address as given, so an address with port `0` binds a different port after every restart. Use an explicit port when the address must stay the same.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
-| `--max-connections` | | `0` | Maximum concurrent connections (0 = unlimited) |
-
-### Examples
-
-```bash
-# Add listener on local agent
-muti-metroo forward add web-server :9090
-
-# Add listener with connection limit
-muti-metroo forward add web-server :9090 --max-connections 100
-
-# Add listener on remote agent
-muti-metroo forward add web-server :9090 -t abc123def456
-
-# Add listener using short agent ID prefix
-muti-metroo forward add web-server :9090 -t abc123
-
-# Via a specific API server
-muti-metroo forward add web-server :9090 -a 192.168.1.10:8080 -t def456
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to act on: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+| `--max-connections` | `0` | Maximum concurrent connections on this listener. `0` means unlimited. |
 
 ### Output
 
+```text
+Forward listener added: forward listener "api-server" added on 127.0.0.1:9091
 ```
-Forward listener added: forward listener "web-server" added on [::]:9090
+
+### Examples
+
+Listen on port 9090 on all interfaces of the local agent:
+
+```bash
+muti-metroo forward add web-server :9090
 ```
 
-### Use Cases
+Limit the listener to 100 concurrent connections:
 
-- **Ad Hoc Port Forwarding**: Expose services through the mesh without config changes
-- **Dynamic Service Discovery**: Add listeners based on runtime conditions
-- **Testing**: Temporarily forward traffic without modifying configuration files
+```bash
+muti-metroo forward add web-server :9090 --max-connections 100
+```
 
----
+Add the listener on a remote agent:
+
+```bash
+muti-metroo forward add web-server 127.0.0.1:9090 -t abc123de
+```
 
 ## forward remove
-
-Remove a dynamic forward listener.
 
 ```bash
 muti-metroo forward remove <key> [flags]
 ```
 
-### Description
-
-Removes a previously added dynamic forward listener. The listener is stopped and removed from the agent.
-
-Only dynamic listeners can be removed via this command. Listeners defined in the `forward.listeners` configuration are protected and cannot be removed without restarting the agent.
+Stop and remove a dynamic forward listener. Listeners from the configuration cannot be removed; the command fails with exit status 5.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to act on: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+
+### Confirmation prompt
+
+```text
+Remove forward listener "web-server"?
+This closes the listening socket and rejects new ingress connections. Continue? [y/N]:
+```
+
+Answering anything other than `y` or `yes` prints `Aborted.` and exits 0. `--yes` skips the prompt; without it, a non-terminal stdin makes the command exit 6. See [confirmation prompts](overview.md#confirmation-prompts).
+
+### Output
+
+```text
+Forward listener removed: forward listener "web-server" removed
+```
 
 ### Examples
 
 ```bash
-# Remove listener from local agent
 muti-metroo forward remove web-server
-
-# Remove listener from remote agent
-muti-metroo forward remove web-server -t abc123def456
-
-# Via a specific API server
-muti-metroo forward remove web-server -a 192.168.1.10:8080 -t def456
 ```
 
-### Output
-
+```bash
+muti-metroo forward remove web-server -t abc123de -y
 ```
-Forward listener removed: forward listener "web-server" removed
-```
-
----
 
 ## forward list
-
-List all forward listeners.
 
 ```bash
 muti-metroo forward list [flags]
 ```
 
-### Description
-
-Displays all forward listeners on the target agent, including both static (config-file) and dynamic (runtime) listeners.
+List forward listeners, both from the configuration (`static`) and added at runtime (`dynamic`).
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
-| `--json` | | `false` | Output in JSON format |
-
-### Examples
-
-```bash
-# List listeners on local agent
-muti-metroo forward list
-
-# List listeners on remote agent
-muti-metroo forward list -t abc123def456
-
-# List listeners with JSON output
-muti-metroo forward list --json
-
-# Via a specific API server
-muti-metroo forward list -a 192.168.1.10:8080 -t def456
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to query: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+| `--json` | `false` | Print the list as JSON. |
 
 ### Output
 
-Standard output:
-
-```
+```text
 Forward Listeners (2)
 KEY                  ADDRESS                  TYPE     MAX_CONN
-web-server           [::]:9090                static   unlimited
-api-server           [::]:8081                dynamic  100
+web-server           127.0.0.1:9090           static   unlimited
+api-server           127.0.0.1:9091           dynamic  100
 ```
 
-JSON output:
+When there are no listeners, the command prints `No forward listeners configured`.
+
+With `--json`:
 
 ```json
 {
@@ -154,13 +141,13 @@ JSON output:
   "listeners": [
     {
       "key": "web-server",
-      "address": "[::]:9090",
+      "address": "127.0.0.1:9090",
       "max_connections": 0,
       "dynamic": false
     },
     {
       "key": "api-server",
-      "address": "[::]:8081",
+      "address": "127.0.0.1:9091",
       "max_connections": 100,
       "dynamic": true
     }
@@ -168,132 +155,123 @@ JSON output:
 }
 ```
 
----
+### Examples
+
+```bash
+muti-metroo forward list
+```
+
+```bash
+muti-metroo forward list -t abc123de --json
+```
 
 ## forward endpoint add
-
-Add a dynamic forward endpoint.
 
 ```bash
 muti-metroo forward endpoint add <key> <target> [flags]
 ```
 
-### Description
+Register `<key>` on the agent and connect streams for it to `<target>`, a `host:port` reachable from that agent. The key is advertised to the mesh so that listeners on other agents can reach the target.
 
-Registers a new routing key on the agent pointing at a local `host:port` target. The endpoint is advertised to the mesh so listeners on peer agents can reach the target through this agent.
-
-Dynamic endpoints persist across restarts when `agent.data_dir` is configured (see [Dynamic Config Persistence](/configuration/dynamic-config-persistence)); when no `data_dir` is set they remain ephemeral. For always-on endpoints, use the `forward.endpoints` configuration.
+Adding a key that already exists as a dynamic endpoint replaces its target. Adding a key that exists in the configuration fails.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to act on: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
 
-### Examples
-
-```bash
-# Add endpoint on local agent
-muti-metroo forward endpoint add web-server 127.0.0.1:3000
-
-# Add on a remote agent
-muti-metroo forward endpoint add web-server 127.0.0.1:3000 -t abc123def456
-
-# Via a specific API server
-muti-metroo forward endpoint add web-server 127.0.0.1:3000 -a 192.168.1.10:8080 -t def456
-```
+The `--target` flag selects the agent; the positional `<target>` argument is the service address.
 
 ### Output
 
-```
-Forward endpoint added: forward endpoint "web-server" added -> 127.0.0.1:3000
+```text
+Forward endpoint added: forward endpoint "db" added -> 127.0.0.1:5432
 ```
 
----
+### Examples
+
+Expose a local web server under the key `web-server`:
+
+```bash
+muti-metroo forward endpoint add web-server 127.0.0.1:3000
+```
+
+Add the endpoint on a remote agent:
+
+```bash
+muti-metroo forward endpoint add web-server 127.0.0.1:3000 -t abc123de
+```
 
 ## forward endpoint remove
-
-Remove a dynamic forward endpoint.
 
 ```bash
 muti-metroo forward endpoint remove <key> [flags]
 ```
 
-### Description
-
-Removes a previously added dynamic forward endpoint. The routing key is unregistered from the handler and a per-route `RouteWithdraw` is flooded to all connected peers immediately, so they prune the key from their routing tables without waiting for `route_ttl` to elapse. Only dynamic endpoints can be removed; endpoints declared in `forward.endpoints` are protected.
+Remove a dynamic forward endpoint. The agent withdraws the key from the mesh right away, so peers drop the route without waiting for `routing.route_ttl` to expire. Endpoints from the configuration cannot be removed; the command fails with exit status 5.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to act on: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+
+### Confirmation prompt
+
+```text
+Remove forward endpoint "web-server"?
+Ingress agents will no longer be able to route to this exit. Continue? [y/N]:
+```
+
+Declining, `--yes`, and non-terminal stdin behave as for `forward remove`.
+
+### Output
+
+```text
+Forward endpoint removed: forward endpoint "web-server" removed
+```
 
 ### Examples
 
 ```bash
-# Remove endpoint from local agent
 muti-metroo forward endpoint remove web-server
-
-# Remove endpoint from remote agent
-muti-metroo forward endpoint remove web-server -t abc123def456
 ```
 
-### Output
-
+```bash
+muti-metroo forward endpoint remove web-server -t abc123de -y
 ```
-Forward endpoint removed: forward endpoint "web-server" removed
-```
-
----
 
 ## forward endpoint list
-
-List all forward endpoints.
 
 ```bash
 muti-metroo forward endpoint list [flags]
 ```
 
-### Description
-
-Displays all forward endpoints on the target agent, including both static (config-file) and dynamic (runtime) entries.
+List forward endpoints, both from the configuration (`static`) and added at runtime (`dynamic`).
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
-| `--json` | | `false` | Output in JSON format |
-
-### Examples
-
-```bash
-# List endpoints on local agent
-muti-metroo forward endpoint list
-
-# List endpoints on a remote agent
-muti-metroo forward endpoint list -t abc123def456
-
-# JSON output
-muti-metroo forward endpoint list --json
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address used as the entry point. See [agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | ID of the agent to query: a full 32-character ID or a unique prefix of one. Omit for the agent at `--agent`. |
+| `--json` | `false` | Print the list as JSON. |
 
 ### Output
 
-Standard output:
-
-```
+```text
 Forward Endpoints (2)
 KEY                  TARGET                   TYPE
 web-server           127.0.0.1:3000           static
-api-server           127.0.0.1:4000           dynamic
+db                   127.0.0.1:5432           dynamic
 ```
 
-JSON output:
+When there are no endpoints, the command prints `No forward endpoints configured`.
+
+With `--json`:
 
 ```json
 {
@@ -305,52 +283,28 @@ JSON output:
       "dynamic": false
     },
     {
-      "key": "api-server",
-      "target": "127.0.0.1:4000",
+      "key": "db",
+      "target": "127.0.0.1:5432",
       "dynamic": true
     }
   ]
 }
 ```
 
----
+### Examples
 
-## Authorization
-
-### Management Key Restriction
-
-Dynamic forward listener modifications are restricted when the mesh is configured with management key encryption, following the same rules as dynamic route management.
-
-If an agent has `management.public_key` configured but does NOT have the corresponding `management.private_key`, forward add/remove commands are rejected with HTTP 403 Forbidden.
-
----
-
-## Important Notes
-
-### Persistence
-
-Dynamic listeners survive agent restarts when `agent.data_dir` is configured: every add/remove is appended to a [dynamic config journal](/configuration/dynamic-config-persistence) under `data_dir/dynamic-config.log` and replayed on the next start. The address string is persisted verbatim, so `:0` (ephemeral port) produces a different bound port on each restart; specify an explicit port if you need a stable address across restarts.
-
-If no `data_dir` is configured, or the journal file cannot be written (bad permissions, read-only filesystem, disk full), the runtime mutation still succeeds but remains ephemeral.
-
-For always-on listeners, use the `forward.listeners` configuration in `config.yaml`:
-
-```yaml
-forward:
-  listeners:
-    - key: "web-server"
-      address: ":9090"
-      max_connections: 100
+```bash
+muti-metroo forward endpoint list
 ```
 
-### Node Info Propagation
+```bash
+muti-metroo forward endpoint list -t abc123de --json
+```
 
-After adding or removing a listener, the change is immediately advertised to peers via node info. No manual action is required.
+## See Also
 
-### Replacing Dynamic Listeners
-
-Re-adding a dynamic listener with the same key stops the old listener and starts a new one with the updated address and settings. Config-file listeners cannot be replaced.
-
-### Short Agent ID Prefixes
-
-The `--target` flag accepts short agent ID prefixes, same as the `route` command.
+- [Port forwarding](../features/port-forwarding.md): how listeners, endpoints, and routing keys work together
+- [Forward configuration](../configuration/forward.md): define permanent listeners and endpoints in YAML
+- [Forward management API](../api/forward-management.md): the HTTP endpoints behind these commands
+- [Dynamic config persistence](../configuration/dynamic-config-persistence.md): how runtime changes survive restarts
+- [route](route.md): manage CIDR exit routes at runtime

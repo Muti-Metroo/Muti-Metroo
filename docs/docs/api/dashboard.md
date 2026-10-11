@@ -1,249 +1,403 @@
 ---
-title: Dashboard API Endpoints
+title: Dashboard Endpoints
+description: JSON endpoints for dashboards and integrations - agent overview, topology, node details, mesh test, interfaces, and setup defaults.
+sidebar_position: 16
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-presenting.png" alt="Mole presenting dashboard" style={{maxWidth: '180px'}} />
 </div>
 
-# Dashboard API Endpoints
+# Dashboard Endpoints
 
-Fetch topology data, dashboard overview, node details, and run mesh connectivity tests via JSON API endpoints.
+The `/api/` endpoints return JSON for dashboards and other integrations. The agent does not serve a web interface itself; [Muti Metroo Manager](/muti-metroo-manager) is a web dashboard that reads these endpoints, and Mutiauk reads `/api/dashboard` for routes and mesh hostnames.
+
+The endpoints belong to the dashboard group (`http.dashboard`, enabled by default). When the group is disabled, every `/api/` path returns `404`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `GET /api/dashboard` | Local agent, statistics, peers, routes, forwards, and mesh hostnames |
+| `GET /api/topology` | Every known agent and the links between them |
+| `GET /api/nodes` | System details of every known agent |
+| `GET /api/mesh-test`, `POST /api/mesh-test` | Reachability test of every known agent |
+| `GET /api/interfaces` | IP addresses of the local agent |
+| `GET /api/setup-defaults` | Non-secret defaults for generating a new agent's configuration |
+| `POST /api/probe` | Probe a listener; see [Probe Endpoints](/api/probe) |
+
+When the agent has `management.public_key` without `management.private_key`, `/api/dashboard`, `/api/topology`, `/api/nodes`, and `/api/mesh-test` report only the local agent.
+
+## `GET /api/dashboard`
 
 ```bash
-# Get dashboard overview
-curl http://localhost:8080/api/dashboard | jq
-
-# Get topology data
-curl http://localhost:8080/api/topology | jq
+curl http://localhost:8080/api/dashboard
 ```
 
-## GET /api/dashboard
-
-Dashboard overview data.
-
-**Response:**
+**Response (200):**
 
 ```json
 {
   "agent": {
-    "id": "abc123def456789012345678901234ab",
-    "short_id": "abc123de",
-    "display_name": "My Agent",
+    "id": "93cdf211bb05aa48900a61ab6699fbdd",
+    "short_id": "93cdf211",
+    "display_name": "gateway",
     "is_local": true,
     "is_connected": true
   },
   "stats": {
-    "peer_count": 3,
-    "stream_count": 42,
-    "route_count": 5,
+    "peer_count": 1,
+    "stream_count": 0,
+    "route_count": 2,
     "socks5_running": true,
-    "exit_handler_running": false
+    "exit_handler_running": false,
+    "can_sign_management": true,
+    "accepts_signed_management": true
   },
   "peers": [
     {
-      "id": "def456789012345678901234567890cd",
-      "short_id": "def45678",
-      "display_name": "Peer 1",
-      "state": "connected",
-      "rtt_ms": 15,
-      "is_dialer": true
+      "id": "653422d2fc10b554514c5cbe6e6cd6cd",
+      "short_id": "653422d2",
+      "display_name": "transit",
+      "state": "CONNECTED",
+      "rtt_ms": 0,
+      "is_dialer": false
     }
   ],
   "routes": [
     {
-      "network": "10.0.0.0/8",
-      "origin": "Exit Node",
-      "origin_id": "exit1234",
+      "network": "10.20.0.0/16",
+      "route_type": "cidr",
+      "origin": "exit-1",
+      "origin_id": "331974cd",
       "hop_count": 2,
-      "path_display": ["My Agent", "Transit", "Exit Node"]
+      "path_display": ["gateway", "transit", "exit-1"],
+      "path_ids": ["93cdf211", "653422d2", "331974cd"],
+      "tcp": true,
+      "udp": true,
+      "comment": "lab network"
+    },
+    {
+      "network": "*.example.com",
+      "route_type": "domain",
+      "origin": "exit-1",
+      "origin_id": "331974cd",
+      "hop_count": 2,
+      "path_display": ["gateway", "transit", "exit-1"],
+      "path_ids": ["93cdf211", "653422d2", "331974cd"],
+      "tcp": true,
+      "udp": true
+    }
+  ],
+  "domain_routes": [
+    {
+      "pattern": "*.example.com",
+      "is_wildcard": true,
+      "origin": "exit-1",
+      "origin_id": "331974cd",
+      "hop_count": 2,
+      "path_display": ["gateway", "transit", "exit-1"],
+      "path_ids": ["93cdf211", "653422d2", "331974cd"],
+      "tcp": true,
+      "udp": true
     }
   ],
   "forward_routes": [
     {
-      "key": "web-server",
-      "ingress_agent": "Ingress Node",
-      "ingress_agent_id": "ingr1234",
-      "listener_address": ":9080",
-      "exit_agent": "Exit Node",
-      "exit_agent_id": "exit1234",
-      "target": "localhost:3000",
+      "key": "web",
+      "ingress_agent": "gateway",
+      "ingress_agent_id": "93cdf211",
+      "listener_address": "127.0.0.1:9090",
+      "exit_agent": "exit-1",
+      "exit_agent_id": "331974cd",
+      "target": "127.0.0.1:3000",
       "hop_count": 2,
-      "path_display": ["Ingress Node", "Exit Node"],
-      "path_ids": ["ingr1234", "exit1234"]
+      "path_display": ["gateway", "exit-1"],
+      "path_ids": ["93cdf211", "331974cd"]
     }
   ],
-  "mesh_hosts_suffixes": ["mesh"],
   "mesh_hosts": [
-    { "name": "gateway.mesh", "ipv4": "10.0.0.1", "ipv6": "fd00::1" },
-    { "name": "target-11.mesh", "ipv4": "10.8.0.11", "comment": "edge worker" }
-  ]
+    {
+      "name": "db.mesh",
+      "ipv4": "10.20.0.20",
+      "comment": "database"
+    }
+  ],
+  "mesh_hosts_suffixes": ["mesh"]
 }
 ```
 
-### Forward Routes Fields
+| Field | Description |
+| ----- | ----------- |
+| `agent` | Local agent identity: `id`, `short_id`, `display_name`, `is_local`, `is_connected` |
+| `stats` | Same statistics as [`GET /healthz`](/api/health#get-healthz) |
+| `peers[]` | Direct peers: `id`, `short_id`, `display_name`, `state`, `rtt_ms`, `is_dialer` (this agent opened the connection), and `unresponsive` (present and `true` when the round-trip time exceeds 60 seconds) |
+| `routes[]` | CIDR routes first, then domain routes, each sorted by network |
+| `domain_routes[]` | Domain routes only, with `pattern` and `is_wildcard`; omitted when there are none |
+| `forward_routes[]` | Port forward listener and endpoint pairs; omitted when there are none |
+| `mesh_hosts[]` | Mesh hostname registry entries; omitted when empty. See [Hosts Management](/api/hosts-management). |
+| `mesh_hosts_suffixes` | Active hostname suffixes; omitted when empty |
 
-The `forward_routes` array contains ingress-exit pairs for port forwarding:
+`routes[]` fields:
 
-| Field              | Description                                |
-| ------------------ | ------------------------------------------ |
-| `key`              | Routing key linking listeners to endpoints |
-| `ingress_agent`    | Display name of the ingress agent          |
-| `ingress_agent_id` | Short ID of the ingress agent              |
-| `listener_address` | Listen address on the ingress agent        |
-| `exit_agent`       | Display name of the exit agent             |
-| `exit_agent_id`    | Short ID of the exit agent                 |
-| `target`           | Target service address on the exit         |
-| `hop_count`        | Hops from ingress to exit agent            |
-| `path_display`     | Agent names in the path                    |
-| `path_ids`         | Short IDs for path highlighting            |
+| Field | Description |
+| ----- | ----------- |
+| `network` | CIDR prefix or domain pattern |
+| `route_type` | `cidr` or `domain` |
+| `origin`, `origin_id` | Display name and short ID of the advertising agent |
+| `hop_count` | Hops to the origin |
+| `path_display`, `path_ids` | Display names and short IDs from this agent to the origin |
+| `tcp` | Always `true` |
+| `udp` | The origin has UDP relay enabled |
+| `comment` | Route comment, when set |
+| `source_ip`, `interface` | Outbound binding; present only for routes this agent originates |
 
-When multiple ingress agents have listeners for the same key, or multiple exit agents have endpoints, all combinations are returned.
+`forward_routes[]` lists every combination of an agent with a forward listener and an agent with a forward endpoint for the same `key`:
 
-### Mesh Hosts Fields
+| Field | Description |
+| ----- | ----------- |
+| `key` | Routing key |
+| `ingress_agent`, `ingress_agent_id` | Agent with the listener |
+| `listener_address` | Listen address on the ingress agent |
+| `exit_agent`, `exit_agent_id` | Agent with the endpoint |
+| `target` | Endpoint target address |
+| `hop_count` | Hops between the ingress and exit agents |
+| `path_display`, `path_ids` | Ingress and exit agent |
 
-The `mesh_hosts` array and `mesh_hosts_suffixes` list expose the agent's mesh hostname registry (the merged config + dynamic set) and the active TLD set. Mutiauk's autoroutes poller reads these to populate its in-process DNS server, and the agent itself consults the registry for SOCKS5 dial and route-trace hostname resolution. The fields are omitted when no entries / suffixes are configured.
+## `GET /api/topology`
 
-| Field                  | Description                                                                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `mesh_hosts_suffixes`  | Active TLD suffix set (default `["mesh"]`, no leading dots). Includes runtime add/remove mutations made via `/hosts/suffixes/manage` |
-| `mesh_hosts[].name`    | Hostname including suffix, e.g. `target-11.mesh`                                                                                     |
-| `mesh_hosts[].ipv4`    | Optional IPv4 address                                                                                                                |
-| `mesh_hosts[].ipv6`    | Optional IPv6 address                                                                                                                |
-| `mesh_hosts[].comment` | Optional free-text comment                                                                                                           |
+Returns every agent the local agent knows about and the links between them.
 
-See [Hosts Configuration](/configuration/hosts) for the YAML schema and [Hosts Management API](/api/hosts-management) for runtime mutation of both hosts and suffixes.
+```bash
+curl http://localhost:8080/api/topology
+```
 
-## GET /api/topology
-
-Mesh topology data for visualization.
-
-**Response:**
+**Response (200):**
 
 ```json
 {
   "local_agent": {
-    "id": "abc123def456789012345678901234ab",
-    "short_id": "abc123de",
-    "display_name": "My Agent",
+    "id": "93cdf211bb05aa48900a61ab6699fbdd",
+    "short_id": "93cdf211",
+    "display_name": "gateway",
     "is_local": true,
     "is_connected": true,
-    "hostname": "server1.example.com",
+    "hostname": "gw-01",
     "os": "linux",
     "arch": "amd64",
-    "version": "1.0.7",
-    "uptime_hours": 24.5,
-    "ip_addresses": ["192.168.1.10", "10.0.0.1"],
-    "roles": ["ingress"],
-    "socks5_addr": ":1080",
-    "shells": ["bash", "sh", "zsh"],
-    "shell_enabled": true
+    "version": "v4.10.6",
+    "pid": 20749,
+    "uptime_hours": 26.5,
+    "ip_addresses": ["192.168.1.10"],
+    "roles": ["ingress", "forward_ingress"],
+    "socks5_addr": "127.0.0.1:1080",
+    "udp_enabled": true,
+    "forward_listeners": ["web"]
   },
   "agents": [
     {
-      "id": "abc123def456789012345678901234ab",
-      "short_id": "abc123de",
-      "display_name": "My Agent",
+      "id": "93cdf211bb05aa48900a61ab6699fbdd",
+      "short_id": "93cdf211",
+      "display_name": "gateway",
       "is_local": true,
       "is_connected": true,
-      "hostname": "server1.example.com",
+      "hostname": "gw-01",
       "os": "linux",
       "arch": "amd64",
-      "version": "1.0.7",
-      "uptime_hours": 24.5,
-      "ip_addresses": ["192.168.1.10", "10.0.0.1"],
-      "roles": ["ingress"],
-      "socks5_addr": ":1080",
-      "shells": ["bash", "sh", "zsh"],
-      "shell_enabled": true
+      "version": "v4.10.6",
+      "pid": 20749,
+      "uptime_hours": 26.5,
+      "ip_addresses": ["192.168.1.10"],
+      "roles": ["ingress", "forward_ingress"],
+      "socks5_addr": "127.0.0.1:1080",
+      "udp_enabled": true,
+      "forward_listeners": ["web"]
     },
     {
-      "id": "def456789012345678901234567890cd",
-      "short_id": "def45678",
-      "display_name": "Peer 1",
+      "id": "653422d2fc10b554514c5cbe6e6cd6cd",
+      "short_id": "653422d2",
+      "display_name": "transit",
       "is_local": false,
       "is_connected": true,
-      "hostname": "peer1.example.com",
+      "hostname": "relay-01",
       "os": "linux",
       "arch": "amd64",
-      "version": "1.0.7",
-      "uptime_hours": 48.0,
-      "ip_addresses": ["192.168.1.20"],
-      "roles": ["exit"],
-      "exit_routes": ["10.0.0.0/8", "0.0.0.0/0"],
-      "domain_routes": ["*.internal.example.com"],
+      "version": "v4.10.6",
+      "pid": 20751,
+      "uptime_hours": 26.5,
+      "ip_addresses": ["198.51.100.20"],
+      "roles": ["transit"],
       "udp_enabled": true,
-      "file_transfer_enabled": true,
-      "shells": ["bash", "sh"],
+      "icmp_enabled": true
+    },
+    {
+      "id": "331974cd4a0be0d7f945ed9d367a0211",
+      "short_id": "331974cd",
+      "display_name": "exit-1",
+      "is_local": false,
+      "is_connected": false,
+      "hostname": "exit-01",
+      "os": "linux",
+      "arch": "arm64",
+      "version": "v4.10.6",
+      "pid": 20753,
+      "uptime_hours": 26.5,
+      "ip_addresses": ["10.20.0.5"],
+      "roles": ["exit", "forward_exit"],
+      "exit_routes": ["10.20.0.0/16", "192.0.2.0/24"],
+      "domain_routes": ["*.example.com"],
+      "udp_enabled": true,
+      "forward_endpoints": ["web"],
+      "shells": ["bash", "sh", "dash"],
       "shell_enabled": true,
-      "advertised_listeners": [
-        {
-          "transport": "h2",
-          "address": "peer1.example.com:3000",
-          "path": "/mesh"
-        }
-      ]
+      "file_transfer_enabled": true,
+      "icmp_enabled": true
     }
   ],
   "connections": [
     {
-      "from_agent": "abc123de",
-      "to_agent": "def45678",
+      "from_agent": "93cdf211",
+      "to_agent": "653422d2",
       "is_direct": true,
-      "rtt_ms": 15,
       "transport": "quic",
-      "dialer": "abc123de"
+      "dialer": "653422d2"
+    },
+    {
+      "from_agent": "653422d2",
+      "to_agent": "331974cd",
+      "is_direct": false,
+      "rtt_ms": 1,
+      "transport": "h2",
+      "dialer": "331974cd"
     }
   ]
 }
 ```
 
-**`advertised_listeners`** appears on any agent whose config declares an `advertise:` block on a listener (see [Listeners Configuration](/configuration/listeners)). Empty when no listener is advertised.
+`local_agent` and each entry of `agents[]` use the agent fields in the table below. `connections[]` fields:
 
-**`dialer`** is the short ID of the agent that initiated the connection. Useful for direction arrows in topology renders. Empty when unknown.
+| Field | Description |
+| ----- | ----------- |
+| `from_agent`, `to_agent` | Short IDs of the two agents |
+| `is_direct` | `true` for links of the local agent; `false` for links reported by other agents |
+| `rtt_ms` | Round-trip time in milliseconds; omitted when `0` |
+| `unresponsive` | Present and `true` when the round-trip time exceeds 60 seconds |
+| `transport` | `quic`, `h2`, or `ws` |
+| `dialer` | Short ID of the agent that opened the connection; omitted when unknown |
 
-## GET/POST /api/mesh-test
+### Agent fields
 
-Test connectivity to all known agents in the mesh. GET returns cached results (30-second TTL), POST forces a fresh test.
+Used by `/api/topology` and `/api/nodes`. Fields without a value are omitted.
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `id`, `short_id` | string | Full and short agent ID |
+| `display_name` | string | Display name, or the short ID when none is set |
+| `is_local` | boolean | The agent serving the request |
+| `is_connected` | boolean | A direct peer of the local agent (always `true` for the local agent) |
+| `hostname`, `os`, `arch`, `version`, `pid` | | System details reported by the agent |
+| `uptime_hours` | number | Agent uptime in hours |
+| `ip_addresses` | string[] | Up to 10 non-loopback IPv4 addresses |
+| `roles` | string[] | `ingress`, `exit`, `forward_ingress`, `forward_exit`, or `transit` when none apply. `/api/topology` only. |
+| `socks5_addr` | string | SOCKS listen address; local agent in `/api/topology` only |
+| `exit_routes`, `domain_routes` | string[] | Routes the agent advertises. `/api/topology` only. |
+| `forward_listeners` | string[] | Forward listener keys |
+| `forward_endpoints` | string[] | Forward endpoint keys. `/api/topology` only. |
+| `udp_enabled` | boolean | UDP relay enabled |
+| `shells` | string[] | Shells available for management commands |
+| `shell_enabled`, `file_transfer_enabled`, `icmp_enabled` | boolean | Management commands, file transfer, and ICMP are enabled. Reported for remote agents only, because these features are used through `/agents/{id}/...` and cannot target the local agent. |
+| `advertised_listeners` | object[] | Public dial targets the agent advertises, each with `transport`, `address`, and `path`. See [Listeners Configuration](/configuration/listeners). |
+
+## `GET /api/nodes`
+
+Returns the system details of the local agent and of every agent that has sent node information, without roles or routes.
 
 ```bash
-# Fresh test
-curl -X POST http://localhost:8080/api/mesh-test | jq
-
-# Cached results
-curl http://localhost:8080/api/mesh-test | jq
+curl http://localhost:8080/api/nodes
 ```
 
-**Response:**
+**Response (200):**
 
 ```json
 {
-  "local_agent": "abc123de",
-  "test_time": "2026-01-27T10:30:00Z",
-  "duration_ms": 1200,
-  "total_count": 5,
-  "reachable_count": 4,
+  "nodes": [
+    {
+      "id": "93cdf211bb05aa48900a61ab6699fbdd",
+      "short_id": "93cdf211",
+      "display_name": "gateway",
+      "is_local": true,
+      "is_connected": true,
+      "hostname": "gw-01",
+      "os": "linux",
+      "arch": "amd64",
+      "version": "v4.10.6",
+      "pid": 20749,
+      "uptime_hours": 26.5,
+      "ip_addresses": ["192.168.1.10"],
+      "udp_enabled": true,
+      "forward_listeners": ["web"]
+    },
+    {
+      "id": "331974cd4a0be0d7f945ed9d367a0211",
+      "short_id": "331974cd",
+      "display_name": "exit-1",
+      "is_local": false,
+      "is_connected": false,
+      "hostname": "exit-01",
+      "os": "linux",
+      "arch": "arm64",
+      "version": "v4.10.6",
+      "pid": 20753,
+      "uptime_hours": 26.5,
+      "ip_addresses": ["10.20.0.5"],
+      "udp_enabled": true,
+      "shells": ["bash", "sh", "dash"],
+      "shell_enabled": true,
+      "file_transfer_enabled": true,
+      "icmp_enabled": true
+    }
+  ]
+}
+```
+
+The local agent is first; the order of the other entries is not fixed. Fields are described under [Agent fields](#agent-fields).
+
+## `GET, POST /api/mesh-test`
+
+Sends a status request to every known agent and reports which ones answered. `POST` always runs a new test. `GET` returns the result of the last test if it is less than 30 seconds old, and runs a new test otherwise. Each agent gets up to 10 seconds to answer. The [`muti-metroo mesh-test`](/cli/mesh-test) command calls this endpoint.
+
+```bash
+curl -X POST http://localhost:8080/api/mesh-test
+```
+
+**Response (200):**
+
+```json
+{
+  "local_agent": "93cdf211",
+  "test_time": "2026-10-11T14:52:10.393997+03:00",
+  "duration_ms": 12,
+  "total_count": 3,
+  "reachable_count": 2,
   "results": [
     {
-      "agent_id": "abc123def456789012345678901234ab",
-      "short_id": "abc123de",
-      "display_name": "gateway-1",
+      "agent_id": "93cdf211bb05aa48900a61ab6699fbdd",
+      "short_id": "93cdf211",
+      "display_name": "gateway",
       "is_local": true,
       "reachable": true,
       "response_time_ms": 0
     },
     {
-      "agent_id": "def456789012345678901234567890cd",
-      "short_id": "def45678",
-      "display_name": "exit-us-west",
+      "agent_id": "653422d2fc10b554514c5cbe6e6cd6cd",
+      "short_id": "653422d2",
+      "display_name": "transit",
       "is_local": false,
       "reachable": true,
-      "response_time_ms": 45
+      "response_time_ms": 3
     },
     {
-      "agent_id": "fed987654321098765432109876543ef",
-      "short_id": "fed98765",
-      "display_name": "exit-offline",
+      "agent_id": "331974cd4a0be0d7f945ed9d367a0211",
+      "short_id": "331974cd",
+      "display_name": "exit-1",
       "is_local": false,
       "reachable": false,
       "response_time_ms": -1,
@@ -253,145 +407,32 @@ curl http://localhost:8080/api/mesh-test | jq
 }
 ```
 
-### Result Fields
+| Field | Description |
+| ----- | ----------- |
+| `local_agent` | Short ID of the agent that ran the test |
+| `test_time` | When the test started |
+| `duration_ms` | Test duration in milliseconds |
+| `total_count`, `reachable_count` | Agents tested and agents that answered |
+| `results[].agent_id`, `short_id`, `display_name`, `is_local` | Agent identity |
+| `results[].reachable` | The agent answered |
+| `results[].response_time_ms` | Round-trip time in milliseconds; `-1` when the request could not be delivered |
+| `results[].error` | Failure reason; present only for unreachable agents |
 
-| Field             | Description                            |
-| ----------------- | -------------------------------------- |
-| `local_agent`     | Short ID of the agent running the test |
-| `test_time`       | When the test was performed            |
-| `duration_ms`     | Total test duration in milliseconds    |
-| `total_count`     | Number of agents tested                |
-| `reachable_count` | Number of reachable agents             |
-| `results`         | Per-agent test results                 |
+Methods other than `GET` and `POST` return `405`.
 
-### Per-Agent Result Fields
+## `GET /api/interfaces`
 
-| Field              | Description                         |
-| ------------------ | ----------------------------------- |
-| `agent_id`         | Full agent ID                       |
-| `short_id`         | Short agent ID                      |
-| `display_name`     | Agent display name                  |
-| `is_local`         | Whether this is the local agent     |
-| `reachable`        | Whether the agent responded         |
-| `response_time_ms` | Response time (-1 if unreachable)   |
-| `error`            | Error message (only if unreachable) |
+Lists every IP address on the local agent's up interfaces, IPv4 and IPv6, including loopback and link-local addresses. Use it to choose a `source_ip` for a route (see [Route Management](/api/route-management#set_source_ip)). The remote equivalent is [`GET /agents/{id}/interfaces`](/api/agents#get-agentsidinterfaces).
 
-Also available via CLI: `muti-metroo mesh-test`
-
-For probing a single listener (rather than every mesh agent), see the
-[Probe API](/api/probe). The probe endpoint exposes the same operation as
-the `muti-metroo probe` CLI over HTTP and is gated by the same `http.dashboard`
-toggle.
-
-## GET /api/nodes
-
-Detailed node information for all known agents.
-
-**Response:**
-
-```json
-{
-  "nodes": [
-    {
-      "id": "abc123def456789012345678901234ab",
-      "short_id": "abc123de",
-      "display_name": "Agent 1",
-      "is_local": true,
-      "is_connected": true,
-      "hostname": "agent1.example.com",
-      "os": "linux",
-      "arch": "amd64",
-      "version": "1.0.7",
-      "uptime_hours": 24.5,
-      "ip_addresses": ["192.168.1.10", "10.0.0.1"],
-      "roles": ["ingress", "exit"],
-      "socks5_addr": ":1080",
-      "exit_routes": ["10.0.0.0/8"],
-      "udp_enabled": true,
-      "file_transfer_enabled": true,
-      "shells": ["bash", "sh", "zsh"],
-      "shell_enabled": true
-    },
-    {
-      "id": "def456789012345678901234567890cd",
-      "short_id": "def45678",
-      "display_name": "Agent 2",
-      "is_local": false,
-      "is_connected": true,
-      "hostname": "agent2.example.com",
-      "os": "darwin",
-      "arch": "arm64",
-      "version": "1.0.7",
-      "uptime_hours": 12.0,
-      "ip_addresses": ["192.168.1.20"],
-      "roles": ["transit"]
-    }
-  ]
-}
+```bash
+curl http://localhost:8080/api/interfaces
 ```
 
-### Node Fields
-
-| Field                   | Type     | Description                                                                                                                |
-| ----------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `id`                    | string   | Full 32-character agent ID                                                                                                 |
-| `short_id`              | string   | Short 8-character agent ID                                                                                                 |
-| `display_name`          | string   | Human-readable agent name                                                                                                  |
-| `is_local`              | boolean  | Whether this is the queried agent                                                                                          |
-| `is_connected`          | boolean  | Whether the agent is a direct peer                                                                                         |
-| `hostname`              | string   | System hostname                                                                                                            |
-| `os`                    | string   | Operating system (e.g., `linux`, `darwin`, `windows`)                                                                      |
-| `arch`                  | string   | CPU architecture (e.g., `amd64`, `arm64`)                                                                                  |
-| `version`               | string   | Agent version                                                                                                              |
-| `pid`                   | number   | Operating-system process ID of the agent (best-effort; populated for both local and remote agents, omitted when unknown).  |
-| `uptime_hours`          | number   | Agent uptime in hours                                                                                                      |
-| `ip_addresses`          | string[] | Non-loopback IPv4 addresses                                                                                                |
-| `roles`                 | string[] | Agent roles: `ingress`, `exit`, `transit`, `forward_ingress`, `forward_exit`                                               |
-| `socks5_addr`           | string   | SOCKS5 listen address (ingress agents only)                                                                                |
-| `exit_routes`           | string[] | Advertised CIDR routes (exit agents only)                                                                                  |
-| `domain_routes`         | string[] | Advertised domain patterns (exit agents only)                                                                              |
-| `udp_enabled`           | boolean  | Whether UDP relay is enabled                                                                                               |
-| `file_transfer_enabled` | boolean  | Whether file transfer is enabled                                                                                           |
-| `forward_listeners`     | string[] | Port forward listener keys (forward ingress agents only)                                                                   |
-| `forward_endpoints`     | string[] | Port forward endpoint keys (forward exit agents only)                                                                      |
-| `shells`                | string[] | Available shells detected on the agent (e.g., `["bash", "sh", "zsh"]`). Only present when management commands are enabled. |
-| `shell_enabled`         | boolean  | Whether management commands are enabled on the agent                                                                       |
-| `icmp_enabled`          | boolean  | Whether ICMP ping is enabled on the agent                                                                                  |
-
-## GET /api/interfaces
-
-Lists every IP address assigned to the agent's up network interfaces, IPv4 and
-IPv6 alike. Unlike the `ip_addresses` field above (which is non-loopback IPv4
-only and capped), this is the complete set. It feeds the route source-IP picker:
-a route can bind its outbound dial to one of these local addresses (see
-[Route Management API](/api/route-management)). Read-only; gated by the same
-`http.dashboard` toggle.
-
-The remote variant `GET /agents/{id}/interfaces` returns the addresses of a
-remote agent over the mesh control channel - useful when binding a source IP on
-an exit agent you are managing remotely.
-
-**Response:**
+**Response (200):**
 
 ```json
 {
   "addresses": [
-    {
-      "interface": "eth0",
-      "ip": "192.168.1.42",
-      "family": "ipv4",
-      "loopback": false,
-      "link_local": false,
-      "global": true
-    },
-    {
-      "interface": "eth0",
-      "ip": "fd00::42",
-      "family": "ipv6",
-      "loopback": false,
-      "link_local": false,
-      "global": true
-    },
     {
       "interface": "lo",
       "ip": "127.0.0.1",
@@ -399,33 +440,114 @@ an exit agent you are managing remotely.
       "loopback": true,
       "link_local": false,
       "global": false
+    },
+    {
+      "interface": "eth0",
+      "ip": "192.168.1.10",
+      "family": "ipv4",
+      "loopback": false,
+      "link_local": false,
+      "global": true
+    },
+    {
+      "interface": "eth0",
+      "ip": "fe80::c39:f90e:431b:f479",
+      "family": "ipv6",
+      "loopback": false,
+      "link_local": true,
+      "global": false
     }
   ]
 }
 ```
 
-### Address Fields
+| Field | Description |
+| ----- | ----------- |
+| `interface` | Interface name |
+| `ip` | Address |
+| `family` | `ipv4` or `ipv6` |
+| `loopback` | Loopback address |
+| `link_local` | Link-local address |
+| `global` | Neither loopback nor link-local |
 
-| Field        | Type    | Description                               |
-| ------------ | ------- | ----------------------------------------- |
-| `interface`  | string  | Interface name (e.g. `eth0`)              |
-| `ip`         | string  | Address literal                           |
-| `family`     | string  | `ipv4` or `ipv6`                          |
-| `loopback`   | boolean | Address is a loopback address             |
-| `link_local` | boolean | Address is link-local                     |
-| `global`     | boolean | Routable: neither loopback nor link-local |
+## `GET /api/setup-defaults`
 
-## Examples
+Returns settings from this agent that a configuration wizard can copy into a new agent's configuration, such as the CA certificate, management public keys, and how to reach this agent as a peer. Private keys and this agent's certificate are never included. The response carries `Cache-Control: no-store`.
 
 ```bash
-# Get dashboard data
-curl http://localhost:8080/api/dashboard
-
-# Get topology
-curl http://localhost:8080/api/topology
-
-# Get node details
-curl http://localhost:8080/api/nodes
+curl http://localhost:8080/api/setup-defaults
 ```
 
-See [HTTP Configuration](/configuration/http) for endpoint access options.
+**Response (200):**
+
+```json
+{
+  "agent_id": "93cdf211bb05aa48900a61ab6699fbdd",
+  "display_name": "gateway",
+  "version": "v4.10.6",
+  "tls": {
+    "ca_pem": "",
+    "strict": false,
+    "mtls": false,
+    "self_signed": true
+  },
+  "management": {
+    "enabled": false,
+    "public_key": "",
+    "has_private_key": false,
+    "signing_public_key": "123101429cb2e1af6caeba09957d986ba1f46cdb0944d68c17d5b20ef28dcf46",
+    "has_signing_private_key": true
+  },
+  "listener": {
+    "transport": "quic",
+    "address": "0.0.0.0:4433",
+    "path": "",
+    "plaintext": false
+  },
+  "suggested_peer": {
+    "address": "192.168.1.10:4433",
+    "transport": "quic",
+    "expected_id": "93cdf211bb05aa48900a61ab6699fbdd"
+  },
+  "http": {
+    "enabled": true
+  },
+  "shell": {
+    "enabled": false
+  },
+  "file_transfer": {
+    "enabled": false
+  }
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `agent_id`, `display_name`, `version` | This agent |
+| `tls.ca_pem` | CA certificate PEM, empty when none is configured |
+| `tls.strict`, `tls.mtls` | TLS verification settings |
+| `tls.self_signed` | The agent uses an auto-generated certificate |
+| `management.public_key`, `management.signing_public_key` | Management public keys |
+| `management.enabled` | `management.public_key` is set |
+| `management.has_private_key`, `management.has_signing_private_key` | Whether this agent holds the private keys (the keys themselves are not returned) |
+| `listener` | The first configured listener |
+| `suggested_peer` | Peer entry for dialing this agent. An unspecified listen address such as `0.0.0.0` is replaced with the agent's first routable IPv4 address, or IPv6 when there is none. |
+| `http.token_hash` | bcrypt hash of the HTTP bearer token, when set |
+| `shell.whitelist`, `file_transfer.allowed_paths` | Present when set |
+| `shell.password_hash`, `file_transfer.password_hash` | Deprecated settings that the agent ignores; echoed when present in the configuration |
+
+## Errors
+
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 404 | HTML page | `http.dashboard` is disabled |
+| 405 | `method not allowed` | Wrong method |
+| 503 | `provider not configured` | The agent has not finished starting |
+
+## See Also
+
+- [Muti Metroo Manager](/muti-metroo-manager) - Web dashboard that uses these endpoints
+- [Agent Endpoints](/api/agents) - Status of individual remote agents
+- [Probe Endpoints](/api/probe) - Test a single listener
+- [CLI - mesh-test](/cli/mesh-test) - Mesh test from the command line
+- [HTTP Configuration](/configuration/http) - Enable or disable the dashboard group

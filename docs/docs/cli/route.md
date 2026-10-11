@@ -1,11 +1,28 @@
-# Route Commands
+---
+title: muti-metroo route
+sidebar_label: route
+sidebar_position: 14
+description: Show the live route table, manage dynamic CIDR exit routes, and trace which route an agent picks for a destination.
+---
 
-Commands for managing dynamic CIDR exit routes.
+# muti-metroo route
 
-`route status` and `route list` answer two different questions:
+Inspect and change the CIDR exit routes of a running agent. Dynamic routes let you turn a transit agent into an exit, or adjust routing, without editing the configuration file. All subcommands talk to a running agent's HTTP API.
 
-- `route status` -> "where would my traffic actually go?" (live route table the agent uses right now: next-hop, origin, metric, hop count). Replaces the deprecated top-level `muti-metroo routes`.
-- `route list` -> "what routes does my configuration define?" (config-seeded + dynamic; use `--all` to include config-seeded entries).
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
+
+`route status` and `route list` answer different questions:
+
+- `route status` shows the route table the agent uses right now: every network it has learned, with origin and hop count.
+- `route list` shows the exit routes the agent itself originates: dynamic routes by default, plus routes from `exit.routes` with `--all`.
+
+## Prerequisites
+
+- The HTTP API must be enabled with `http.remote_api: true` for every subcommand except `status`, which reads `/api/dashboard` and needs `http.dashboard: true` (see [HTTP configuration](../configuration/http.md)).
+- `add`, `remove`, `comment`, `source-ip`, and `interface` are mutations. The agent that serves the API (the one `-a` points at) must have `management.signing_private_key` configured, otherwise the request is refused. When `-t` targets a remote agent, the API agent signs the request and the target verifies it with its `management.signing_public_key`. See [Management keys](../configuration/management.md).
+- If the API agent has `management.public_key` configured without `management.private_key`, every subcommand except `status` is refused.
+
+`-t` accepts a full 32-character agent ID or a unique prefix. A prefix that matches more than one known agent is rejected; use a longer prefix.
 
 ## route status
 
@@ -13,555 +30,400 @@ Commands for managing dynamic CIDR exit routes.
 muti-metroo route status [flags]
 ```
 
-Fetch the live route table from `/api/dashboard` -- equivalent to the deprecated top-level `muti-metroo routes`. Use `--json` for machine-readable output.
+Prints the route table of the agent at `-a`. This command only queries the agent it talks to; it has no `-t` flag.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `--json` | `false` | Print the route array as JSON. |
+
+### Output
+
+The table has the columns `NETWORK`, `NEXT HOP`, `ORIGIN`, `METRIC`, `HOPS`, and `COMMENT`, followed by a `Total: N route(s)` line. `ORIGIN` identifies the exit agent that advertises the network, `HOPS` is the number of hops to it, and `COMMENT` is the operator comment attached to the route. With no routes, the table is replaced by `No routes in table.`
+
+### Examples
+
+```bash
+# Route table of the local agent
+muti-metroo route status
+
+# Route table of another agent's API
+muti-metroo route status -a 192.168.1.10:8080
+
+# Check whether any route covers 10.0.0.0/8
+muti-metroo route status --json | jq '.[] | select(.network == "10.0.0.0/8")'
+```
+
+To see which of several overlapping routes a destination would use, run [`route trace`](#route-trace).
+
+### Deprecated alias
+
+`muti-metroo routes` is a deprecated alias for `route status` with the same flags and output. It prints this line to stderr before the table:
+
+```text
+Command "routes" is deprecated, use 'muti-metroo route status' (same data; cleaner naming alongside 'muti-metroo route list')
+```
+
+The alias does not appear in `muti-metroo help`. See [Deprecated commands and flags](overview.md#deprecated-commands-and-flags).
 
 ## route add
-
-Add a dynamic CIDR exit route.
 
 ```bash
 muti-metroo route add <cidr> [flags]
 ```
 
-### Description
+Adds a dynamic exit route for `<cidr>` and advertises it to the mesh immediately. If the agent was not an exit before, it starts handling exit traffic for the route.
 
-Adds a new exit route for the specified CIDR range. The route is added to the target agent's exit route table and advertised to the mesh.
+Adding a default route (`0.0.0.0/0` or `::/0`) requires a typed confirmation, because the agent becomes the exit for every destination without a more specific route:
 
-Dynamic routes persist across restarts when `agent.data_dir` is configured (see [Dynamic Config Persistence](/configuration/dynamic-config-persistence)); when no `data_dir` is set they remain ephemeral. For always-on static routes, use the `exit.routes` configuration.
+```text
+0.0.0.0/0 is a DEFAULT ROUTE. Adding it advertises this agent as the exit
+for any destination not covered by a more-specific route. Type 'add default route' to confirm:
+```
+
+Anything other than the exact phrase prints `Aborted. Re-run with --allow-default-route to skip this prompt.` and exits with code 0. `--allow-default-route` or `--yes` skips the prompt; without either, a non-terminal stdin exits with code 6 (see [Confirmation prompts](overview.md#confirmation-prompts)).
 
 ### Flags
 
-| Flag          | Short | Default          | Description                                                                                                                                                                                         |
-| ------------- | ----- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent`     | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL)                                                                                                                                                     |
-| `--target`    | `-t`  |                  | Target agent ID (omit for local agent)                                                                                                                                                              |
-| `--metric`    | `-m`  | `0`              | Route metric                                                                                                                                                                                        |
-| `--comment`   |       |                  | Operator comment. Propagates with the route advertisement so other agents see the same text alongside the CIDR.                                                                                     |
-| `--source-ip` |       |                  | Local IP the exit binds outbound dials to for this CIDR (equivalent to `curl --interface`). Local-only; not advertised. Must already be bound on the exit host and match the CIDR's address family. |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that should originate the route. Omit to act on the agent at `-a`. |
+| `-m`, `--metric` | `0` | Route metric, 0 to 65535. Lower wins when two routes have the same prefix length. |
+| `--comment` | none | Operator comment. Advertised with the route, so other agents show the same text. |
+| `--source-ip` | none | Local IP the exit binds outbound connections to for this route, like `curl --interface`. Must be in the same address family as `<cidr>`. Not advertised. |
+| `--interface` | none | Network interface the exit binds outbound connections to for this route. Not advertised. See [`route interface`](#route-interface). |
+| `--allow-default-route` | `false` | Skip the typed confirmation for `0.0.0.0/0` and `::/0`. |
+
+An invalid CIDR or a `--source-ip` from the wrong address family is rejected before contacting the agent, with exit code 2.
+
+### Output
+
+```text
+Route added: route 172.16.0.0/12 added
+```
 
 ### Examples
 
 ```bash
-# Add route on local agent
+# Add a route on the local agent
 muti-metroo route add 10.0.0.0/24
 
-# Add route with metric and comment
-muti-metroo route add 10.0.0.0/24 -m 5 --comment "office LAN"
+# Add a route with a metric and a comment
+muti-metroo route add 192.168.0.0/16 -m 5 --comment "office LAN"
 
-# Pin outbound dials for this CIDR to a specific local IP on the exit
+# Bind outbound connections for this route to a local address
 muti-metroo route add 10.10.0.0/16 --source-ip 192.168.1.50
 
-# Add route on remote agent
-muti-metroo route add 10.0.0.0/24 -t abc123def456
+# Add a route on a remote agent
+muti-metroo route add 10.0.0.0/24 -t abc123de
 
-# Add route using short agent ID prefix
-muti-metroo route add 10.0.0.0/24 -t abc123
-
-# Via a specific API server
-muti-metroo route add 10.0.0.0/24 -a 192.168.1.10:8080 -t def456
+# Make a remote agent the default exit, without prompting
+muti-metroo route add 0.0.0.0/0 -t abc123de --allow-default-route
 ```
-
-### Output
-
-```
-Route added: 10.0.0.0/24 (metric 0)
-```
-
-### Use Cases
-
-- **Transit to Exit Promotion**: Convert a transit-only agent to an exit agent on the fly
-- **Dynamic Route Injection**: Add routes based on runtime conditions or automation
-- **Testing**: Temporarily expose routes without modifying configuration files
-- **Emergency Routing**: Add fallback routes during network issues
-
----
 
 ## route remove
-
-Remove a dynamic CIDR exit route.
 
 ```bash
 muti-metroo route remove <cidr> [flags]
 ```
 
-### Description
+Removes a dynamic route and immediately tells connected peers to withdraw it, so they do not wait for the route TTL to expire. Routes from `exit.routes` cannot be removed at runtime; the agent rejects the request with exit code 5.
 
-Removes a previously added dynamic exit route. The route is removed from the target agent's exit route table and a per-route `RouteWithdraw` is flooded to all connected peers immediately, so they prune the route from their tables without waiting for `route_ttl` to elapse.
+Before acting, the command asks for confirmation. When the route is found, the prompt shows its metric, kind, and comment:
 
-Only dynamic routes can be removed via this command. Routes defined in the `exit.routes` configuration are persistent and cannot be removed without restarting the agent.
+```text
+Remove route 172.16.0.0/12 (metric 5, dynamic, "lab")? [y/N]:
+```
+
+Any answer other than `y` or `yes` prints `Aborted.` and exits with code 0. `--yes` skips the prompt; without it, a non-terminal stdin exits with code 6.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                     |
-| ---------- | ----- | ---------------- | ----------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)          |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that originates the route. Omit to act on the agent at `-a`. |
+
+### Output
+
+```text
+Route removed: route 172.16.0.0/12 removed
+```
 
 ### Examples
 
 ```bash
-# Remove route from local agent
+# Remove a route from the local agent
 muti-metroo route remove 10.0.0.0/24
 
-# Remove route from remote agent
-muti-metroo route remove 10.0.0.0/24 -t abc123def456
-
-# Remove route using short agent ID prefix
-muti-metroo route remove 10.0.0.0/24 -t abc123
-
-# Via a specific API server
-muti-metroo route remove 10.0.0.0/24 -a 192.168.1.10:8080 -t def456
+# Remove a route from a remote agent without prompting
+muti-metroo route remove 10.0.0.0/24 -t abc123de --yes
 ```
-
-### Output
-
-```
-Route removed: 10.0.0.0/24
-```
-
----
 
 ## route comment
-
-Set or clear the operator comment on a CIDR exit route.
 
 ```bash
 muti-metroo route comment <cidr> <text> [flags]
 ```
 
-### Description
-
-Updates the operator-visible comment on either a config-seeded or
-dynamically-added route. Pass an empty string for `<text>` to clear the
-comment. The change is journalled to `data_dir/dynamic-config.log` and
-overrides the value from the config file -- the override survives agent
-restart.
-
-Comments propagate alongside the route advertisement, so other agents see
-the same text when they receive the route. They appear in `muti-metroo route
-list`, the Muti Metroo Manager dashboard, and `muti-metroo route trace` regardless of
-which agent originally set them.
+Sets the operator comment on a route the agent originates, dynamic or from `exit.routes`. Pass `""` as `<text>` to clear it. The comment is re-advertised immediately, and peers show it in `route status`, `route trace`, and the dashboard. A comment set this way overrides the one in the configuration file and is kept across restarts when `agent.data_dir` is set.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                     |
-| ---------- | ----- | ---------------- | ----------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)          |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that originates the route. Omit to act on the agent at `-a`. |
+
+### Output
+
+```text
+Route comment updated: route 10.0.0.0/8 comment updated
+```
 
 ### Examples
 
 ```bash
-# Set a comment on a config-seeded route (overrides the YAML value)
+# Set a comment, overriding the value from the configuration file
 muti-metroo route comment 10.0.0.0/8 "internal corp network"
 
-# Clear a comment
+# Clear the comment
 muti-metroo route comment 10.0.0.0/8 ""
 
-# Update on a remote agent
-muti-metroo route comment 10.0.0.0/8 "renamed" -t abc123
+# Set a comment on a remote agent
+muti-metroo route comment 10.0.0.0/8 "internal corp network" -t abc123de
 ```
-
-### Output
-
-```
-Route comment updated: route 10.0.0.0/8 comment updated
-```
-
----
 
 ## route source-ip
-
-Set or clear the local source IP an exit binds outbound dials to for a CIDR
-(equivalent to `curl --interface`).
 
 ```bash
 muti-metroo route source-ip <cidr> <ip> [flags]
 ```
 
-### Description
+Sets the local source address the exit binds outbound connections to for a route, like `curl --interface`. Works on dynamic routes and routes from `exit.routes`; pass `""` as `<ip>` to clear the binding. The address must be in the same address family as `<cidr>` (checked before contacting the agent, exit code 2). It must also be assigned on the exit host; this is not checked when the binding is set, so a missing address shows up as failed connections for that route. The binding is local to the exit and never advertised. It overrides the configuration file value and is kept across restarts when `agent.data_dir` is set.
 
-Updates the source IP binding on either a config-seeded or dynamically-added
-route. Pass an empty string for `<ip>` to clear the binding. The change is
-journalled to `data_dir/dynamic-config.log` and overrides the value from the
-config file -- the override survives agent restart.
-
-The source IP must already be bound on the exit host and match the CIDR's
-address family. Unlike the comment, the source IP is **local-only** -- it is
-never advertised to other agents because it is only meaningful on the host
-that owns the address.
+The target agent must already be an exit (have `exit.enabled: true` or at least one dynamic route); otherwise the request is rejected.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                     |
-| ---------- | ----- | ---------------- | ----------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)          |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that originates the route. Omit to act on the agent at `-a`. |
+
+### Output
+
+```text
+Route source IP updated: route 192.168.0.0/16 source_ip updated
+```
 
 ### Examples
 
 ```bash
-# Pin outbound dials for 10.10.0.0/16 to a specific local IP
+# Bind outbound connections for 10.10.0.0/16 to a local address
 muti-metroo route source-ip 10.10.0.0/16 192.168.1.50
 
-# Change the binding without removing the route
-muti-metroo route source-ip 10.10.0.0/16 192.168.1.60
-
-# Clear the binding (fall back to the OS default source)
+# Clear the binding and use the operating system's default source address
 muti-metroo route source-ip 10.10.0.0/16 ""
-
-# Update on a remote agent
-muti-metroo route source-ip 10.10.0.0/16 192.168.1.50 -t abc123
 ```
-
-### Output
-
-```
-Route source IP updated: route 10.10.0.0/16 source_ip updated
-```
-
----
 
 ## route interface
-
-Set or clear the egress network interface an exit binds outbound dials to for a
-CIDR.
 
 ```bash
 muti-metroo route interface <cidr> <name> [flags]
 ```
 
-### Description
+Sets the network interface the exit binds outbound connections to for a route. Works on dynamic routes and routes from `exit.routes`; pass `""` as `<name>` to clear the binding. The binding is local to the exit, never advertised, overrides the configuration file value, and is kept across restarts when `agent.data_dir` is set.
 
-Pins the egress NIC for outbound dials matching this CIDR. Pass an empty string
-for `<name>` to clear the binding. The change is journalled to
-`data_dir/dynamic-config.log` and overrides the config-file value.
+How the binding is applied depends on the route's source IP:
 
-When the route has no `source_ip`, or a `source_ip` already assigned to the
-interface, the exit binds to an address on that interface
-(`net.Dialer.LocalAddr`). This is portable and **unprivileged** -- it works on
-Linux, macOS, and Windows without root; the egress device then follows the host
-routing table.
+- With no source IP, or a source IP assigned to that interface, the exit binds to an address on the interface. This works on Linux, macOS, and Windows without elevated privileges.
+- With a source IP that is not assigned to the interface (for example a loopback-bound address that must leave through a physical NIC), the exit uses `SO_BINDTODEVICE`, which requires Linux and root. On other platforms, or on Linux without root, connections for that route fail.
 
-When the route's `source_ip` is _not_ assigned to the interface -- a
-loopback-bound floating address forced out a physical NIC -- the exit uses the
-privileged `SO_BINDTODEVICE` +
-`IP_FREEBIND` path, which is **Linux + root only**. On macOS/Windows, or on
-Linux as a non-root user, that off-interface combination is rejected at
-validation time with a clear error. On Linux + root the interface is honored via
-`SO_BINDTODEVICE` regardless of the source.
-
-Like `source_ip`, the interface binding is **local-only** and is never
-advertised to other agents.
+The interface name is not checked when the binding is set. As with `source-ip`, the target agent must already be an exit.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                     |
-| ---------- | ----- | ---------------- | ----------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)          |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that originates the route. Omit to act on the agent at `-a`. |
+
+### Output
+
+```text
+Route interface updated: route 192.168.0.0/16 interface updated
+```
 
 ### Examples
 
 ```bash
-# Pin outbound dials for 10.10.0.0/16 to ens192 (e.g. when 10.10.x.x's source
-# IP is a loopback-bound floating address)
+# Send outbound connections for 10.10.0.0/16 out of ens192
 muti-metroo route interface 10.10.0.0/16 ens192
 
 # Clear the binding
 muti-metroo route interface 10.10.0.0/16 ""
 
-# Combine with --source-ip on add to pin both source IP and egress interface
-muti-metroo route add 10.10.0.0/16 --source-ip 192.0.2.10 --interface ens192
+# Set source IP and interface together when adding a route
+muti-metroo route add 10.10.0.0/16 --source-ip 192.168.1.50 --interface ens192
 ```
-
-### Output
-
-```
-Route interface updated: route 10.10.0.0/16 interface updated
-```
-
----
 
 ## route list
-
-List CIDR exit routes.
 
 ```bash
 muti-metroo route list [flags]
 ```
 
-### Description
+Lists the exit routes the agent originates. By default only dynamic routes are shown. With `--all`, routes from `exit.routes` are included and a `KIND` column (`config` or `dynamic`) is added; entries are sorted by network.
 
-By default, displays all dynamic (runtime-added) exit routes currently active on the target agent. Routes configured in `exit.routes` are not shown.
-
-With `--all`, displays both config-seeded and dynamic routes, including any operator comments set or overridden via the management API. The `KIND` column distinguishes them.
+`SOURCE` and `INTERFACE` columns appear only when at least one listed route has a source IP or interface binding.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                          |
-| ---------- | ----- | ---------------- | ---------------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL)      |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)               |
-| `--json`   |       | `false`          | Output in JSON format                                |
-| `--all`    |       | `false`          | Include config-seeded routes (default: dynamic only) |
-
-### Examples
-
-```bash
-# List dynamic routes on local agent
-muti-metroo route list
-
-# Include config-seeded routes (and their comments) too
-muti-metroo route list --all
-
-# List routes on remote agent
-muti-metroo route list -t abc123def456
-
-# JSON output
-muti-metroo route list --all --json
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of a remote agent to query. Omit to query the agent at `-a`. |
+| `--all` | `false` | Include routes from `exit.routes`. |
+| `--json` | `false` | Print the full API response as JSON. |
 
 ### Output
 
-Default (dynamic only):
+Default:
 
-```
-Dynamic Routes (2)
+```text
+Dynamic Routes (1)
 NETWORK                  METRIC  COMMENT
-10.0.0.0/24              0       office LAN
-192.168.1.0/24           5
+172.16.0.0/12            5       lab
 ```
 
 With `--all`:
 
-```
+```text
 Local Routes (3)
 NETWORK                  METRIC  KIND     COMMENT
-10.0.0.0/24              0       dynamic  office LAN
-10.0.0.0/8               0       config   internal corp (operator override)
-192.168.1.0/24           5       dynamic
+10.0.0.0/8               0       config   internal corp
+172.20.0.0/16            0       dynamic  remote lab
+192.168.0.0/16           0       config
 ```
 
-JSON output:
+With bindings set:
+
+```text
+Local Routes (3)
+NETWORK                  METRIC  KIND     SOURCE             INTERFACE    COMMENT
+10.0.0.0/8               0       config
+172.20.0.0/16            0       dynamic                                  remote lab
+192.168.0.0/16           0       config   192.168.1.50       ens192
+```
+
+With no routes, the command prints `No dynamic routes configured` (or `No routes configured` with `--all`).
+
+`--all --json` output:
 
 ```json
 {
   "status": "ok",
   "routes": [
     {
-      "network": "10.0.0.0/24",
+      "network": "10.0.0.0/8",
       "metric": 0,
-      "dynamic": true,
-      "comment": "office LAN"
+      "dynamic": false,
+      "comment": "internal corp"
     },
     {
-      "network": "192.168.1.0/24",
-      "metric": 5,
-      "dynamic": true
+      "network": "192.168.0.0/16",
+      "metric": 0,
+      "dynamic": false,
+      "source_ip": "192.168.1.50",
+      "interface": "ens192"
     }
   ]
 }
 ```
 
----
+### Examples
+
+```bash
+# Dynamic routes of the local agent
+muti-metroo route list
+
+# All routes the local agent originates, including configured ones
+muti-metroo route list --all
+
+# All routes of a remote agent, as JSON
+muti-metroo route list -t abc123de --all --json
+```
 
 ## route trace
-
-Explain which route this agent would pick for a destination.
 
 ```bash
 muti-metroo route trace <ip|hostname> [flags]
 ```
 
-### Description
+Shows which route the agent would choose for a destination, using the same selection rules as a real connection: longest prefix wins, then lowest metric, then lowest origin agent ID. Every matching CIDR route is listed. The winner is marked with `->`; each other candidate carries the reason it lost (`shorter prefix`, `higher metric`, or `lost origin tiebreaker`). Route comments are appended after `#`.
 
-Runs the same route selection logic used by the live stream open path against the supplied destination, and prints every matching CIDR route along with which one would win and why the rest lost.
+A hostname is resolved on the selected agent, in this order: domain routes are checked and reported, then the [mesh-host registry](host.md), then the system resolver. CIDR candidates are listed for every resolved address. The JSON output reports how the destination was resolved in the `resolution` field: `ip` for a literal address, `mesh` for a mesh-host entry, or `system` for the system resolver.
 
-Accepts either an IP address or a hostname. Hostnames are resolved on the selected agent in this order: literal-IP shortcut, domain route table, mesh-host registry (entries from `mesh_hosts:` and `/hosts/manage` under any active suffix), and finally system DNS. The output reports which source was used. Registered names trace correctly even on agents whose host has no Mutiauk forwarding the suffix.
-
-The winner is chosen by longest prefix, then lowest metric, then lowest origin ID. Losers are annotated with the reason (`shorter prefix`, `higher metric`, or `lost origin tiebreaker`).
+`route trace` is read-only and does not need a signing key.
 
 ### Flags
 
-| Flag       | Short | Default          | Description                                     |
-| ---------- | ----- | ---------------- | ----------------------------------------------- |
-| `--agent`  | `-a`  | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t`  |                  | Target agent ID (omit for local agent)          |
-| `--json`   |       | `false`          | Output in JSON format                           |
-
-### Examples
-
-```bash
-# Trace a single IP on the local agent
-muti-metroo route trace 8.8.8.8
-
-# Trace a hostname on a remote agent
-muti-metroo route trace example.com -t abc123
-
-# JSON output for scripting
-muti-metroo route trace 10.1.2.3 --json
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of a remote agent to trace from. Omit to trace on the agent at `-a`. |
+| `--json` | `false` | Print the API response as JSON (single line). |
 
 ### Output
 
-```
-Trace for 8.8.8.8
-    -> 8.8.8.0/24           metric=2 hops=1 next_hop=gateway (ab12cd) origin=gateway (ab12cd)
-       0.0.0.0/0            metric=1 hops=1 next_hop=gateway (ab12cd) origin=gateway (ab12cd)  [shorter prefix]
+For an IP address:
+
+```text
+Trace for 10.1.2.3
+    -> 10.1.0.0/16          metric=4 hops=1 next_hop=exit-office (b0bca945) origin=exit-office (b0bca945)  # branch
+       10.0.0.0/8           metric=1 hops=1 next_hop=exit-office (b0bca945) origin=exit-office (b0bca945)  [shorter prefix]
 ```
 
 For a hostname:
 
-```
+```text
 Trace for example.com
   Domain route: no match
-  Resolved: 93.184.215.14 (via system DNS)
+  Resolved: 203.0.113.10
 
-  93.184.215.14:
-    -> 93.184.215.0/24      metric=2 hops=1 next_hop=exit (cd34ef) origin=exit (cd34ef)
+  203.0.113.10:
+    no matching CIDR route
 ```
 
-The `Resolved:` line carries one of three suffixes: `(via mesh DNS)` for names found in the agent's mesh-host registry, `(via system DNS)` for names resolved via the host resolver, or `(literal IP)` if the input was already an address. The JSON output reports the same in a `resolution` field with values `"mesh"`, `"system"`, or `"ip"`.
-
-### Authorization
-
-Route trace is a read-only diagnostic. It does not require a management key signature.
-
-When the mesh is configured with management key encryption and the local agent lacks the private key, trace is rejected with HTTP 403 -- the same restriction applied to other topology-exposing endpoints.
-
----
-
-## Authorization
-
-### Management Key Restriction
-
-Dynamic route modifications are restricted when the mesh is configured with management key encryption.
-
-If an agent has `management.public_key` configured but does NOT have the corresponding `management.private_key`, route add/remove/comment commands are rejected with HTTP 403 Forbidden. This provides compartmentalization -- field agents (with only the public key) cannot modify routes, while operator nodes (with both keys) can.
-
-```yaml
-# Field agent config (cannot manage routes)
-management:
-  public_key: "hex-encoded-public-key"
-
-# Operator node config (can manage routes)
-management:
-  public_key: "hex-encoded-public-key"
-  private_key: "hex-encoded-private-key"
-```
-
-If no management key is configured at all, route management is unrestricted.
-
-### Generating Management Keys
+### Examples
 
 ```bash
-# Generate keypair (outputs both public and private keys in hex)
-muti-metroo management-key generate
+# Trace an address on the local agent
+muti-metroo route trace 10.1.2.3
 
-# Derive public key from an existing private key
-muti-metroo management-key public
-# (interactive prompt for private key in hex)
+# Trace a hostname from a remote agent
+muti-metroo route trace example.com -t abc123de
 
-# Or provide via flag
-muti-metroo management-key public --private <hex-private-key>
+# Pretty-print the JSON result
+muti-metroo route trace 10.1.2.3 --json | jq .
 ```
 
----
+## Persistence
 
-## Important Notes
+When `agent.data_dir` is set, every route mutation (`add`, `remove`, `comment`, `source-ip`, `interface`) is written to the dynamic configuration journal and replayed when the agent starts. Without a `data_dir`, or when the journal cannot be written, the change still takes effect but is lost on restart. For routes that must always exist, use `exit.routes` (see [Exit configuration](../configuration/exit.md)) or see [Dynamic configuration persistence](../configuration/dynamic-config-persistence.md).
 
-### Persistence
+## Exit status
 
-Dynamic routes survive agent restarts when `agent.data_dir` is configured: every add/remove is appended to a [dynamic config journal](/configuration/dynamic-config-persistence) under `data_dir/dynamic-config.log` and replayed on the next start.
+Exit codes follow the table in [CLI overview](overview.md#exit-codes). For `add` and `remove`, a request the agent rejects (unknown route, config route, invalid binding) exits with 5. An invalid CIDR passed to `add` or `remove`, or a source IP from the wrong address family, exits with 2. Declining a confirmation prompt exits with 0.
 
-If no `data_dir` is configured, or the journal file cannot be written (bad permissions, read-only filesystem, disk full), the runtime mutation still succeeds but remains ephemeral.
+## See Also
 
-For routes that must always be present, use the `exit.routes` configuration in `config.yaml`:
-
-```yaml
-exit:
-  routes:
-    - 10.0.0.0/24
-    - 192.168.1.0/24
-```
-
-### Route Propagation
-
-After adding or removing a route, the change is immediately advertised to all connected peers. No manual action is required.
-
-To trigger a route advertisement at any other time (e.g., after configuration changes), use:
-
-```bash
-curl -X POST http://localhost:8080/routes/advertise
-```
-
-### Short Agent ID Prefixes
-
-The `--target` flag accepts short agent ID prefixes. If multiple agents match the prefix, the command fails. Provide a longer prefix to disambiguate.
-
-```bash
-# Agent IDs: abc123def456, abc789ghi012
-
-# Ambiguous
-muti-metroo route add 10.0.0.0/24 -t abc
-# Error: multiple agents match prefix
-
-# Specific
-muti-metroo route add 10.0.0.0/24 -t abc123
-# Success
-```
-
----
-
-## Workflow Examples
-
-### Promote Transit Agent to Exit
-
-Convert a transit-only agent to an exit agent at runtime:
-
-```bash
-# Add default route
-muti-metroo route add 0.0.0.0/0 -t abc123def456
-
-# Verify route
-muti-metroo route list -t abc123def456
-```
-
-### Automation Script
-
-Add routes based on cloud provider metadata:
-
-```bash
-#!/bin/bash
-# Detect VPC CIDR and advertise it
-VPC_CIDR=$(curl -s http://169.254.169.254/latest/meta-data/network/interfaces/macs/$(curl -s http://169.254.169.254/latest/meta-data/mac)/vpc-ipv4-cidr-block)
-muti-metroo route add "$VPC_CIDR"
-```
-
-### Testing Exit Routing
-
-Temporarily add a route for testing:
-
-```bash
-# Add test route
-muti-metroo route add 10.99.0.0/16 -t testnode
-
-# Test connectivity
-curl --socks5 localhost:1080 http://10.99.1.1/test
-
-# Remove route
-muti-metroo route remove 10.99.0.0/16 -t testnode
-```
-
-### Emergency Fallback
-
-Add a backup route during network issues:
-
-```bash
-# Primary exit agent down, add fallback
-muti-metroo route add 0.0.0.0/0 -t backup-exit -m 100
-
-# When primary recovers, remove fallback
-muti-metroo route remove 0.0.0.0/0 -t backup-exit
-```
+- [Exit configuration](../configuration/exit.md): define permanent exit routes, comments, and bindings in YAML
+- [Routing concepts](../concepts/routing.md): how routes propagate and how the winner is chosen
+- [Route management API](../api/route-management.md): the HTTP endpoint behind the route subcommands
+- [Route trace API](../api/route-trace.md): the HTTP endpoint behind `route trace`
+- [muti-metroo host](host.md): register mesh hostnames that `route trace` resolves

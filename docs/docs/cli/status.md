@@ -1,5 +1,8 @@
 ---
-title: status
+title: muti-metroo status
+sidebar_label: status
+sidebar_position: 12
+description: Show whether an agent is running, with its peer, stream, and route counts and the state of its SOCKS5 and exit handlers.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,20 +11,11 @@ title: status
 
 # muti-metroo status
 
-Check if an agent is running and view its current state.
+Show the current state of a running agent. The command reads the agent's `/healthz` endpoint over the HTTP API, so the agent must have `http.enabled: true`. `/healthz` is exempt from bearer-token authentication, so no `--token` is needed.
 
-```bash
-# Check local agent
-muti-metroo status
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-# Check remote agent
-muti-metroo status -a 192.168.1.10:8080
-
-# JSON output for scripting
-muti-metroo status --json
-```
-
-## Usage
+## Synopsis
 
 ```bash
 muti-metroo status [flags]
@@ -29,78 +23,82 @@ muti-metroo status [flags]
 
 ## Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent HTTP API address (host:port or http(s):// URL) |
-| `--json` | | `false` | Output in JSON format |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address, as `host:port` or an `http(s)://` URL with an optional path prefix. See [agent address](overview.md#agent-address). |
+| `--json` | `false` | Print the response as JSON. |
 
-## Example Output
+## Output
 
-```
+```text
 Agent Status
 ============
-Status:       OK
+Status:       healthy
 Running:      true
-Peer Count:   3
-Stream Count: 12
-Route Count:  5
-SOCKS5:       true
+Peer Count:   1
+Stream Count: 0
+Route Count:  0
+SOCKS5:       false
 Exit Handler: false
 ```
 
-## Output Fields
+| Field | JSON key | Description |
+| --- | --- | --- |
+| Status | `status` | `healthy` when the agent is running, `unavailable` when the HTTP server is up but the agent is not running. |
+| Running | `running` | Whether the agent is running. |
+| Peer Count | `peer_count` | Number of connected peers. |
+| Stream Count | `stream_count` | Number of active streams. |
+| Route Count | `route_count` | Number of entries in the route table. |
+| SOCKS5 | `socks5_running` | Whether the SOCKS5 listener is running. |
+| Exit Handler | `exit_handler_running` | Whether the exit handler is running. |
 
-| Field | Description |
-|-------|-------------|
-| Status | Agent health status (OK or error message) |
-| Running | Whether the agent is running |
-| Peer Count | Number of connected peer agents |
-| Stream Count | Number of active streams |
-| Route Count | Number of routes in the routing table |
-| SOCKS5 | Whether SOCKS5 proxy is enabled |
-| Exit Handler | Whether exit routing is enabled |
-
-## JSON Output
-
-```bash
-muti-metroo status --json
-```
+With `--json`:
 
 ```json
 {
-  "status": "OK",
+  "status": "healthy",
   "running": true,
-  "peer_count": 3,
-  "stream_count": 12,
-  "route_count": 5,
-  "socks5_running": true,
+  "peer_count": 1,
+  "stream_count": 0,
+  "route_count": 0,
+  "socks5_running": false,
   "exit_handler_running": false
 }
 ```
 
-## Use Cases
+## Examples
 
-### Health Monitoring
+Check the local agent:
 
 ```bash
-# Simple health check for monitoring scripts
-if muti-metroo status --json | jq -e '.status == "OK"' > /dev/null; then
-  echo "Agent healthy"
+muti-metroo status
+```
+
+Check an agent on another host:
+
+```bash
+muti-metroo status -a 192.168.1.10:8080
+```
+
+Use the JSON output in a health check script:
+
+```bash
+if muti-metroo status --json | jq -e '.status == "healthy"' > /dev/null; then
+  echo "agent healthy"
 else
-  echo "Agent unhealthy"
+  echo "agent unhealthy"
   exit 1
 fi
 ```
 
-### Check Remote Agent
+## Exit status
 
-```bash
-# Verify a remote agent is running before operations
-muti-metroo status -a remote-host:8080
-```
+The command exits 3 when the agent cannot be reached. It exits 0 whenever the agent answers, including when `status` is `unavailable`, so scripts that need a health verdict should check the `status` field as shown above.
 
-## Related
+## See Also
 
-- [peers](/cli/peers) - List connected peers
-- [routes](/cli/routes) - List route table
-- [HTTP API - Health](/api/health) - Programmatic health checks
+- [peer](peer.md): list connected peers with `peer status`
+- [route](route.md): inspect the live route table with `route status`
+- [sleep-status](sleep.md#sleep-status): check whether the agent is sleeping
+- [Health API](../api/health.md): the `/health`, `/healthz`, and `/ready` endpoints
+- [HTTP configuration](../configuration/http.md): enable the HTTP API and set its address

@@ -1,5 +1,6 @@
 ---
 title: Common Issues
+description: Error messages printed by Muti Metroo agents and CLI commands, what causes them, and how to fix them.
 sidebar_position: 1
 ---
 
@@ -9,640 +10,254 @@ sidebar_position: 1
 
 # Common Issues
 
-Find your error message and fix it. Jump to the section that matches what you're seeing.
+This page lists the errors operators see most often, grouped by where they appear. Search the page for the text of your error. For step-by-step diagnosis of peers and routes, see [Connectivity Troubleshooting](/troubleshooting/connectivity).
 
-**Jump to:**
-- [Agent won't start](#agent-wont-start) - port in use, config errors, certificates
-- [Connection issues](#connection-issues) - peers not connecting, TLS failures
-- [SOCKS5 issues](#socks5-issues) - no route, timeouts, auth failures
-- [Shell/file transfer issues](#shell-issues) - command rejected, path not allowed
-- [Windows-specific](#windows-specific-issues) - ports, services, paths
-- [Multi-agent deployment](#multi-agent-deployment) - start order, routes not propagating
+## Agent does not start
 
-## Agent Won't Start
+`muti-metroo run` prints the error and exits with a non-zero status. Under a service manager, find the same text in the service log (`journalctl -u muti-metroo` on Linux).
 
-### Port Already in Use
+### Config file not found
 
-```
-Error: listen tcp 0.0.0.0:4433: bind: address already in use
+```text
+Error: failed to load config: failed to read config file: open config.yaml: no such file or directory
 ```
 
-**Solution:**
+`-c` defaults to `./config.yaml` in the current directory. Pass the full path with `-c`.
+
+### YAML syntax error
+
+```text
+Error: failed to load config: failed to parse config: yaml: line 3: mapping values are not allowed in this context
+```
+
+The file is not valid YAML, usually because of inconsistent indentation or an unquoted value containing `:`. The line number points at or just after the problem.
+
+### Validation errors
+
+```text
+Error: failed to load config: config validation failed: validation errors:
+  - listeners[0]: path is required for ws transport
+```
+
+The YAML parsed, but a value is missing or invalid. Each problem is listed on its own line with the key that caused it. Check a config without starting the agent:
 
 ```bash
-# Find what's using the port
-lsof -i :4433
-netstat -tlnp | grep 4433
-
-# Kill the process or use a different port
-kill <PID>
-
-# Or change config
-listeners:
-  - address: "0.0.0.0:4434"   # Different port
+muti-metroo config validate ./config.yaml
 ```
 
-### Configuration Error
+### Port already in use
 
-```
-Error: invalid configuration: ...
+```text
+Error: failed to start agent: start HTTP server: listen tcp 127.0.0.1:8080: bind: address already in use
 ```
 
-**Solution:**
+Another process, often a previous instance of the agent, holds the port. The message names the component (`HTTP server`, `listener`, or `SOCKS5`) and the address. Find the process:
 
 ```bash
-# Validate YAML syntax
-yamllint config.yaml
-
-# Check for common issues:
-# - Incorrect indentation
-# - Missing quotes around values with special chars
-# - Invalid CIDR notation
-# - Missing required fields
+lsof -nP -i :8080
 ```
 
-### Certificate Not Found
+On Windows the same condition reads:
 
+```text
+bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
 ```
-Error: open ./certs/agent.crt: no such file or directory
-```
-
-**Solution:**
-
-```bash
-# Generate certificates
-muti-metroo cert ca --cn "My CA"
-muti-metroo cert agent --cn "agent-1" \
-  --ca ./certs/ca.crt \
-  --ca-key ./certs/ca.key
-
-# Or fix path in config
-tls:
-  cert: "/absolute/path/to/agent.crt"
-  key: "/absolute/path/to/agent.key"
-```
-
-### Permission Denied
-
-```
-Error: open ./data/agent_id: permission denied
-```
-
-**Solution:**
-
-```bash
-# Fix ownership
-chown -R $(whoami) ./data
-
-# Or fix permissions
-chmod 700 ./data
-
-# If running as service user
-chown -R muti-metroo:muti-metroo /var/lib/muti-metroo
-```
-
-### Permission Denied for Agent Keys
-
-```
-Error: failed to read private key: open /opt/muti-metroo/data/agent_key: permission denied
-```
-
-This often happens when the agent was previously run as root or a different user.
-
-**Solution:**
-
-```bash
-# Check current ownership
-ls -la /opt/muti-metroo/data/
-
-# Fix ownership (replace 'andris' with your user)
-sudo chown andris:andris /opt/muti-metroo/data/agent_key
-sudo chown andris:andris /opt/muti-metroo/data/agent_key.pub
-
-# Or fix for all data files
-sudo chown -R andris:andris /opt/muti-metroo/data/
-```
-
-### Stale Process from Previous Run
-
-```
-Error: bind: address already in use
-```
-
-A previous instance may still be running.
-
-**Solution:**
-
-```bash
-# Find and kill stale processes
-pgrep -la muti-metroo
-pkill -f muti-metroo
-
-# Verify ports are free
-lsof -i :4433
-lsof -i :1080
-
-# On Linux, check for zombie listeners
-ss -tlnp | grep muti-metroo
-```
-
-## Connection Issues
-
-### Peer Won't Connect
-
-**Symptoms:**
-- `peers: 0` in health check
-- Logs show connection attempts but no success
-
-**Solutions:**
-
-1. Check network connectivity:
-   ```bash
-   # Can you reach the peer?
-   nc -zv peer-address 4433
-   ping peer-address
-   ```
-
-2. Check firewall:
-   ```bash
-   # Is port open?
-   sudo iptables -L -n | grep 4433
-   ```
-
-3. Check TLS:
-   ```bash
-   # Verify certificate
-   openssl s_client -connect peer-address:4433
-   ```
-
-4. Check peer ID:
-   ```yaml
-   # Is the ID correct?
-   peers:
-     - id: "correct-peer-id..."  # Must match peer's agent_id
-   ```
-
-### Connection Refused
-
-```
-Error: connection refused to peer-address:4433
-```
-
-**Solutions:**
-
-1. Peer not running or not listening
-2. Wrong address/port
-3. Firewall blocking connection
-4. Wrong transport type
-
-### TLS Handshake Failed
-
-```
-Error: tls: handshake failure
-```
-
-**Solutions:**
-
-1. Certificate not signed by trusted CA:
-   ```bash
-   openssl verify -CAfile ca.crt peer.crt
-   ```
-
-2. Certificate expired:
-   ```bash
-   openssl x509 -enddate -noout -in agent.crt
-   ```
-
-3. Wrong hostname/IP in certificate:
-   ```bash
-   openssl x509 -text -noout -in agent.crt | grep -A1 "Subject Alternative Name"
-   ```
-
-## SOCKS5 Issues
-
-### No Route to Host
-
-```
-Error: no route to 1.2.3.4
-```
-
-**Cause:** No exit agent with matching route.
-
-**Solutions:**
-
-1. Check exit is running and connected:
-   ```bash
-   curl http://localhost:8080/healthz | jq '.peer_count, .route_count'
-   ```
-
-2. Check exit has route configured:
-   ```yaml
-   exit:
-     enabled: true
-     routes:
-       - "0.0.0.0/0"  # Or specific CIDR
-   ```
-
-3. Trigger route advertisement:
-   ```bash
-   curl -X POST http://exit-agent:8080/routes/advertise
-   ```
-
-### Connection Timeout
-
-```
-Error: connection timeout
-```
-
-**Causes:**
-- Slow network
-- Too many hops
-- Exit agent overloaded
-
-**Solutions:**
-
-1. Increase timeout:
-   ```yaml
-   limits:
-     stream_open_timeout: 60s  # Default 30s
-   ```
-
-2. Reduce hop count
-
-3. Check exit agent health
-
-### Authentication Failed
-
-```
-Error: SOCKS5 authentication failed
-```
-
-**Solutions:**
-
-1. Check username/password:
-   ```bash
-   curl -x socks5://user:password@localhost:1080 https://example.com
-   ```
-
-2. Verify password hash in config is correct
-
-3. Check for special characters needing escaping
-
-## Exit Issues
-
-### DNS Resolution Failed
-
-```
-Error: DNS lookup failed for example.com
-```
-
-**Solutions:**
-
-1. Check DNS servers are configured:
-   ```yaml
-   exit:
-     dns:
-       servers:
-         - "8.8.8.8:53"
-   ```
-
-2. Check DNS servers are reachable from exit host:
-   ```bash
-   dig @8.8.8.8 example.com
-   ```
-
-3. Increase DNS timeout:
-   ```yaml
-   exit:
-     dns:
-       timeout: 10s
-   ```
-
-### Destination Not Allowed
-
-```
-Error: destination not in allowed routes
-```
-
-**Solution:** Add route to exit config:
-
-```yaml
-exit:
-  routes:
-    - "0.0.0.0/0"  # Or specific CIDR matching destination
-```
-
-## Shell Issues
-
-### Command Rejected
-
-```
-Error: command not in whitelist
-```
-
-**Solution:** Add command to whitelist:
-
-```yaml
-shell:
-  whitelist:
-    - bash
-    - your-command  # Add needed command
-```
-
-### Shell Authentication Failed
-
-```
-Error: auth_required
-Error: invalid_credentials
-```
-
-Shell, file transfer, and dynamic config mutations are authorized by the mesh management Ed25519 signing key, not by a password.
-
-**Solutions:**
-
-1. Verify the local agent reached via `-a` has `management.signing_private_key` set in its config. Without it, the CLI cannot sign requests and the target rejects them as `auth_required`.
-
-2. Verify the target agent has `management.signing_public_key` set, and that it matches the public half of the operator's signing private key. A mismatch produces `invalid_credentials`.
-
-3. If you have lost the keypair, generate a new one with `muti-metroo signing-key generate` and redeploy the public half to every agent in the mesh.
-
-## File Transfer Issues
-
-### Path Not Allowed
-
-```
-Error: path not in allowed paths
-```
-
-**Solution:** Add path prefix to allowed_paths:
-
-```yaml
-file_transfer:
-  allowed_paths:
-    - /tmp
-    - /path/to/your/files
-```
-
-### File Too Large
-
-```
-Error: file exceeds maximum size
-```
-
-**Solution:** Increase max_file_size or use 0 for unlimited:
-
-```yaml
-file_transfer:
-  max_file_size: 0  # Unlimited
-```
-
-## Performance Issues
-
-See [Performance Troubleshooting](/troubleshooting/performance) for:
-- Slow connections
-- High latency
-- Memory usage
-- CPU usage
-
-## Windows-Specific Issues
-
-### Port 8080 Already in Use
-
-Windows commonly has services using port 8080. You'll see:
-
-```
-Error: listen tcp :8080: bind: Only one usage of each socket address
-```
-
-**Solution:** Use a different port:
-
-```yaml
-http:
-  address: ":8083"  # Or another free port
-```
-
-Check what's using the port:
 
 ```powershell
-netstat -anb | findstr ":8080"
+netstat -ano | findstr :8080
 ```
 
-### Running Agent in Background on Windows
+Stop the other process, or change the address in the config. Port 8080 is often taken by other software on Windows.
 
-Use the `--detach` flag to keep the agent running after you close the terminal or disconnect an SSH session:
+### Certificate file not found
 
-```cmd
-muti-metroo.exe run --detach -c C:\muti-metroo\config.yaml
+```text
+Error: failed to start agent: start listener 0.0.0.0:4433: load TLS config: load certificate: open ./certs/agent.crt: no such file or directory
 ```
 
-This re-spawns the process outside the session's Job Object, prints the PID, and exits immediately. The agent runs until the machine reboots or you stop it manually.
+A `cert` or `key` path in the config does not exist. Relative paths resolve against the working directory, not the config file's directory; use absolute paths. `muti-metroo cert agent --cn <name>` writes `<name>.crt` and `<name>.key`, so check the file names as well.
 
-```cmd
-# Verify it's running
-tasklist | findstr muti-metroo
+If no certificate is configured at all, the agent generates a self-signed one at startup and needs no files.
 
-# Stop the agent
-taskkill /IM muti-metroo.exe /F
+### RSA certificate rejected
+
+```text
+Error: failed to start agent: start listener 0.0.0.0:4433: load TLS config: EC validation failed: certificate: RSA certificates are not supported; use EC (ECDSA) certificates
 ```
 
-For persistent background operation that also survives reboots, install as a Windows service instead:
+Listener certificates, client certificates, and CA certificates must use ECDSA keys. Certificates from `muti-metroo cert` always do. For Let's Encrypt, request an ECDSA certificate (Certbot: `--key-type ecdsa`).
 
-```cmd
-muti-metroo.exe service install -c C:\muti-metroo\config.yaml
+### Data directory not readable or writable
+
+```text
+Error: failed to create agent: load identity: failed to read agent ID: open /var/lib/muti-metroo/agent_id: permission denied
 ```
 
-### Firewall Blocking Connections
-
-Windows Firewall may block inbound or outbound connections.
-
-```powershell
-# Check if Windows Firewall is blocking
-netsh advfirewall firewall show rule name=all | findstr muti-metroo
-
-# Allow inbound on specific port
-netsh advfirewall firewall add rule name="Muti Metroo" `
-  dir=in action=allow protocol=tcp localport=3000
-
-# Or allow the executable
-netsh advfirewall firewall add rule name="Muti Metroo" `
-  dir=in action=allow program="C:\muti-metroo\muti-metroo.exe"
+```text
+Error: failed to create agent: load keypair: failed to read private key: open /var/lib/muti-metroo/agent_key: permission denied
 ```
 
-### Path Issues with Backslashes
-
-Windows paths use backslashes. In YAML, either escape or use forward slashes:
-
-```yaml
-# Option 1: Escaped backslashes
-data_dir: "C:\\muti-metroo\\data"
-tls:
-  cert: "C:\\muti-metroo\\certs\\agent.crt"
-
-# Option 2: Forward slashes (also works)
-data_dir: "C:/muti-metroo/data"
-```
-
-## Multi-Agent Deployment
-
-### Start Order Matters
-
-When deploying multiple agents, start them in the correct order:
-
-1. **Listeners first** - Agents that accept connections (have `listeners:` configured)
-2. **Dialers second** - Agents that connect outbound (have `peers:` configured)
-
-Example for a chain A → B → C:
-1. Start Agent C (has listener, exit role)
-2. Start Agent B (has listener, connects to C)
-3. Start Agent A (connects to B, SOCKS5 ingress)
-
-### Peer Not Connecting After Restart
-
-After restarting a listener agent, dialers may take time to reconnect due to exponential backoff.
-
-**Speed up reconnection:**
+The data directory or the identity files belong to another user, typically because the agent once ran as root. Give the account that runs the agent ownership of the directory:
 
 ```bash
-# Restart the dialer agent
-pkill -f muti-metroo
-./muti-metroo run -c config.yaml
-
-# Or trigger faster reconnect by reducing max_delay
-connections:
-  reconnect:
-    initial_delay: 500ms
-    max_delay: 10s
+sudo chown -R "$(whoami)" /var/lib/muti-metroo
 ```
 
-### Routes Not Propagating
-
-After starting agents, routes may take time to propagate (up to `advertise_interval`).
-
-**Trigger immediate advertisement:**
-
-```bash
-# On exit agent
-curl -X POST http://localhost:8080/routes/advertise
-
-# Wait a few seconds for propagation
-sleep 5
-
-# Check routes on ingress agent
-curl http://ingress-agent:8080/healthz | jq '.route_count'
+```text
+Error: failed to create agent: load identity: failed to create data directory: mkdir /var/lib/muti-metroo: permission denied
 ```
 
-### Verifying Multi-Agent Topology
+The parent directory is not writable. Create the data directory in advance, or choose a writable `agent.data_dir`.
 
-Check the full topology from the dashboard API:
+### Service fails with `status=226/NAMESPACE`
 
-```bash
-# List all known nodes
-curl -s http://localhost:8080/api/nodes | jq '.nodes[] | {id: .short_id, name: .display_name, connected: .is_connected}'
+The systemd unit lists a directory in `ReadWritePaths` that does not exist. See [System Service - Troubleshooting](/deployment/system-service#troubleshooting).
 
-# Check route paths
-curl -s http://localhost:8080/api/dashboard | jq '.routes[] | {network, origin, hops: .hop_count, path: .path_display}'
+## Peers do not connect
+
+Failed connection attempts are logged at `WARN` level with the message `failed to connect to peer` and an `error` field. The agent retries with exponential backoff (1 second up to 60 seconds).
+
+| `error` field contains | Cause | Fix |
+|------------------------|-------|-----|
+| `peer ID mismatch: expected <id>, got <id>` | The agent at that address has a different ID than `peers[].id`. | Correct the `id`, or use `"auto"` to accept any agent. |
+| `QUIC dial failed: timeout: no recent network activity` | No QUIC response: the listener is down, the address is wrong, or UDP is blocked. | Check the address and that UDP is allowed through firewalls. Try an HTTP/2 or WebSocket listener if UDP is filtered. |
+| `connect: connection refused` | Nothing listens on that TCP port (HTTP/2 or WebSocket). | Check the address, port, and transport. |
+| `tls: failed to verify certificate: x509: ...` | Strict verification is on and the peer's certificate does not match the configured CA or address. | Fix the CA or certificate, or see [TLS Certificates](/configuration/tls-certificates). |
+| `expected handshake response status code 101 but got 404` | WebSocket or HTTP/2 path mismatch. | Use the listener's path in the peer address, for example `wss://host:443/mesh`. |
+
+Test a listener from the dialing host with [`muti-metroo probe`](/cli/probe). For a full checklist, see [Connectivity Troubleshooting](/troubleshooting/connectivity#peers-do-not-connect).
+
+A related validation error:
+
+```text
+  - peers[0]: tls.ca is required when strict mode is enabled (for peer certificate verification)
 ```
 
-### Upgrading Agents
+`tls.strict: true` needs a CA to verify against. Set `tls.ca` globally or on the peer.
 
-When deploying new binary versions:
+## SOCKS clients get errors
 
-```bash
-# 1. Stop the agent
-pkill -f muti-metroo  # Linux/macOS
-taskkill /IM muti-metroo.exe /F  # Windows
+The SOCKS listener reports failures to the client as SOCKS5 reply codes. curl shows the code in parentheses:
 
-# 2. Replace binary
-cp muti-metroo-linux-amd64 /opt/muti-metroo/muti-metroo
-chmod +x /opt/muti-metroo/muti-metroo
-
-# 3. Start agent
-cd /opt/muti-metroo && ./muti-metroo run -c config.yaml
-
-# 4. Verify
-curl http://localhost:8080/healthz
+```text
+curl: (97) Can't complete SOCKS5 connection to 10.0.12.5. (5)
 ```
 
-For remote agents via SSH:
+| Code | Meaning in Muti Metroo | What to check |
+|------|------------------------|---------------|
+| 1 | General failure | Agent logs on the ingress and exit. |
+| 2 | Not allowed | The exit refused the destination. |
+| 3 | Network unreachable | The exit host has no route to the destination network. |
+| 4 | Host unreachable | DNS resolution failed, or the exit cannot reach the host. |
+| 5 | Connection refused | The destination refused the TCP connection. The mesh path works. |
+| 6 | Timeout | The connection attempt timed out at the exit or along the path. |
 
-```bash
-# Upload new binary
-scp muti-metroo-linux-amd64 user@remote:/opt/muti-metroo/muti-metroo
+When no route matches the destination, the ingress agent does not return an error. It connects to the destination directly from its own host. If traffic leaves from the wrong place, check the routes with `muti-metroo route trace <destination>`; see [Connectivity Troubleshooting - Routing](/troubleshooting/connectivity#routing-problems).
 
-# Stop, set permissions, restart
-ssh user@remote "pkill -f muti-metroo; chmod +x /opt/muti-metroo/muti-metroo"
-ssh user@remote "cd /opt/muti-metroo && nohup ./muti-metroo run -c config.yaml > agent.log 2>&1 &"
+### Authentication rejected
+
+```text
+curl: (97) User was rejected by the SOCKS5 server (1 1).
 ```
 
-### Deployment Verification Checklist
+The username or password does not match `socks5.auth.users`. If the config uses `password_hash`, regenerate it with `muti-metroo hash`. URL-encode special characters in the password when passing it in a proxy URL.
 
-After deploying agents, verify each component:
+### Host names do not resolve
 
-```bash
-# 1. Check each agent is running
-curl http://agent-a:8080/healthz  # Should show running: true
+With `socks5h://` or another mode that sends host names to the proxy, the ingress agent resolves the name with its own system resolver, unless the name matches a domain route, in which case the exit resolves it with `exit.dns`. A name that only internal DNS knows needs a matching `exit.domain_routes` entry on the exit. With `socks5://`, the client resolves the name itself before connecting.
 
-# 2. Check peer connections
-curl http://agent-a:8080/healthz | jq '.peer_count'  # Should be > 0
+## Management commands fail
 
-# 3. Check routes exist
-curl http://agent-a:8080/healthz | jq '.route_count'  # Should match expected routes
+`shell`, `upload`, `download`, and the dynamic configuration commands (`route add`, `peer add`, and others) are authorized with the management signing key.
 
-# 4. Test SOCKS5 proxy (if applicable)
-curl --socks5 127.0.0.1:1080 https://ifconfig.me/ip
+### Signing key missing on the local agent
 
-# 5. Check all nodes visible
-curl http://agent-a:8080/api/nodes | jq '.nodes | length'
+```text
+Error: remote error: management signing private key not configured (set management.signing_private_key)
 ```
 
-**Quick health check script:**
+The agent that the CLI talks to (`-a`, default `localhost:8080`) has no `management.signing_private_key`, so it cannot sign the request. Set the private key on that operator agent.
 
-```bash
-#!/bin/bash
-for agent in "localhost:8080" "remote1:8080" "remote2:8082"; do
-  echo "=== $agent ==="
-  curl -s "http://$agent/healthz" | jq '{running, peers: .peer_count, routes: .route_count}'
-done
+### Signature rejected by the target
+
+```text
+Error: remote error: management signature rejected: management signature verification failed
 ```
 
-## Debug Mode
-
-Enable debug logging for detailed diagnostics:
-
-```bash
-muti-metroo run -c config.yaml
+```text
+Error: upload failed: management signature verification failed
 ```
 
-Set debug level in config:
+The target's `management.signing_public_key` is not the public half of the operator's private key. Deploy the matching public key to the target. To start over, create a new pair with `muti-metroo signing-key generate` and distribute the public key to every agent.
+
+```text
+management signing public key not configured on this agent
+```
+
+The target has no signing public key, so it rejects every privileged request. Add `management.signing_public_key` to its config.
+
+### Command not allowed
+
+```text
+Error: remote error: failed to start session: command 'ls' is not allowed
+```
+
+The command is not in the target's `shell.whitelist`. Add it, or use `["*"]` to allow every command. See [Configuration - Shell](/configuration/shell).
+
+### File transfer path or size rejected
+
+```text
+Error: upload failed: remote error: path not in allowed list: /tmp/report.txt
+```
+
+The path is outside the target's `file_transfer.allowed_paths`. Add the directory to the list. See [Configuration - File Transfer](/configuration/file-transfer).
+
+```text
+Error: upload failed: remote error: file too large: 104857600 bytes (max 10485760)
+```
+
+The file exceeds `file_transfer.max_file_size`. Raise the limit, or set it to `0` for no limit.
+
+## Windows
+
+### Paths in the config file
+
+Backslashes are escape characters in double-quoted YAML strings. Double them, or use forward slashes:
 
 ```yaml
 agent:
-  log_level: "debug"
+  data_dir: "C:/muti-metroo/data"
+
+tls:
+  cert: "C:\\muti-metroo\\certs\\agent1.crt"
 ```
 
-## Getting Help
+### The agent stops when the SSH session ends
 
-If these solutions don't work:
+Processes started in an SSH session are terminated when the session closes. Start the agent with `run --detach`, or install it as a service. See [System Service - Windows](/deployment/system-service#windows-background-start-without-a-service).
 
-1. Check logs with debug level
-2. Review the specific troubleshooting guides
-3. Check the protocol and limits documentation
-4. Search existing issues
-5. Open a new issue with:
-   - Configuration (redacted)
-   - Logs (debug level)
-   - Steps to reproduce
+### Windows Firewall blocks inbound peers
+
+Allow the listener port, or the executable:
+
+```powershell
+netsh advfirewall firewall add rule name="Muti Metroo QUIC" dir=in action=allow protocol=udp localport=4433
+netsh advfirewall firewall add rule name="Muti Metroo" dir=in action=allow program="C:\Program Files\muti-metroo\muti-metroo.exe"
+```
+
+## Collecting information for a bug report
+
+Set `agent.log_level: "debug"` in the config and restart the agent to get detailed logs. Include:
+
+- The output of `muti-metroo config show <config>` (secrets are redacted).
+- The relevant log lines from each agent involved.
+- The output of `muti-metroo status`, `muti-metroo peer status`, and `muti-metroo route status`.
+- The version from `muti-metroo --version`.
 
 ## See Also
 
-- [CLI - Status](/cli/status) - Check agent status
-- [CLI - Peers](/cli/peers) - List connected peers
-- [CLI - Routes](/cli/routes) - View routing table
-- [CLI - Cert](/cli/cert) - Certificate management
-- [API - Health](/api/health) - Health check endpoints
-
-## Next Steps
-
-- [Connectivity Troubleshooting](/troubleshooting/connectivity)
-- [Performance Troubleshooting](/troubleshooting/performance)
-- [FAQ](/troubleshooting/faq)
+- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Diagnosing peers and routes step by step
+- [Performance Troubleshooting](/troubleshooting/performance) - Latency, throughput, and resource use
+- [FAQ](/troubleshooting/faq) - Short answers to common questions
+- [CLI Overview](/cli/overview) - Exit codes and global flags
+- [System Service](/deployment/system-service) - Service logs and startup problems

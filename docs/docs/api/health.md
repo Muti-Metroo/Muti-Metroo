@@ -1,5 +1,7 @@
 ---
 title: Health Endpoints
+description: Liveness, readiness, and statistics endpoints for load balancers, orchestrators, and monitoring.
+sidebar_position: 2
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,88 +10,103 @@ title: Health Endpoints
 
 # Health Endpoints
 
-Check if an agent is running and ready to handle traffic. Use these for load balancer health checks, container orchestration probes, or monitoring scripts.
+Three endpoints report whether the agent is running. They are always enabled, including with `http.minimal: true`, and never require the bearer token, so load balancers and container orchestrators can call them without credentials.
 
-**Quick check:**
+| Endpoint | Response | Use for |
+| -------- | -------- | ------- |
+| `GET /health` | `OK` (plain text) | Liveness: the HTTP server responds |
+| `GET /ready` | `READY` or `NOT READY` (plain text) | Readiness: the agent is running |
+| `GET /healthz` | JSON statistics | Monitoring scripts and dashboards |
+
+All three accept only `GET`; other methods return `405 Method Not Allowed`.
+
+## `GET /health`
+
+Returns `200 OK` with the body `OK` whenever the HTTP server is up.
 
 ```bash
-curl http://localhost:8080/healthz
-# Returns: peer count, stream count, route count, and status
+curl http://localhost:8080/health
 ```
 
-## GET /health
-
-Basic health check.
-
-**Response:**
-
-```
+```text
 OK
 ```
 
-**Status:** 200 OK
+## `GET /ready`
 
-## GET /healthz
+Returns `200 OK` with `READY` when the agent is running, and `503 Service Unavailable` with `NOT READY` otherwise.
 
-Detailed health check with statistics.
-
-**Response (200 OK):**
-
-```json
-{
-  "status": "healthy",
-  "running": true,
-  "peer_count": 3,
-  "stream_count": 42,
-  "route_count": 5,
-  "socks5_running": true,
-  "exit_handler_running": false,
-  "can_sign_management": true,
-  "accepts_signed_management": true
-}
+```bash
+curl http://localhost:8080/ready
 ```
 
-`can_sign_management` is `true` when this agent holds the management signing private key and can therefore initiate management command sessions, file transfers, dynamic config mutations, and sleep/wake. `accepts_signed_management` is `true` when this agent holds the matching public key and will verify signed requests from other agents. Web dashboards and clients use these flags to enable or disable management UI without probing each feature. See [Authentication](/security/authentication) for the full authorization model.
-
-**Response (503 Service Unavailable):**
-
-```json
-{
-  "status": "unavailable",
-  "running": false
-}
-```
-
-Returns 503 Service Unavailable if agent is not running.
-
-## GET /ready
-
-Readiness probe for container orchestration.
-
-**Response:**
-
-```
+```text
 READY
 ```
 
-Returns 200 if agent is ready to accept traffic.
-Returns 503 with "NOT READY" if agent is not running.
+## `GET /healthz`
 
-## Examples
+Returns agent statistics as JSON.
 
 ```bash
-# Basic health check
-curl http://localhost:8080/health
-
-# Detailed health
 curl http://localhost:8080/healthz
+```
 
-# Readiness
-curl http://localhost:8080/ready
+**Response (200):**
+
+```json
+{
+  "accepts_signed_management": true,
+  "can_sign_management": true,
+  "exit_handler_running": false,
+  "peer_count": 1,
+  "route_count": 2,
+  "running": true,
+  "socks5_running": true,
+  "status": "healthy",
+  "stream_count": 0
+}
+```
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `status` | string | `healthy` |
+| `running` | boolean | Always `true` in a 200 response |
+| `peer_count` | integer | Connected peers |
+| `stream_count` | integer | Open virtual streams |
+| `route_count` | integer | Entries in the CIDR route table, local and learned |
+| `socks5_running` | boolean | The SOCKS listener is running |
+| `exit_handler_running` | boolean | The exit handler is running (exit enabled, or a dynamic route was added) |
+| `can_sign_management` | boolean | The agent has `management.signing_private_key` and can initiate privileged operations |
+| `accepts_signed_management` | boolean | The agent has `management.signing_public_key` and executes signed privileged operations from other agents |
+
+Clients such as Muti Metroo Manager use the two `*_management` flags to decide whether to offer management actions. See [Authentication](/security/authentication).
+
+**Response (503)** when the agent is not running:
+
+```json
+{
+  "running": false,
+  "status": "unavailable"
+}
+```
+
+## Container probes
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
 ```
 
 ## See Also
 
-- [CLI - Status](/cli/status) - Check agent status from CLI
-- [HTTP Configuration](/configuration/http) - Configure HTTP endpoints
-- [Deployment Scenarios](/deployment/scenarios) - Using health checks in production
+- [HTTP API Overview](/api/overview) - Endpoint groups and authentication
+- [HTTP Configuration](/configuration/http) - Enable the HTTP server
+- [CLI - status](/cli/status) - Check agent status from the command line
+- [Docker Deployment](/deployment/docker) - Health checks in containers

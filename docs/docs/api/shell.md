@@ -1,5 +1,7 @@
 ---
 title: Management Commands WebSocket API
+description: WebSocket endpoint and message format for running management commands on remote agents.
+sidebar_position: 11
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,175 +10,97 @@ title: Management Commands WebSocket API
 
 # Management Commands WebSocket API
 
-Run management commands on remote agents through the mesh. The CLI handles this automatically - this reference is for building custom integrations.
+The shell endpoint runs a command on a remote agent and streams its input and output over a WebSocket. The [`muti-metroo shell`](/cli/shell) command is a client of this endpoint; this page is for building other clients.
 
-**Using the CLI (recommended):**
+## `GET /agents/{id}/shell`
 
-```bash
-muti-metroo shell abc123 whoami
-muti-metroo shell --tty abc123 bash
+```text
+ws://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/shell?mode=stream
 ```
 
-**WebSocket endpoint for custom clients:**
+| Item | Value |
+| ---- | ----- |
+| Group | Remote API (`http.remote_api`) |
+| Subprotocol | `muti-metroo-shell` |
+| Query parameter `mode` | `stream`: run without a terminal, stdout and stderr separate. Any other value, or no value: interactive session with a pseudo-terminal. |
+| Query parameter `token` | Bearer token, for clients that cannot send an `Authorization` header |
+| Target | A remote agent; the local agent's own ID is not reachable |
 
-```
-ws://localhost:8080/agents/{agent-id}/shell?mode=tty
-```
+### Requirements
 
-## WebSocket Endpoint
+- The agent serving the request has `management.signing_private_key`. It signs every session on the client's behalf; any `auth` value the client sends is replaced.
+- The target agent has `management.signing_public_key`, `shell.enabled: true`, and the command in `shell.whitelist`. See [Management Commands Configuration](/configuration/shell).
 
-```
-GET /agents/{agent-id}/shell?mode=tty|stream
-```
+## Message format
 
-### Query Parameters
+Every WebSocket message is binary. The first byte is the message type; the rest is the payload.
 
-| Parameter | Values   | Description                         |
-| --------- | -------- | ----------------------------------- |
-| `mode`    | `tty`    | Interactive mode with PTY (default) |
-|           | `stream` | Streaming mode without PTY          |
+| Byte | Name | Direction | Payload |
+| ---- | ---- | --------- | ------- |
+| `0x01` | META | client to server | JSON session request; must be the first message |
+| `0x02` | ACK | server to client | JSON `{"success": true}` or `{"success": false, "error": "..."}` |
+| `0x03` | STDIN | client to server | Raw input bytes |
+| `0x04` | STDOUT | server to client | Raw output bytes |
+| `0x05` | STDERR | server to client | Raw error output bytes (stream mode only) |
+| `0x06` | RESIZE | client to server | 4 bytes: rows and columns, each a big-endian uint16 |
+| `0x07` | SIGNAL | client to server | 1 byte: signal number, for example `2` for SIGINT |
+| `0x08` | EXIT | server to client | 4 bytes: exit code, big-endian int32 |
+| `0x09` | ERROR | server to client | JSON `{"message": "...", "code": 21}`; `code` is optional |
+| `0x0a` | STDIN_CLOSE | client to server | No payload. Closes the command's standard input so commands that read until end of input (`cat`, `wc`, `sort`) can finish. |
 
-### Subprotocol
-
-The WebSocket uses the `muti-metroo-shell` subprotocol.
-
-## Message Protocol
-
-The WebSocket uses a binary message protocol. All messages have a 1-byte type prefix followed by the payload. The CLI handles this protocol automatically - you only need to understand it if building custom integrations.
-
-### Message Types
-
-| Name        | Direction       | Description                                                                                                                |
-| ----------- | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| META        | Client → Server | JSON metadata to start session                                                                                             |
-| ACK         | Server → Client | JSON acknowledgment                                                                                                        |
-| STDIN       | Client → Server | Keyboard input (raw bytes)                                                                                                 |
-| STDIN_CLOSE | Client → Server | Stdin EOF; server closes the child's stdin so EOF-sensitive commands (cat, wc, sort, sha256sum) can terminate. No payload. |
-| STDOUT      | Server → Client | Command output (raw bytes)                                                                                                 |
-| STDERR      | Server → Client | Error output (raw bytes, normal mode only)                                                                                 |
-| RESIZE      | Client → Server | Terminal resize notification                                                                                               |
-| SIGNAL      | Client → Server | Signal to send (e.g., SIGINT)                                                                                              |
-| EXIT        | Server → Client | Process exit code                                                                                                          |
-| ERROR       | Server → Client | JSON error message                                                                                                         |
-
-## Session Flow
-
-### 1. Connect
-
-```
-WebSocket: ws://localhost:8080/agents/abc123/shell?mode=tty
-Subprotocol: muti-metroo-shell
-```
-
-### 2. Send Metadata (META)
-
-First message must be META with session configuration:
+### META payload
 
 ```json
 {
   "command": "bash",
   "args": ["-l"],
-  "env": { "TERM": "xterm-256color" },
-  "work_dir": "/home/user",
-  "tty": {
-    "rows": 24,
-    "cols": 80,
-    "term": "xterm-256color"
-  },
-  "timeout": 3600,
-  "auth": {
-    "origin_agent": "...",
-    "target_agent": "...",
-    "timestamp": 1745193600,
-    "signature": "..."
-  }
+  "env": {"LANG": "C.UTF-8"},
+  "work_dir": "/tmp",
+  "tty": {"rows": 24, "cols": 80, "term": "xterm-256color"},
+  "timeout": 3600
 }
 ```
 
-| Field      | Type     | Description                                                                                                                                 |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `command`  | string   | Command to execute (required)                                                                                                               |
-| `args`     | string[] | Command arguments                                                                                                                           |
-| `env`      | object   | Additional environment variables                                                                                                            |
-| `work_dir` | string   | Working directory                                                                                                                           |
-| `tty`      | object   | TTY settings (for interactive mode)                                                                                                         |
-| `tty.rows` | number   | Terminal rows                                                                                                                               |
-| `tty.cols` | number   | Terminal columns                                                                                                                            |
-| `tty.term` | string   | TERM value (default: xterm-256color)                                                                                                        |
-| `timeout`  | number   | Session timeout in seconds                                                                                                                  |
-| `auth`     | object   | Management-key signature (normally filled in by the gateway agent on the client's behalf -- see [Authentication](/security/authentication)) |
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `command` | string | Command to run; required |
+| `args` | string[] | Arguments |
+| `env` | object | Extra environment variables |
+| `work_dir` | string | Working directory |
+| `tty` | object | Terminal size and `TERM` (default `xterm-256color`); set it for interactive sessions |
+| `timeout` | integer | Session timeout in seconds; `0` or omitted means no timeout |
 
-### 3. Receive Acknowledgment (ACK)
+## Session flow
 
-```json
-{
-  "success": true
-}
-```
+1. Open the WebSocket with the `muti-metroo-shell` subprotocol.
+2. Send META.
+3. Read the first message. ACK with `success: true` means the command started. ERROR or ACK with `success: false` means it did not; the server then closes the WebSocket.
+4. Exchange STDIN, STDOUT, STDERR, RESIZE, SIGNAL, and STDIN_CLOSE messages.
+5. When the command exits, the server sends EXIT and closes the WebSocket.
 
-If `success` is false, the session failed to start.
+## Errors
 
-### 4. Data Exchange
+Errors after the WebSocket is open arrive as ERROR messages:
 
-After ACK, send and receive data:
+| `code` | Meaning |
+| ------ | ------- |
+| `21` | Missing signature, or the target has no `management.signing_public_key` |
+| `22` | Signature rejected: wrong key, wrong target, or expired |
+| omitted | Any other failure, for example the command is not in the whitelist, the session limit is reached, or the target has management commands disabled |
 
-- **STDIN**: Send keyboard input as raw bytes
-- **STDIN_CLOSE**: Signal stdin EOF when piping data from a finite source (`cat file | muti-metroo shell ... wc -l`). The server closes the child process's stdin so the command can exit.
-- **STDOUT**: Receive command output
-- **STDERR**: Receive error output (normal mode only)
-- **RESIZE**: Send terminal size changes
-- **SIGNAL**: Send signals (e.g., SIGINT = 2)
+Errors before the upgrade are plain HTTP responses: `401` for a missing bearer token, `503 shell not available` when the agent has no shell support, and `400` for an invalid agent ID or a failed upgrade.
 
-### 5. Session End
+WebSocket close codes:
 
-The server sends EXIT with the exit code, then closes the WebSocket.
-
-## Error Handling
-
-### ERROR Message
-
-```json
-{
-  "message": "command not allowed"
-}
-```
-
-Sent when:
-
-- Command not in whitelist
-- Authentication failed
-- Session limit reached
-- Other server errors
-
-### WebSocket Close Codes
-
-| Code | Reason         |
-| ---- | -------------- |
+| Code | Meaning |
+| ---- | ------- |
 | 1000 | Normal closure |
-| 1002 | Protocol error |
-| 1011 | Internal error |
-
-## Custom Client Integration
-
-For custom integrations, refer to the binary protocol implementation. The message format uses a 1-byte type prefix:
-
-| Type Byte | Message                                   |
-| --------- | ----------------------------------------- |
-| 0x01      | META                                      |
-| 0x02      | ACK                                       |
-| 0x03      | STDIN                                     |
-| 0x04      | STDOUT                                    |
-| 0x05      | STDERR                                    |
-| 0x06      | RESIZE (4 bytes: rows, cols as uint16 BE) |
-| 0x07      | SIGNAL (1 byte: signal number)            |
-| 0x08      | EXIT (4 bytes: exit code as int32 BE)     |
-| 0x09      | ERROR                                     |
-| 0x0a      | STDIN_CLOSE (no payload)                  |
-
-For a complete implementation example, see the CLI source code in the project repository.
+| 1002 | Protocol error: the first message was not a valid META |
+| 1011 | The session could not be opened or ended unexpectedly |
 
 ## See Also
 
 - [Management Commands](/features/shell) - Feature overview
-- [CLI - shell](/cli/shell) - CLI reference
-- [Management Commands Configuration](/configuration/shell) - Enable and configure management commands
+- [CLI - shell](/cli/shell) - Command-line client
+- [Management Commands Configuration](/configuration/shell) - Enable commands and set the whitelist
+- [Authentication](/security/authentication) - Management signing keys

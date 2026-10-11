@@ -1,58 +1,36 @@
-# Display Name Management API
-
-HTTP endpoints for managing the agent display name at runtime.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/display-name/manage` | POST | Manage display name on local agent |
-| `/agents/{agent-id}/display-name/manage` | POST | Manage display name on remote agent |
-
-These endpoints require `http.remote_api: true` in configuration.
-
+---
+title: Display Name Management Endpoints
+description: Read or change the display name of a local or remote agent at runtime.
+sidebar_position: 9
 ---
 
-## POST /display-name/manage
+# Display Name Management Endpoints
 
-Manage the display name on the local agent.
+These endpoints read and change an agent's display name, the label shown in topology views, route lists, and CLI output. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /display-name/manage` | Display name of the local agent |
+| `POST /agents/{id}/display-name/manage` | Display name of a remote agent |
+
+## `POST /display-name/manage`
 
 ### Request
 
-Set the display name:
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `get` or `set` |
+| `name` | string | `set` | New display name, up to 255 bytes. An empty string reverts to `agent.display_name` from the configuration. |
+
+`set` is a mutation: the agent serving the request must have `management.signing_private_key`, otherwise it returns `403`. The new name is advertised to peers immediately and is written to the [dynamic configuration journal](/configuration/dynamic-config-persistence) when `agent.data_dir` is set, so it survives restart.
+
+### `set`
 
 ```bash
 curl -X POST http://localhost:8080/display-name/manage \
   -H "Content-Type: application/json" \
   -d '{"action": "set", "name": "gateway-us-east"}'
 ```
-
-Get the current display name:
-
-```bash
-curl -X POST http://localhost:8080/display-name/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "get"}'
-```
-
-Revert to the config value (set empty name):
-
-```bash
-curl -X POST http://localhost:8080/display-name/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "set", "name": ""}'
-```
-
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | Action to perform: `set` or `get` |
-| `name` | string | For set | Display name to set (empty string reverts to config value) |
-
-### Response
-
-**Set Success (200)**:
 
 ```json
 {
@@ -62,7 +40,15 @@ curl -X POST http://localhost:8080/display-name/manage \
 }
 ```
 
-**Get Success (200)**:
+`name` in the response is the effective display name. After a `set` with an empty name it is the configured name, or the short agent ID when none is configured.
+
+### `get`
+
+```bash
+curl -X POST http://localhost:8080/display-name/manage \
+  -H "Content-Type: application/json" \
+  -d '{"action": "get"}'
+```
 
 ```json
 {
@@ -71,110 +57,47 @@ curl -X POST http://localhost:8080/display-name/manage \
 }
 ```
 
-**Bad Request (400)**:
+The effective name is the runtime name if one is set, otherwise `agent.display_name`, otherwise the short agent ID.
+
+### Errors
+
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"display name is 300 bytes, maximum is 255"}` | Name too long |
+| 400 | `{"error":"unknown action \"foo\" (expected set or get)"}` | Invalid `action` |
+| 400 | `{"error":"invalid request: ..."}` | Body is not valid JSON |
+| 403 | `management signing private key not configured on this agent` | `set` without a signing private key |
+| 403 | `display name management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 405 | `method not allowed` | Method other than `POST` |
+
+## `POST /agents/{id}/display-name/manage`
+
+Reads or changes the display name of a remote agent. The request body and responses are the same as for [`POST /display-name/manage`](#post-display-namemanage).
+
+```bash
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/display-name/manage \
+  -H "Content-Type: application/json" \
+  -d '{"action": "set", "name": "exit-eu"}'
+```
 
 ```json
 {
-  "error": "unknown action foo (expected set or get)"
+  "status": "ok",
+  "message": "display name set to \"exit-eu\"",
+  "name": "exit-eu"
 }
 ```
 
-**Forbidden (403)**:
+The local agent signs `set` and forwards the request over the mesh; the target verifies the signature with its `management.signing_public_key`. Additional errors:
 
-```
-display name management restricted: management key decryption unavailable
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"management signing public key not configured on this agent"}` | The target has no signing public key |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
 
-**Service Unavailable (503)**:
+## See Also
 
-```
-display name management not configured
-```
-
-### Behavior
-
-When a display name is set:
-1. The name is stored in memory
-2. Route advertisements are triggered immediately
-3. Node info is re-advertised to peers
-4. The new name appears in dashboard, topology, and agent listings
-
-When a display name is retrieved:
-1. Returns the current effective display name
-2. Priority: dynamic name > config name > short agent ID
-
-Setting an empty name reverts to the configured `agent.display_name` value.
-
-Dynamic display names:
-- Are ephemeral (lost on agent restart)
-- Override the config-file display name while set
-- Are immediately propagated to all connected peers
-
----
-
-## POST /agents/\{agent-id\}/display-name/manage
-
-Manage the display name on a remote agent.
-
-### Request
-
-Set display name on remote agent:
-
-```bash
-curl -X POST http://localhost:8080/agents/abc123def456/display-name/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "set", "name": "exit-eu-west"}'
-```
-
-Get display name from remote agent:
-
-```bash
-curl -X POST http://localhost:8080/agents/abc123def456/display-name/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "get"}'
-```
-
-### Request Body
-
-Same as `/display-name/manage`.
-
-### Response
-
-Same response formats as `/display-name/manage`.
-
-The request is forwarded to the target agent via the mesh control channel. The response reflects the result from the remote agent.
-
-### Error Responses
-
-Additional error cases for remote display name management:
-
-**Agent Not Found or Unreachable (502)**:
-
-```
-failed to send request: <error details>
-```
-
-All remote failures (agent not found, timeout, routing errors) return 502 Bad Gateway with a plain text error message.
-
----
-
-## Error Responses
-
-All endpoints may return:
-
-| Status | Description |
-|--------|-------------|
-| 400 | Invalid request body or parameters |
-| 403 | Management key required but unavailable |
-| 404 | Endpoint disabled (remote_api not enabled) |
-| 405 | Method not allowed (must be POST) |
-| 502 | Remote agent not found, unreachable, or timed out |
-| 503 | Display name management not configured |
-
-:::note Management Key Protection
-Display name management endpoints follow the same management key restrictions as route management. Agents with only `management.public_key` (field agents) cannot manage display names. Agents with both keys (operator nodes) can manage display names freely. If no management key is configured, display name management is unrestricted.
-:::
-
-:::warning Dynamic Display Names are Ephemeral
-Dynamic display names set via the API are lost when the agent restarts. For persistent names, set `agent.display_name` in the configuration file.
-:::
+- [CLI - display-name](/cli/display-name) - The `display-name` commands that call these endpoints
+- [Agent Configuration](/configuration/agent) - The configured `display_name`
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart

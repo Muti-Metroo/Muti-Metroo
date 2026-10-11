@@ -1,5 +1,8 @@
 ---
-title: mesh-test
+title: muti-metroo mesh-test
+sidebar_label: mesh-test
+sidebar_position: 20
+description: Ask an agent to send a status request to every agent it knows about and report which ones answer.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,16 +11,11 @@ title: mesh-test
 
 # muti-metroo mesh-test
 
-Test connectivity to all known agents in the mesh network. Sends a status request to each agent and reports reachability along with response times.
+Asks a running agent to test connectivity to every agent it knows about. The agent sends a status request through the mesh to each one and reports whether it answered and how long the round trip took.
 
-**Quick test:**
-```bash
-# Test all mesh agents via local agent
-muti-metroo mesh-test
+The command talks to the agent's HTTP API, which must have the dashboard endpoints enabled (`http.dashboard`, on by default). See [HTTP API configuration](../configuration/http.md).
 
-# JSON output for scripting
-muti-metroo mesh-test --json
-```
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
 ## Synopsis
 
@@ -25,62 +23,50 @@ muti-metroo mesh-test --json
 muti-metroo mesh-test [flags]
 ```
 
-## What It Tests
+## Description
 
-1. **Agent discovery** - Queries the local agent for all known agents in the mesh
-2. **Status request** - Sends a control-plane status request to each agent through the mesh
-3. **Response timing** - Measures round-trip time for each agent's response
+The agent at `--agent` builds its list of known agents (itself plus every agent in its agent table), then tests up to ten of them in parallel. Each remote agent has 10 seconds to answer; the local agent is always reported as reachable. The agent runs a fresh test every time the command is used.
 
-The test runs through the local agent's HTTP API, using the mesh network to reach remote agents.
+When the agent has a management `public_key` but not the `private_key`, it does not reveal the mesh topology and reports only itself. See [Management keys](../configuration/management.md).
 
 ## Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--timeout` | `-t` | `30s` | Overall timeout for the test |
-| `--json` | | `false` | Output in JSON format |
-| `-h, --help` | | | Show help |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address, as `host:port` or a URL. See [Agent address](overview.md#agent-address). |
+| `-w`, `--timeout` | `30s` | Overall timeout for the request to the agent, as a Go duration. |
+| `--json` | `false` | Print the agent's JSON response. |
 
-## Examples
+`-t` is a deprecated alias for `--timeout`; it still works but prints a warning to stderr. See [Deprecated commands and flags](overview.md#deprecated-commands-and-flags).
 
-### Basic Mesh Test
+## Output
 
 ```bash
 muti-metroo mesh-test
 ```
 
-Output:
-
-```
+```text
 Testing mesh connectivity...
 
 AGENT                STATUS       RESPONSE TIME
 -----                ------       -------------
 gateway-1            OK           local
-exit-us-west         OK           45ms
-exit-eu-east         OK           123ms
-transit-1            OK           67ms
-exit-offline         FAILED       timeout after 10s
+exit-1               OK           42ms
 
-Summary: 4/5 agents reachable (tested in 1.2s)
+Summary: 2/2 agents reachable (tested in 0.1s)
 ```
 
-### JSON Output
+The `AGENT` column shows the display name, or the short agent ID when the agent has none. For an unreachable agent, `STATUS` is `FAILED` and the last column carries the error reported by the agent instead of a time.
 
-```bash
-muti-metroo mesh-test --json
-```
-
-Output:
+With `--json`:
 
 ```json
 {
   "local_agent": "abc123de",
-  "test_time": "2026-01-27T10:30:00Z",
-  "duration_ms": 1200,
-  "total_count": 5,
-  "reachable_count": 4,
+  "test_time": "2026-10-11T14:54:18.695448+03:00",
+  "duration_ms": 112,
+  "total_count": 2,
+  "reachable_count": 2,
   "results": [
     {
       "agent_id": "abc123def456789012345678901234ab",
@@ -93,60 +79,30 @@ Output:
     {
       "agent_id": "def456789012345678901234567890cd",
       "short_id": "def45678",
-      "display_name": "exit-us-west",
+      "display_name": "exit-1",
       "is_local": false,
       "reachable": true,
-      "response_time_ms": 45
+      "response_time_ms": 42
     }
   ]
 }
 ```
 
-### Test via Different Agent
+An unreachable agent has `"reachable": false`, `"response_time_ms": -1` (when it did not answer at all), and an `error` field.
+
+## Examples
 
 ```bash
+# Test through the local agent
+muti-metroo mesh-test
+
+# Test from a different agent's point of view
 muti-metroo mesh-test -a 192.168.1.10:8080
-```
 
-### Custom Timeout
+# Allow more time in a large mesh
+muti-metroo mesh-test -w 60s
 
-```bash
-muti-metroo mesh-test -t 60s
-```
-
-## HTTP API
-
-The `mesh-test` command calls the `/api/mesh-test` endpoint on the target agent.
-
-| Method | Behavior |
-|--------|----------|
-| `POST /api/mesh-test` | Force a fresh connectivity test (used by CLI) |
-| `GET /api/mesh-test` | Return cached results if available (30s cache TTL) |
-
-```bash
-# Via curl (fresh test)
-curl -X POST http://localhost:8080/api/mesh-test | jq
-
-# Via curl (cached results)
-curl http://localhost:8080/api/mesh-test | jq
-```
-
-## Use Cases
-
-### Pre-operation Verification
-
-Before running remote operations (shell, file transfer), verify all agents are reachable:
-
-```bash
-muti-metroo mesh-test && muti-metroo shell exit-agent whoami
-```
-
-### Monitoring Script
-
-Periodically check mesh health:
-
-```bash
-#!/bin/bash
+# Alert when any agent is unreachable
 result=$(muti-metroo mesh-test --json)
 total=$(echo "$result" | jq '.total_count')
 reachable=$(echo "$result" | jq '.reachable_count')
@@ -155,27 +111,13 @@ if [ "$total" != "$reachable" ]; then
 fi
 ```
 
-### Multi-agent Diagnostics
+## Exit status
 
-Compare connectivity from different vantage points:
+The command exits 0 when the test completes, even if some agents are unreachable; check the summary or `reachable_count`. It exits 3 when the agent at `--agent` cannot be reached and 1 for any other error, including an HTTP error status such as a rejected bearer token. See [Exit codes](overview.md#exit-codes).
 
-```bash
-for agent in "localhost:8080" "192.168.1.10:8080" "10.0.0.1:8080"; do
-  echo "=== From $agent ==="
-  muti-metroo mesh-test -a "$agent"
-  echo
-done
-```
+## See Also
 
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Test completed (check results for individual agent status) |
-| 1 | Error (cannot connect to local agent or invalid flags) |
-
-## Related
-
-- [Status](/cli/status) - Show local agent status
-- [Peers](/cli/peers) - List connected peers
-- [Dashboard API](/api/dashboard) - Dashboard and mesh-test API endpoints
+- [status](status.md): show the state of a single agent
+- [peer](peer.md): list direct peer connections with `peer status`
+- [probe](probe.md): test a transport listener that is not yet part of the mesh
+- [Dashboard API](../api/dashboard.md): the `/api/mesh-test` endpoint this command calls

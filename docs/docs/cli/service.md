@@ -1,5 +1,8 @@
 ---
-title: service
+title: muti-metroo service
+sidebar_label: service
+sidebar_position: 11
+description: Install, remove, and query Muti Metroo as a systemd, launchd, Windows, or per-user service.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,104 +11,139 @@ title: service
 
 # muti-metroo service
 
-Install the agent as a system service so it starts automatically on boot and restarts if it crashes. Works on Linux (systemd, systemd --user, or cron), macOS (launchd), and Windows.
+Registers the agent with the operating system's service manager so it starts at boot or logon, and removes or queries that registration. Every install method starts the agent immediately.
 
-**Quick install:**
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
+
+| Platform | Without `--user` | With `--user` |
+| --- | --- | --- |
+| Linux | systemd system unit (requires root) | systemd user unit, or cron `@reboot` with `nohup` when systemd user sessions are not available |
+| macOS | launchd daemon (requires root) | Not supported |
+| Windows | Windows service (requires Administrator) | `HKCU` Registry Run key that starts the DLL with `rundll32.exe` |
+
+## service install
+
 ```bash
-# Linux/macOS (requires root)
+muti-metroo service install -c <config> [flags]
+```
+
+Installs and starts the service. The configuration path is resolved to an absolute path and must exist. The command fails if a service with the same name is already installed.
+
+For a system service (without `--user`), the running binary is copied to a standard location first, unless `--deploy=false` is given:
+
+| Platform | Binary location with `--deploy` |
+| --- | --- |
+| Linux, macOS | `/usr/local/bin/<name>` |
+| Windows | `%ProgramFiles%\<name>\<name>.exe` |
+
+With `--deploy=false`, the service runs the binary from its current location. User services always run the binary from its current location.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-c`, `--config` | none (required) | Path to the configuration file. |
+| `-n`, `--name` | `muti-metroo` | Service name. It names the unit, plist, Windows service, or Registry value, and the deployed binary. |
+| `--deploy` | `true` | Copy the binary to the standard location before installing a system service. |
+| `--user` | `false` | Install a per-user service that needs no root or Administrator rights. Linux and Windows only. |
+| `--user-method` | `auto` | Linux user-service backend: `auto`, `systemd`, or `cron`. `auto` uses systemd when a user session is reachable, otherwise cron. |
+| `--dll` | none | Path to `muti-metroo.dll`. Required with `--user` on Windows. |
+
+### Linux system service (systemd)
+
+Run as root. Creates `/etc/systemd/system/<name>.service`, reloads systemd, then enables and starts the unit. The unit runs `<binary> run -c <config>` with:
+
+- `Restart=on-failure` with a 5 second delay.
+- `ProtectSystem=strict` and `ProtectHome=read-only`. The agent can write only to the configuration file's directory and the `agent.data_dir` from the configuration (`ReadWritePaths`). File uploads to other paths fail unless you extend `ReadWritePaths` in the unit.
+- `NoNewPrivileges=true` and `PrivateTmp=true`.
+- Output to the journal under the service name.
+
+ICMP relay through a systemd service still needs the host's `net.ipv4.ping_group_range` sysctl to allow unprivileged ping sockets, even as root; see [ICMP configuration](../configuration/icmp.md).
+
+### Linux user service (systemd user unit)
+
+With `--user`, and `--user-method` set to `systemd` or to `auto` with a reachable user systemd instance. Creates `~/.config/systemd/user/<name>.service`, runs `systemctl --user enable --now`, and then attempts `loginctl enable-linger` for the current user so the service keeps running after logout. If enabling linger is not permitted, the command prints the `sudo loginctl enable-linger <user>` command to run. The unit restarts on failure and logs to the user journal.
+
+### Linux user service (cron)
+
+With `--user`, and `--user-method` set to `cron` or to `auto` without a reachable user systemd instance. Requires `crontab`. Creates the wrapper script `~/.<name>/<name>.sh`, adds an `@reboot` entry to the user's crontab, and runs the script. The agent runs under `nohup` with its PID in `~/.<name>/<name>.pid` and its output appended to `~/.<name>/<name>.log`. The agent is not restarted if it exits.
+
+### macOS (launchd)
+
+Run as root. Creates `/Library/LaunchDaemons/com.<name>.plist` and loads it with `launchctl load -w`. The daemon starts at boot and is restarted when it exits with an error. Output goes to `<name>.log` and `<name>.err.log` in the configuration file's directory.
+
+### Windows service
+
+Run as Administrator. Registers a service with automatic start that runs as LocalSystem, then starts it. No recovery actions are configured, so Windows does not restart the service after a crash unless you add them (for example with `sc failure`).
+
+### Windows user service (Registry Run key)
+
+With `--user` and `--dll`. Adds a value to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `rundll32.exe <dll>,Run <config>` at logon, and starts the agent immediately. No console window is shown and the process appears as `rundll32.exe`. The agent is not restarted if it exits.
+
+The Registry value name is the service name converted to PascalCase: hyphens, underscores, and spaces separate words, and the words are joined. The default `muti-metroo` becomes `MutiMetroo`, and `my-tunnel` or `My Tunnel` becomes `MyTunnel`.
+
+### Examples
+
+```bash
+# Linux or macOS system service
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
 
-# Linux without root (auto-picks systemd --user when available, else cron+nohup)
+# Keep the binary where it is
+sudo muti-metroo service install -c /etc/muti-metroo/config.yaml --deploy=false
+
+# Linux user service, backend chosen automatically
 muti-metroo service install --user -c ~/muti-metroo/config.yaml
 
-# Windows (as Administrator)
-muti-metroo service install -c C:\muti-metroo\config.yaml
-
-# Windows without admin (uses Registry Run key + DLL)
-muti-metroo service install --user --dll C:\path\to\muti-metroo.dll -c C:\muti-metroo\config.yaml
+# Linux user service, force cron
+muti-metroo service install --user --user-method cron -c ~/muti-metroo/config.yaml
 ```
 
-## Subcommands
+```powershell
+# Windows service (Administrator)
+muti-metroo.exe service install -c C:\muti-metroo\config.yaml
 
-### service install
+# Windows user service with a custom name
+muti-metroo.exe service install --user -n my-tunnel --dll C:\muti-metroo\muti-metroo.dll -c C:\muti-metroo\config.yaml
+```
 
-Install as system service.
+## service status
 
 ```bash
-muti-metroo service install -c <config-file> [-n <service-name>] [--user] [--dll <dll-path>]
+muti-metroo service status [flags]
 ```
 
-**Flags:**
-- `-c, --config <file>`: Configuration file path (required)
-- `-n, --name <name>`: Service name (default: muti-metroo)
-- `--deploy`: Copy binary to system location (default: true). Installs to `/usr/local/bin` on Linux/macOS or `C:\Program Files\<name>` on Windows. Use `--deploy=false` to use the binary from its current location.
-- `--user`: Install as user service (Linux: systemd --user or cron+nohup, auto-detected; Windows: Registry Run)
-- `--user-method <auto|systemd|cron>`: Force a specific Linux user-service backend (default: `auto`, prefers `systemd` when available)
-- `--dll <path>`: Path to muti-metroo.dll (Windows `--user` mode only)
+Prints whether the service is installed and its current state. On Linux and Windows a user service with the given name is reported first; otherwise the system service is reported. The command exits with `0` when nothing is installed.
 
-**Linux (systemd)** - requires root:
-- Creates `/etc/systemd/system/muti-metroo.service`
-- Reloads systemd daemon
-- Enables automatic startup
+The state comes from the platform: `systemctl is-active` on Linux (for example `active` or `inactive`), `running` or `stopped` on macOS, and `running`, `stopped`, `starting`, or `stopping` for a Windows service. A Linux systemd user service reports the state with the linger setting, for example `active (systemd-user, linger=yes)`. A cron user service reports `active (pid <pid>, cron+nohup)` or `inactive`. A Windows user service reports `running as '<name>'` or `stopped (installed as '<name>')`.
 
-**Linux (systemd --user)** - with `--user` flag, no root required (preferred when available):
-- Creates `~/.config/systemd/user/muti-metroo.service`
-- Reloads the user systemd manager and enables the unit (`systemctl --user enable --now`)
-- Best-effort runs `loginctl enable-linger <user>` so the unit survives logout (prints a warning if linger could not be enabled)
-- Logs to journald (view with `journalctl --user -u muti-metroo -f`)
+### Flags
 
-**Linux (cron+nohup)** - with `--user` flag, used when systemd --user is not available:
-- Creates `~/.muti-metroo/muti-metroo.sh` wrapper script
-- Adds `@reboot` cron entry
-- Logs to `~/.muti-metroo/muti-metroo.log`
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-n`, `--name` | `muti-metroo` | Service name. |
+| `--json` | `false` | Print a JSON object instead of text. |
 
-**macOS (launchd)** - requires root:
-- Creates `/Library/LaunchDaemons/com.muti-metroo.plist`
-- Loads service with `launchctl`
-
-**Windows Service** - requires Administrator:
-- Registers Windows Service
-- Sets to automatic startup
-
-**Windows Registry Run** - with `--user --dll` flags, no admin required:
-- Adds entry to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-- Runs at user logon via `rundll32.exe`
-- No console window (background execution)
-- The `-n` flag sets the Registry value name, converted to PascalCase (e.g., "My Tunnel" becomes "MyTunnel")
-
-:::tip Auto-Start
-All installation methods start the service immediately after installation. You don't need to manually start it or reboot.
-:::
-
-### service uninstall
-
-Uninstall system service.
+### Examples
 
 ```bash
-muti-metroo service uninstall [-n <service-name>] [-f]
+muti-metroo service status
 ```
 
-**Flags:**
-- `-n, --name <name>`: Service name (default: muti-metroo)
-- `-f, --force`: Skip confirmation prompt
+```text
+Service 'muti-metroo' is not installed.
+```
 
-Removes service registration. On Linux and Windows, automatically detects whether system service or user service was used.
+For an installed system service:
 
-### service status
-
-Check service status.
+```text
+Service: muti-metroo
+Status: running
+Platform: darwin
+```
 
 ```bash
-muti-metroo service status [-n <service-name>] [--json]
+muti-metroo service status --json
 ```
-
-**Flags:**
-- `-n, --name <name>`: Service name (default: muti-metroo)
-- `--json`: Emit the status as structured JSON instead of the human-readable summary.
-
-Shows current service state (running, stopped, etc.).
-
-**`--json` output** is a single object intended for fleet tooling. The shape is cross-platform-native: it carries the per-OS status string Muti Metroo already computes rather than backend-specific booleans. Field names are part of the CLI's JSON contract and are not localized. `status`, `type`, `config_path`, `log_path`, and `dll_path` are omitted when empty.
 
 ```json
 {
@@ -113,237 +151,115 @@ Shows current service state (running, stopped, etc.).
   "scope": "user",
   "platform": "linux",
   "service_name": "muti-metroo",
-  "status": "running",
+  "status": "active (pid 48211, cron+nohup)",
   "type": "cron+nohup",
-  "config_path": "/home/user/.muti-metroo/config.yaml",
-  "log_path": "/home/user/.muti-metroo/muti-metroo.log"
+  "config_path": "/home/operator/muti-metroo/config.yaml",
+  "log_path": "/home/operator/.muti-metroo/muti-metroo.log"
 }
 ```
 
 | Field | Description |
-|-------|-------------|
-| `installed` | Whether a service is installed under this name |
-| `scope` | `system`, `user`, or `none` |
-| `platform` | Operating system the agent is running on |
-| `service_name` | Service name queried |
-| `status` | Per-OS status string (e.g., `running`, `stopped`) |
-| `type` | User-service backend, e.g. `cron+nohup` (Linux) or `Registry Run key` (Windows) |
-| `config_path` | Recorded config path, if any |
-| `log_path` | Recorded log path, if any |
-| `dll_path` | Recorded DLL path (Windows Registry Run installs) |
+| --- | --- |
+| `installed` | Whether a service with this name is installed. |
+| `scope` | `system`, `user`, or `none`. |
+| `platform` | `linux`, `darwin`, or `windows`. |
+| `service_name` | The queried service name. |
+| `status` | Platform state string, as in the text output. Omitted when not installed. |
+| `type` | User service backend. Omitted for system services. |
+| `config_path` | Configuration path recorded by a user service. Omitted when unknown. |
+| `log_path` | Log file of a cron user service. Omitted otherwise. |
+| `dll_path` | DLL path of a Windows user service. Omitted otherwise. |
 
-:::note Windows detach hint
-When `muti-metroo run -D` cannot break away from the OpenSSH Job Object, the detach failure suggests installing as a service instead. The suggestion is admin-aware: Administrators are pointed at the system install (`muti-metroo service install`), while non-Administrators are pointed at the per-user (Registry Run key) install (`muti-metroo service install --user --dll <path> -c <config>`).
-:::
-
-## Linux: Systemd vs Systemd --user vs Cron+Nohup
-
-| Feature | Systemd (root) | Systemd --user | Cron+Nohup |
-|---------|---------------|----------------|------------|
-| Requires root | Yes | No | No |
-| Auto-restart on crash | Yes | Yes | No |
-| Log management | journald | journald (per-user) | File-based |
-| Resource limits | cgroups | cgroups (per-user) | None |
-| Start on boot | Yes | At user login (or always with linger) | Yes |
-| Survives logout | n/a | Only with `loginctl enable-linger` | Yes |
-
-`muti-metroo service install --user` auto-picks `systemd --user` when the user has a working systemd session, otherwise falls back to cron+nohup. Use `--user-method=systemd` or `--user-method=cron` to force one.
-
-**Use systemd (root) when:**
-- You have root access
-- The agent should run before any user logs in
-
-**Use systemd --user when:**
-- You don't have root, but the host has systemd and a user session bus
-- You want auto-restart and journald logs without privileged install
-
-**Use cron+nohup when:**
-- The host has no systemd at all, or no user session bus is available
-
-## Windows: Windows Service vs Registry Run
-
-| Feature | Windows Service | Registry Run |
-|---------|----------------|--------------|
-| Requires admin | Yes | No |
-| Auto-restart on crash | Yes | No |
-| Start on boot | Yes (before login) | Yes (at login) |
-| Console window | No | No |
-| Runs as | SYSTEM/service account | Current user |
-| Process name | `muti-metroo.exe` | `rundll32.exe` |
-| Requires DLL | No | Yes |
-
-**Use Windows Service when:**
-- You have Administrator access
-- You need automatic restart on crash
-- Service must start before user login
-
-**Use Registry Run when:**
-- You don't have Administrator access
-- User-level background execution is sufficient
-- You want minimal installation footprint
-
-## Linux Management (Systemd)
-
-After installation with root (service auto-starts):
+## service uninstall
 
 ```bash
-# Check status
-sudo systemctl status muti-metroo
+muti-metroo service uninstall [flags]
+```
 
-# View logs
+Stops the service and removes its registration. On Linux and Windows, a user service with the given name is removed if one exists, without root or Administrator rights. Otherwise the system service is removed, which requires root or Administrator rights. If no service is installed, the command prints a message and exits with `0`.
+
+Before removing, the command asks `Continue? [y/N]:`. Any answer other than `y`, `Y`, or `yes` prints `Aborted.` and exits with `0`. Pass `-f` to skip the question.
+
+What is removed:
+
+| Backend | Removed |
+| --- | --- |
+| systemd system unit | Unit stopped, disabled, and deleted; systemd reloaded. |
+| systemd user unit | Unit disabled and stopped, deleted; user systemd reloaded. |
+| cron user service | Process stopped, crontab entry and wrapper script deleted. The log file is kept. |
+| launchd | Daemon unloaded, plist deleted. |
+| Windows service | Service stopped and deleted. |
+| Registry Run key | Process stopped, Registry value deleted. |
+
+A binary copied by `--deploy` is not deleted.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-n`, `--name` | `muti-metroo` | Service name. |
+| `-f`, `--force` | `false` | Remove without asking for confirmation. |
+
+### Examples
+
+```bash
+# System service on Linux or macOS
+sudo muti-metroo service uninstall
+
+# User service, no prompt
+muti-metroo service uninstall -f
+
+# Service installed under a custom name
+sudo muti-metroo service uninstall -n edge-agent
+```
+
+## Managing an installed service
+
+After installation, the platform's own tools control the service:
+
+```bash
+# Linux system service
+sudo systemctl restart muti-metroo
 sudo journalctl -u muti-metroo -f
 
-# Restart (after config changes)
-sudo systemctl restart muti-metroo
-
-# Stop
-sudo systemctl stop muti-metroo
-```
-
-:::note ICMP (ping) needs a host sysctl, even as root
-The generated unit does not restrict ICMP (no `RestrictAddressFamilies`, `SystemCallFilter`, `PrivateNetwork`, or capability drops), and a system install runs as **root**. But ICMP relay still needs `net.ipv4.ping_group_range` widened on the host: Muti Metroo uses unprivileged ICMP *ping sockets*, which the kernel gates **solely** on that sysctl and which **do not honor `CAP_NET_RAW`** -- so running as root does **not** bypass it. The default `1 0` (disabled) makes `muti-metroo ping` fail with "failed to create ICMP socket".
-
-```bash
-sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
-echo "net.ipv4.ping_group_range=0 2147483647" | sudo tee /etc/sysctl.d/99-muti-metroo-ping.conf
-```
-
-No agent restart is required -- the socket is created per ping session. If you harden the unit with `User=` (a dedicated unprivileged account), that user's GID must fall inside the range. See [ICMP Configuration](/configuration/icmp). Operators who want this applied automatically can add `ExecStartPre=+/sbin/sysctl -w net.ipv4.ping_group_range="0 2147483647"` to the unit (the `+` runs it as root); Muti Metroo does not do this by default to avoid mutating a global kernel setting.
-:::
-
-## Linux Management (Systemd --user)
-
-After installation with `--user` on a host where systemd --user is available:
-
-```bash
-# Check status
-muti-metroo service status                  # cross-platform wrapper
-systemctl --user status muti-metroo         # native
-
-# View logs
+# Linux systemd user service
+systemctl --user restart muti-metroo
 journalctl --user -u muti-metroo -f
 
-# Restart (after config changes)
-systemctl --user restart muti-metroo
-
-# Stop
-systemctl --user stop muti-metroo
-
-# Keep the agent running after logout (one-time, requires sudo on most distros)
-sudo loginctl enable-linger $USER
-
-# Uninstall
-muti-metroo service uninstall
-```
-
-## Linux Management (Cron+Nohup)
-
-After installation with `--user` when cron+nohup was selected (no systemd --user available):
-
-```bash
-# Check status
-muti-metroo service status
-
-# View logs
+# Linux cron user service
 tail -f ~/.muti-metroo/muti-metroo.log
 
-# Manually start (if stopped)
-~/.muti-metroo/muti-metroo.sh
-
-# Uninstall
-muti-metroo service uninstall
-```
-
-## macOS Management
-
-After installation:
-
-```bash
-# Check status
-sudo launchctl list | grep muti-metroo
-
-# Stop service
-sudo launchctl stop com.muti-metroo
-
-# Start service
-sudo launchctl start com.muti-metroo
-
-# View logs (in the config file's directory)
+# macOS
+sudo launchctl list com.muti-metroo
 tail -f /etc/muti-metroo/muti-metroo.log
 ```
 
-## Windows Management (Windows Service)
-
-After installation as Administrator:
-
 ```powershell
-# Start service
+# Windows service
+sc query muti-metroo
+sc stop muti-metroo
 sc start muti-metroo
 
-# Check status
-sc query muti-metroo
-
-# Stop service
-sc stop muti-metroo
+# Windows user service
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MutiMetroo
 ```
 
-## Windows Management (Registry Run)
+The macOS log path above assumes the configuration file is in `/etc/muti-metroo`. Restart a Windows user service by logging off and on, or by uninstalling and installing it again.
 
-After installation with `--user --dll`:
+## Choosing a backend
 
-```powershell
-# Check status (shows DLL and config paths)
-muti-metroo service status
+| | systemd system | systemd user | cron user | launchd | Windows service | Registry Run |
+| --- | --- | --- | --- | --- | --- | --- |
+| Needs root or Administrator | Yes | No | No | Yes | Yes | No |
+| Starts | At boot | At boot with linger, otherwise at login | At boot | At boot | At boot | At logon |
+| Restarts after a crash | Yes | Yes | No | Yes | No | No |
+| Logs | Journal | User journal | `~/.<name>/<name>.log` | Configuration directory | Not captured | Not captured |
+| Runs as | root | Current user | Current user | root | LocalSystem | Current user |
 
-# Uninstall
-muti-metroo service uninstall
+## See Also
 
-# View registry entry (default name)
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v Muti Metroo
-
-# View registry entry (custom name, e.g., -n "My Tunnel" becomes "MyTunnel")
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MyTunnel
-
-# Stop manually (if needed)
-taskkill /F /IM rundll32.exe
-```
-
-:::tip Registry Value Names
-The `-n` flag sets the service name, which is converted to PascalCase for the registry value:
-- `muti-metroo` (default) becomes `Muti Metroo`
-- `my-tunnel` becomes `MyTunnel`
-- `My Tunnel` becomes `MyTunnel`
-:::
-
-:::note
-The service starts automatically after installation and at each user logon. To restart the service, uninstall and reinstall it, or log out and log back in.
-:::
-
-## Examples
-
-```bash
-# Linux install (systemd, requires root) - auto-starts
-sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
-
-# Linux install (cron+nohup, no root required) - auto-starts
-muti-metroo service install --user -c ~/muti-metroo/config.yaml
-
-# macOS install - auto-starts
-sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
-
-# Windows install (as Administrator) - auto-starts
-muti-metroo service install -c C:\Program Files\muti-metroo\config.yaml
-
-# Windows install (no admin required, uses DLL) - auto-starts
-muti-metroo service install --user --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-
-# Windows install with custom name (no admin required)
-muti-metroo service install --user -n "My Tunnel" --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-
-# Check status (all platforms)
-muti-metroo service status
-
-# Uninstall (auto-detects installation type)
-sudo muti-metroo service uninstall  # Linux systemd / macOS
-muti-metroo service uninstall        # Linux user service / Windows user service
-```
+- [System service deployment](../deployment/system-service.md): end-to-end guide to running agents as services
+- [DLL mode](../deployment/dll-mode.md): build and use the Windows DLL for Registry Run installs
+- [muti-metroo run](run.md): the command every service runs
+- [muti-metroo stop](stop.md): stop an agent through its HTTP API
+- [ICMP configuration](../configuration/icmp.md): host settings needed for ping relay

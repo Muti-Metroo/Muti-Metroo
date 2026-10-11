@@ -1,291 +1,137 @@
-# Probe API
-
-HTTP endpoints for testing connectivity to Muti Metroo listeners. The probe dials a
-listener, performs the `PEER_HELLO` handshake, and reports diagnostics
-(success, RTT, remote agent ID, classified error) without establishing a
-real peer connection. This is the same operation exposed by the
-[`muti-metroo probe`](/cli/probe) CLI command, but available over HTTP so
-dashboards and other tools can run tests programmatically.
-
-## Endpoints
-
-| Endpoint                   | Method | Description                                          |
-| -------------------------- | ------ | ---------------------------------------------------- |
-| `/api/probe`               | POST   | Probe from the local agent (the one serving the API) |
-| `/agents/{agent-id}/probe` | POST   | Probe from a remote agent in the mesh                |
-
-`/api/probe` requires `http.dashboard: true` in configuration.
-`/agents/{agent-id}/probe` requires `http.remote_api: true` in configuration.
-
-A probe that ran to completion always returns HTTP 200, even when the
-handshake failed. The boolean `success` field in the response body indicates
-whether the listener was reachable. HTTP 4xx is reserved for invalid
-requests (bad JSON, unknown transport, malformed PEM, etc.).
-
-:::warning Treat as outbound network access
-An authenticated caller of `/api/probe` can dial any `host:port` reachable
-from the agent, including internal addresses the caller could not reach
-directly. The probe only sends a `PEER_HELLO` handshake, but the TCP/TLS
-dial itself is a stronger primitive than anything else exposed by the
-dashboard API. Protect it with `http.token_hash` and gate the endpoint
-groups with `http.dashboard` / `http.remote_api`. The remote variant is
-additionally blocked when management-key decryption is unavailable.
-:::
-
+---
+title: Probe Endpoints
+description: Test whether a Muti Metroo listener is reachable and completes the handshake, from the local agent or from any remote agent.
+sidebar_position: 17
 ---
 
-## POST /api/probe
+# Probe Endpoints
 
-Probe a Muti Metroo listener from the local agent.
+A probe dials a Muti Metroo listener, performs the peer handshake, and reports whether it succeeded, the round-trip time, and the remote agent's ID, without keeping a peer connection. It is the HTTP form of the [`muti-metroo probe`](/cli/probe) command.
+
+| Endpoint | Group | Description |
+| -------- | ----- | ----------- |
+| `POST /api/probe` | dashboard (`http.dashboard`) | Probe from the agent serving the request |
+| `POST /agents/{id}/probe` | remote API (`http.remote_api`) | Probe from a remote agent |
+
+Probes need no management signing key.
+
+:::warning
+A probe makes the agent open a TCP or UDP connection to any `host:port` the caller names, including internal addresses the caller cannot reach directly. Protect the HTTP API with `http.token_hash`, and disable the endpoint groups you do not need.
+:::
+
+## `POST /api/probe`
 
 ### Request
 
-```bash
-curl -X POST http://localhost:8080/api/probe \
-  -H "Content-Type: application/json" \
-  -d '{"transport": "quic", "address": "agent2.example.com:4433"}'
-```
+| Field | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `address` | string | Yes | Listener `host:port` |
+| `transport` | string | No | `quic` (default), `h2`, or `ws` |
+| `path` | string | No | HTTP path for `h2` and `ws`; default `/mesh` |
+| `timeout_ms` | integer | No | Probe timeout in milliseconds, up to `60000`; default `10000` |
+| `strict_verify` | boolean | No | Verify the listener's TLS certificate; default `false` |
+| `plaintext` | boolean | No | Connect without TLS; `ws` only |
+| `ca_cert_pem` | string | No | CA certificate PEM for `strict_verify` |
+| `client_cert_pem` | string | No | Client certificate PEM for listeners that require mTLS; requires `client_key_pem` |
+| `client_key_pem` | string | No | Client private key PEM; requires `client_cert_pem` |
+| `alpn_protocol` | string | No | ALPN identifier, when the listener uses a custom `protocol.alpn` |
+| `http_header` | string | No | Protocol HTTP header, when the listener uses a custom `protocol.http_header` |
+| `ws_subprotocol` | string | No | WebSocket subprotocol, when the listener uses a custom `protocol.ws_subprotocol` |
 
-Probe over HTTP/2 with strict TLS verification using a custom CA bundle:
-
-```bash
-curl -X POST http://localhost:8080/api/probe \
-  -H "Content-Type: application/json" \
-  -d @- <<'JSON'
-{
-  "transport": "h2",
-  "address": "agent2.example.com:443",
-  "path": "/mesh",
-  "strict_verify": true,
-  "ca_cert_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
-}
-JSON
-```
-
-Probe a plaintext WebSocket listener (e.g. behind a reverse proxy):
+TLS material is passed inline as PEM text. Unlike the CLI, the API does not accept file paths.
 
 ```bash
 curl -X POST http://localhost:8080/api/probe \
   -H "Content-Type: application/json" \
-  -d '{"transport": "ws", "address": "127.0.0.1:8080", "path": "/mesh", "plaintext": true}'
+  -d '{"transport": "h2", "address": "relay.example.com:443", "path": "/mesh"}'
 ```
-
-### Request Body
-
-| Field             | Type    | Required | Description                                                                   |
-| ----------------- | ------- | -------- | ----------------------------------------------------------------------------- |
-| `address`         | string  | Yes      | Target `host:port` to probe                                                   |
-| `transport`       | string  | No       | `quic` (default), `h2`, or `ws`                                               |
-| `path`            | string  | No       | HTTP path for `h2`/`ws` transports (default `/mesh`)                          |
-| `timeout_ms`      | integer | No       | Probe timeout in milliseconds (default `10000`, max `60000`)                  |
-| `strict_verify`   | boolean | No       | If `true`, verify the server's TLS certificate (default `false`)              |
-| `plaintext`       | boolean | No       | Use plaintext (no TLS); valid only with `transport: ws`                       |
-| `ca_cert_pem`     | string  | No       | Inline CA certificate PEM for verification                                    |
-| `client_cert_pem` | string  | No       | Inline client certificate PEM for mTLS (must be paired with `client_key_pem`) |
-| `client_key_pem`  | string  | No       | Inline client key PEM for mTLS (must be paired with `client_cert_pem`)        |
-| `alpn_protocol`   | string  | No       | Override the ALPN identifier                                                  |
-| `http_header`     | string  | No       | Override the protocol HTTP header                                             |
-| `ws_subprotocol`  | string  | No       | Override the WebSocket subprotocol                                            |
-
-:::note Inline PEM, not file paths
-Unlike the `muti-metroo probe` CLI, the HTTP API never accepts filesystem paths for
-TLS material. Provide PEM blocks inline in the request body. This avoids
-turning the API into a remote file-read primitive.
-:::
 
 ### Response
 
-**Probe Succeeded (200)**:
+A probe that ran returns `200`, whether or not the listener answered. Check `success`.
+
+**Listener reachable:**
 
 ```json
 {
   "success": true,
-  "transport": "quic",
-  "address": "agent2.example.com:4433",
-  "remote_id": "abc123def456789012345678",
-  "remote_display_name": "agent-eu-west",
-  "rtt_ms": 23
-}
-```
-
-**Probe Ran but Listener Unreachable (200)**:
-
-```json
-{
-  "success": false,
-  "transport": "quic",
-  "address": "agent2.example.com:9999",
-  "error": "Connection refused - listener not running or port blocked"
-}
-```
-
-```json
-{
-  "success": false,
   "transport": "h2",
-  "address": "agent2.example.com:443",
-  "error": "TLS error - certificate signed by unknown authority (disable verification or provide a trusted CA)"
+  "address": "relay.example.com:443",
+  "remote_id": "653422d2fc10b554514c5cbe6e6cd6cd",
+  "remote_display_name": "transit",
+  "rtt_ms": 1
 }
 ```
 
-**Bad Request (400)**:
+**Listener not reachable:**
 
 ```json
 {
-  "error": "address is required"
+  "success": false,
+  "transport": "quic",
+  "address": "relay.example.com:4499",
+  "error": "Connection timed out - firewall may be blocking"
 }
 ```
 
-```json
-{
-  "error": "invalid transport \"foo\" (expected quic, h2, or ws)"
-}
-```
+| Field | Description |
+| ----- | ----------- |
+| `success` | The handshake completed |
+| `transport`, `address` | What was probed |
+| `remote_id`, `remote_display_name` | The listener's agent ID and display name, when the handshake completed |
+| `rtt_ms` | Handshake round-trip time in whole milliseconds; omitted when it is `0` or the probe failed |
+| `error` | Failure reason with a hint, for example connection refused, timeout, or a TLS verification error |
 
-```json
-{
-  "error": "plaintext mode is only supported for the ws transport"
-}
-```
+### Errors
 
-```json
-{
-  "error": "ca_cert_pem must be a CERTIFICATE PEM block"
-}
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"address is required"}` | Missing `address` |
+| 400 | `{"error":"invalid transport \"foo\" (expected quic, h2, or ws)"}` | Invalid `transport` |
+| 400 | `{"error":"plaintext mode is only supported for the ws transport"}` | `plaintext` with `quic` or `h2` |
+| 400 | `{"error":"timeout_ms must be between 0 and 60000"}` | Timeout out of range |
+| 400 | `{"error":"ca_cert_pem must be a CERTIFICATE PEM block"}` | Invalid CA PEM |
+| 400 | `{"error":"client_cert_pem and client_key_pem must be provided together"}` | Only one of the client PEMs |
+| 400 | `{"error":"request body: ..."}` | Body larger than 1 MB |
+| 404 | HTML page | `http.dashboard` is disabled |
+| 405 | `method not allowed` | Method other than `POST` |
 
-```json
-{
-  "error": "client_cert_pem and client_key_pem must be provided together"
-}
-```
+## `POST /agents/{id}/probe`
 
-```json
-{
-  "error": "timeout_ms must be between 0 and 60000"
-}
-```
-
-**Method Not Allowed (405)**:
-
-```
-method not allowed
-```
-
-**Not Found (404)**:
-
-Returned when `http.dashboard: false` in the agent's configuration.
-
----
-
-## POST /agents/\{agent-id\}/probe
-
-Probe a Muti Metroo listener from the perspective of a remote mesh agent. The
-request is forwarded to the target agent over the mesh control channel,
-which executes the probe locally and returns the result. Useful for
-verifying connectivity from any vantage point in the mesh from a single
-dashboard.
-
-### Request
+Runs the probe on a remote agent, which is useful for checking that a listener is reachable from a particular place in the mesh. The request and response are the same as for [`POST /api/probe`](#post-apiprobe).
 
 ```bash
-curl -X POST http://localhost:8080/agents/abc123def456/probe \
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/probe \
   -H "Content-Type: application/json" \
-  -d '{"transport": "quic", "address": "10.0.0.4:4433"}'
+  -d '{"transport": "quic", "address": "10.20.0.4:4433"}'
 ```
 
-### Request Body
+Additional errors:
 
-Same as `/api/probe`.
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 403 | `probe restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 404 | HTML page | `http.remote_api` is disabled |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
 
-### Response
-
-Same response format as `/api/probe`. The body reflects the probe result as
-seen from the target agent.
-
-### Additional Error Responses
-
-**Forbidden (403)**:
-
-```
-probe restricted: management key decryption unavailable
-```
-
-**Bad Gateway (502)**:
-
-```
-failed to send request: <error details>
-```
-
-Returned when the control request to the remote agent fails (agent unknown,
-unreachable, or timed out).
-
----
-
-## Error Responses
-
-| Status | Description                                                                                                   |
-| ------ | ------------------------------------------------------------------------------------------------------------- |
-| 200    | Probe ran (inspect `success` field for the result)                                                            |
-| 400    | Invalid request body, validation error, or malformed PEM                                                      |
-| 401    | Bearer token authentication required (when `http.token_hash` is set)                                          |
-| 403    | Management key decryption unavailable (remote variant only)                                                   |
-| 404    | Endpoint disabled (`http.dashboard: false` for `/api/probe`, `http.remote_api: false` for the remote variant) |
-| 405    | Method not allowed (must be POST)                                                                             |
-| 502    | Remote agent not found, unreachable, or timed out (remote variant only)                                       |
-
-:::tip success vs HTTP status
-The HTTP status reflects whether the API call itself succeeded. The `success`
-field in the JSON body reflects whether the probe reached the listener and
-completed the handshake. A handshake failure is an HTTP 200 with
-`"success": false`, mirroring the `/api/mesh-test` convention.
-:::
-
----
-
-## Examples
-
-### Verify a Set of Listeners
+## Example: probe one listener from every agent
 
 ```bash
 #!/bin/bash
-AGENT="http://localhost:8080"
+API="http://localhost:8080"
+LISTENER="relay.example.com:4433"
 
-LISTENERS=(
-  "quic agent1.example.com:4433"
-  "quic agent2.example.com:4433"
-  "h2   agent3.example.com:443"
-)
-
-for ENTRY in "${LISTENERS[@]}"; do
-  read -r TRANSPORT ADDR <<<"$ENTRY"
-  RESULT=$(curl -s -X POST "$AGENT/api/probe" \
-    -H "Content-Type: application/json" \
-    -d "{\"transport\":\"$TRANSPORT\",\"address\":\"$ADDR\",\"timeout_ms\":3000}")
-  OK=$(echo "$RESULT" | jq -r '.success')
-  if [ "$OK" = "true" ]; then
-    echo "OK   $TRANSPORT $ADDR rtt=$(echo "$RESULT" | jq -r '.rtt_ms')ms"
-  else
-    echo "FAIL $TRANSPORT $ADDR error=$(echo "$RESULT" | jq -r '.error')"
-  fi
+for ID in $(curl -s "$API/agents" | jq -r '.[] | select(.local | not) | .id'); do
+  RESULT=$(curl -s -X POST "$API/agents/$ID/probe" \
+    -d "{\"address\": \"$LISTENER\", \"timeout_ms\": 3000}")
+  echo "$ID: $(echo "$RESULT" | jq -r 'if .success then "ok \(.rtt_ms // 0) ms" else .error end')"
 done
 ```
 
-### Probe a Listener From Every Agent
+## See Also
 
-```bash
-#!/bin/bash
-ENTRY_AGENT="http://localhost:8080"
-TARGET="agent2.example.com:4433"
-
-# Get all known agents
-AGENTS=$(curl -s "$ENTRY_AGENT/agents" | jq -r '.[].id')
-
-for AGENT_ID in $AGENTS; do
-  RESULT=$(curl -s -X POST "$ENTRY_AGENT/agents/$AGENT_ID/probe" \
-    -H "Content-Type: application/json" \
-    -d "{\"transport\":\"quic\",\"address\":\"$TARGET\",\"timeout_ms\":3000}")
-  OK=$(echo "$RESULT" | jq -r '.success')
-  echo "$AGENT_ID -> $TARGET: $OK ($(echo "$RESULT" | jq -r '.rtt_ms // .error'))"
-done
-```
+- [CLI - probe](/cli/probe) - Probe from the command line
+- [Dashboard Endpoints](/api/dashboard#get-post-apimesh-test) - Reachability test of every agent
+- [Listeners Configuration](/configuration/listeners) - Listener transports and paths
+- [Protocol Configuration](/configuration/protocol) - Custom ALPN, header, and subprotocol values

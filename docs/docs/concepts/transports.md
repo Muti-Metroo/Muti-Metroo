@@ -1,5 +1,6 @@
 ---
 title: Transports
+description: The QUIC, HTTP/2, and WebSocket transports that carry peer connections between Muti Metroo agents, and how to choose one for each link.
 sidebar_position: 3
 ---
 
@@ -7,175 +8,115 @@ sidebar_position: 3
   <img src="/img/mole-wiring.png" alt="Mole connecting transports" style={{maxWidth: '180px'}} />
 </div>
 
-# Transport Protocols
+# Transports
 
-Choose the right transport for your network environment. Use QUIC when you control the network, HTTP/2 or WebSocket when you need to get through firewalls and proxies.
+A transport is the protocol that carries a peer connection between two agents. Muti Metroo supports QUIC, HTTP/2, and WebSocket. Each listener and each peer entry picks one with its `transport` field (`quic`, `h2`, or `ws`), and a single mesh can mix all three.
 
-## Quick Guide
+## Comparison
 
-| Your Situation                        | Use This                                           |
-| ------------------------------------- | -------------------------------------------------- |
-| Direct connection, no firewall issues | **QUIC** - fastest option                          |
-| Corporate firewall blocks UDP         | **HTTP/2** - looks like normal HTTPS               |
-| Must go through HTTP proxy            | **WebSocket** - maximum compatibility              |
-| Not sure                              | Start with QUIC, fall back to WebSocket if blocked |
+| | QUIC (`quic`) | HTTP/2 (`h2`) | WebSocket (`ws`) |
+| --- | --- | --- | --- |
+| **Runs over** | UDP | TCP | TCP |
+| **Encryption** | TLS 1.3 | TLS 1.3 | TLS 1.3, or none behind a TLS-terminating reverse proxy (`plaintext: true`) |
+| **URL path** | Not used | Listener `path`, default `/mesh` | Listener `path`, default `/mesh` |
+| **Outbound HTTP proxy** | No | No | Yes (`proxy`, `proxy_auth`) |
+| **Needs open** | A UDP port | A TCP port | A TCP port, or only an HTTP proxy |
+| **Typical use** | Links where UDP is allowed | Links where only TCP, typically 443, is allowed | Links that must go through an HTTP proxy, reverse proxy, or CDN |
 
-## Transport Comparison
+All three carry the same traffic and support the same features. End-to-end encryption of stream payloads is independent of the transport.
 
-| Transport     | Speed   | Firewall Friendliness | Best For                    |
-| ------------- | ------- | --------------------- | --------------------------- |
-| **QUIC**      | Fastest | Medium (needs UDP)    | Data centers, home networks |
-| **HTTP/2**    | Good    | Good                  | Corporate networks          |
-| **WebSocket** | Fair    | Excellent             | Restrictive proxies, CDNs   |
-
-## QUIC Transport
-
-QUIC (Quick UDP Internet Connections) is the recommended transport for most deployments.
+## QUIC
 
 ```mermaid
 flowchart LR
     A[Agent A] <-->|"UDP + TLS 1.3"| B[Agent B]
 ```
 
-**Characteristics:**
+QUIC runs over UDP with TLS 1.3 built in, and has the least protocol overhead of the three. Use it when the network between two agents allows UDP on the chosen port: between servers you control, from home and most residential networks, and between cloud regions.
 
-- UDP with built-in TLS 1.3
-- Native stream multiplexing (no head-of-line blocking)
-- Lowest latency, best throughput
-- Fast reconnection
+Some corporate networks block or throttle outbound UDP. If a QUIC peer cannot connect from such a network, switch that link to HTTP/2 or WebSocket.
 
-**When to use:**
+```yaml
+listeners:
+  - transport: quic
+    address: "0.0.0.0:4433"
+```
 
-- Connecting servers you control (cloud, data center)
-- Home or office network without strict firewalls
-- When speed matters (large file transfers, low latency)
-- Most residential ISP connections (UDP usually works)
-
-**Firewall considerations:**
-
-- Requires UDP port to be open
-- May be blocked by corporate firewalls
-- NAT traversal generally works well
-- Some ISPs throttle or block UDP
-
-## HTTP/2 Transport
-
-HTTP/2 provides a TCP-based alternative with good firewall compatibility.
+## HTTP/2
 
 ```mermaid
 flowchart LR
-    A[Agent A] <-->|"TCP + TLS 1.3<br/>/mesh path"| B[Agent B]
+    A[Agent A] <-->|"TCP + TLS 1.3<br/>POST /mesh"| B[Agent B]
 ```
 
-**Characteristics:**
+HTTP/2 runs over TCP with TLS 1.3, as a long-lived HTTPS request to the listener's path. Use it when UDP is blocked but direct outbound TCP, typically to port 443, is allowed.
 
-- TCP with TLS 1.3
-- HTTP/2 stream multiplexing
-- Good performance, but TCP head-of-line blocking
-- Compatible with most firewalls and proxies
+A peer that dials a `host:port` address uses the path `/mesh`. To dial a different path, give the address as a URL, for example `https://relay.example.com:443/tunnel`.
 
-**When to use:**
+HTTP/2 listeners always use TLS; there is no plaintext mode. HTTP/2 peers cannot be configured to go through an HTTP proxy; use WebSocket for that.
 
-- Corporate network that blocks UDP
-- Behind a load balancer or reverse proxy
-- Runs over standard HTTPS, passing corporate proxies
-- QUIC is being blocked or throttled
+```yaml
+listeners:
+  - transport: h2
+    address: "0.0.0.0:443"
+    path: "/mesh"
+```
 
-**Firewall considerations:**
-
-- Uses standard HTTPS port (443)
-- Passes through most corporate firewalls
-- Compatible with HTTP proxies (without CONNECT)
-- Can be hosted behind reverse proxies
-
-## WebSocket Transport
-
-WebSocket provides maximum compatibility, especially through HTTP proxies.
+## WebSocket
 
 ```mermaid
 flowchart LR
-    A[Agent A] <-->|"HTTP Upgrade<br/>Framed Messages"| Proxy[HTTP Proxy]
-    Proxy <-->|"WebSocket"| B[Agent B]
+    A[Agent A] <-->|"HTTP CONNECT"| Proxy[HTTP Proxy]
+    Proxy <-->|"WebSocket over TLS"| B[Agent B]
 ```
 
-**Characteristics:**
+WebSocket runs over TCP as an HTTP upgrade to the listener's path. It is the only transport that:
 
-- HTTP upgrade to WebSocket, then framed messages
-- Application-level multiplexing over single connection
-- Highest overhead, most latency
-- Works through HTTP proxies with CONNECT
+- **Dials through an HTTP proxy.** Set `proxy` (and optionally `proxy_auth`) on the peer entry.
+- **Can sit behind a reverse proxy or CDN that terminates TLS.** Set `plaintext: true` on the listener and bind it to a local address that only the reverse proxy can reach.
 
-**When to use:**
+```yaml
+peers:
+  - id: "auto"
+    transport: ws
+    address: "wss://relay.example.com:443/mesh"
+    proxy: "http://proxy.example.com:8080"
+```
 
-- Must go through a corporate HTTP proxy
-- Network inspects and blocks non-HTTP traffic
-- Hosting behind a CDN or WAF
-- Maximum compatibility is more important than speed
+As with HTTP/2, a peer that dials a `host:port` address uses the path `/mesh`; give a `wss://` URL to dial a different path.
 
-**Firewall considerations:**
+See [Reverse Proxy Deployment](/deployment/reverse-proxy) for the plaintext listener setup.
 
-- Uses standard HTTP/HTTPS ports
-- Works through HTTP proxies with CONNECT
-- Compatible with most corporate environments
-- May work through some WAFs and CDNs
+## Mixed transports
 
-:::info Plain WebSocket Mode
-When behind a reverse proxy handling TLS termination, use `plaintext: true` to accept unencrypted WebSocket connections on localhost. See [Reverse Proxy Deployment](/deployment/reverse-proxy).
-:::
-
-## Performance Comparison
-
-### Latency (per hop)
-
-| Transport | LAN    | WAN      |
-| --------- | ------ | -------- |
-| QUIC      | 1-2ms  | 50-100ms |
-| HTTP/2    | 2-5ms  | 60-150ms |
-| WebSocket | 3-10ms | 80-200ms |
-
-### Connection Establishment
-
-| Transport | Initial              | Reconnect |
-| --------- | -------------------- | --------- |
-| QUIC      | 1-RTT                | 1-RTT     |
-| HTTP/2    | 2-RTT                | 2-RTT     |
-| WebSocket | 2-RTT + HTTP upgrade | 2-RTT     |
-
-### Throughput
-
-| Transport | Single Stream | Multi-Stream |
-| --------- | ------------- | ------------ |
-| QUIC      | Excellent     | Excellent    |
-| HTTP/2    | Good          | Good         |
-| WebSocket | Fair          | Fair         |
-
-## Mixed Transport Deployments
-
-You can mix transports in a single mesh. Each peer connection chooses the best transport for that specific link:
+Each peer connection uses its own transport, chosen for the network between those two agents. Routes and streams cross transport boundaries without any extra configuration:
 
 ```mermaid
 flowchart TB
     A[Agent A<br/>Ingress] -->|QUIC<br/>direct LAN| C[Agent C<br/>Transit]
-    A -->|HTTP/2<br/>corporate firewall| B[Agent B<br/>Transit]
+    A -->|HTTP/2<br/>UDP blocked| B[Agent B<br/>Transit]
     C -->|WebSocket<br/>through proxy| D[Agent D<br/>Exit]
     D -->|QUIC<br/>cloud| B
 ```
 
-Routes propagate across all transports - traffic finds the best path regardless of underlying protocol.
+An agent can also run several listeners with different transports at once, so peers in different networks can each use the transport that works for them.
 
-## Selection Guide
+## Choosing a transport
 
-| Where You Are     | Where You're Connecting     | Use                 |
-| ----------------- | --------------------------- | ------------------- |
-| Home network      | Cloud server                | QUIC                |
-| Office (no proxy) | Cloud server                | QUIC or HTTP/2      |
-| Corporate laptop  | Through corporate proxy     | WebSocket           |
-| Cloud server      | Another cloud server        | QUIC                |
-| Behind CDN/WAF    | Anywhere                    | WebSocket           |
-| Anywhere          | Server behind reverse proxy | HTTP/2 or WebSocket |
+| From | To | Use |
+| ---- | -- | --- |
+| Home or office network | Cloud server | QUIC; HTTP/2 if UDP is blocked |
+| Cloud server | Cloud server | QUIC |
+| Network with UDP blocked, direct TCP allowed | Anywhere | HTTP/2 or WebSocket |
+| Network with only an HTTP proxy for outbound traffic | Anywhere | WebSocket with `proxy` |
+| Anywhere | Agent behind a TLS-terminating reverse proxy or CDN | WebSocket (`plaintext: true` on the listener) |
 
-## Next Steps
+When unsure, start with QUIC, and change the link to HTTP/2 or WebSocket if it cannot connect. `muti-metroo probe` tests whether a listener is reachable with a given transport before you configure the peer.
 
-- [Routing](/concepts/routing) - How routes work across transports
-- [Configuration Reference](/configuration/overview) - Transport configuration
-- [Troubleshooting Connectivity](/troubleshooting/connectivity) - Connection issues
+## See Also
+
+- [Listeners configuration](/configuration/listeners): every listener option, including TLS and plaintext mode
+- [Peers configuration](/configuration/peers): peer options, including proxy settings
+- [Reverse Proxy Deployment](/deployment/reverse-proxy): running a WebSocket listener behind Nginx, Caddy, or Apache
+- [`probe` command](/cli/probe): test connectivity to a listener
+- [Connectivity troubleshooting](/troubleshooting/connectivity): diagnosing peers that do not connect

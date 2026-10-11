@@ -1,85 +1,102 @@
-# Listener Commands
+---
+title: muti-metroo listener
+sidebar_label: listener
+sidebar_position: 15
+description: Open, close, and list QUIC, HTTP/2, and WebSocket transport listeners on a running agent.
+---
 
-Commands for managing dynamic transport listeners.
+# muti-metroo listener
 
-Transport listeners are the QUIC/HTTP2/WebSocket sockets that accept inbound peer connections (the top-level `listeners:` config block). Dynamic listeners let you open or close one on an already-running agent without editing `config.yaml` and restarting. A common use case: bring up a second ingress on a different port or transport to migrate peers, or expose a plaintext WebSocket endpoint behind a reverse proxy on demand.
+Open or close a transport listener (the QUIC, HTTP/2, or WebSocket socket that accepts inbound peer connections) on a running agent without editing its configuration file. Use it to add a second ingress on another port or transport, or to expose a plaintext WebSocket endpoint behind a reverse proxy. All subcommands talk to a running agent's HTTP API.
 
-Listeners are uniquely keyed by listen address. Dynamic listeners persist across agent restarts when `agent.data_dir` is set (see [Dynamic Config Persistence](/configuration/dynamic-config-persistence)) and are restored across sleep/wake. They reuse the agent's global TLS certificate (or an auto-generated self-signed one) and the global mTLS setting.
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
+
+## Prerequisites
+
+- The HTTP API must be enabled with `http.remote_api: true` (see [HTTP configuration](../configuration/http.md)).
+- `listener add` and `listener remove` are mutations. The agent that serves the API (the one `-a` points at) must have `management.signing_private_key` configured, otherwise the request is refused. When `-t` targets a remote agent, the API agent signs the request and the target verifies it with its `management.signing_public_key`. See [Management keys](../configuration/management.md).
+- If the API agent has `management.public_key` configured without `management.private_key`, all listener subcommands are refused.
 
 ## listener add
-
-Add a dynamic transport listener.
 
 ```bash
 muti-metroo listener add <transport> <address> [flags]
 ```
 
-### Description
+Starts a listener on the target agent. `<transport>` is `quic`, `h2`, or `ws`. `<address>` is the bind address, such as `:4434`, `0.0.0.0:4434`, or `127.0.0.1:3002`. HTTP/2 and WebSocket listeners require `--path`.
 
-Opens a new listener on the target agent. `<transport>` is one of `quic`, `h2`, or `ws`; `<address>` is the bind address (`:4433`, `0.0.0.0:4433`, `127.0.0.1:3002`). HTTP/2 and WebSocket listeners require `--path`.
+The listener uses the agent's global TLS certificate and key (or the auto-generated self-signed certificate) and the global mTLS setting. Per-listener TLS overrides are only available in the `listeners:` config section.
 
-The listener reuses the agent's global TLS configuration. `--plaintext` starts a WebSocket listener without TLS, for use behind a trusted reverse proxy. Supply `--advertise-address` to publish a public dial target via NodeInfo so other agents can discover and dial the listener.
+Listeners are keyed by address. Running `listener add` again with the address of a dynamic listener replaces it: the old listener stops and a new one starts with the new settings. Addresses that belong to a configured listener cannot be replaced.
 
-When `agent.data_dir` is configured the listener survives agent restarts via the [dynamic config journal](/configuration/dynamic-config-persistence); if no `data_dir` is set (or the journal is not writable) it remains ephemeral and is lost on restart.
+To let other agents discover the listener, pass `--advertise-address`. The agent then publishes the dial target to the mesh. Loopback and unspecified hosts are rejected.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
-| `--path` | | | HTTP path for h2/ws listeners (e.g. `/ws/`) |
-| `--plaintext` | | `false` | Start a WebSocket listener without TLS (ws only) |
-| `--advertise-address` | | | Public `host:port` to advertise to the mesh |
-| `--advertise-path` | | | Path to advertise for h2/ws (defaults to `--path`) |
-| `--advertise-transport` | | | Transport to advertise (defaults to the listener transport) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that should open the listener. Omit to act on the agent at `-a`. |
+| `--path` | none | HTTP path for `h2` and `ws` listeners, such as `/ws/`. Required for those transports. |
+| `--plaintext` | `false` | Start a `ws` listener without TLS, for use behind a trusted reverse proxy that terminates TLS. Rejected for `quic` and `h2`. |
+| `--advertise-address` | none | Public `host:port` to advertise to the mesh so other agents can dial this listener. |
+| `--advertise-path` | value of `--path` | Path to advertise for `h2` and `ws`. |
+| `--advertise-transport` | listener transport | Transport to advertise. |
+
+### Output
+
+```text
+Listener added: listener 127.0.0.1:18434 added (transport=quic)
+```
 
 ### Examples
 
 ```bash
-# Open a new QUIC listener on the local agent
+# Open a QUIC listener on the local agent
 muti-metroo listener add quic :4434
+
+# Open an HTTP/2 listener
+muti-metroo listener add h2 0.0.0.0:8443 --path /mesh
 
 # Open a plaintext WebSocket listener behind a reverse proxy
 muti-metroo listener add ws 127.0.0.1:3002 --path /ws/ --plaintext
 
-# Open a listener and advertise its public dial target to the mesh
+# Open a listener and advertise its public dial target
 muti-metroo listener add quic :4433 --advertise-address vps.example.com:4433
 
-# Tell remote agent D (reachable via mesh) to open a listener
-muti-metroo listener add quic :4433 --target <agent-d-id>
+# Open a listener on a remote agent
+muti-metroo listener add quic :4433 -t abc123de
 ```
-
-### Output
-
-```
-Listener added: listener :4434 added (transport=quic)
-```
-
----
 
 ## listener remove
-
-Remove a dynamic transport listener.
 
 ```bash
 muti-metroo listener remove <address> [flags]
 ```
 
-### Description
+Stops a dynamic listener. It stops accepting new connections; peer connections already established through it stay up. `<address>` must match the address used with `listener add`. Listeners from the `listeners:` config section cannot be removed; the agent rejects the request with exit code 5.
 
-Stops accepting new inbound connections on the listener at the given address and tears the socket down. Existing peer connections established through it are not affected.
+Before acting, the command asks for confirmation:
 
-Only dynamic listeners can be removed this way. Listeners declared in the `listeners:` config are protected and cannot be removed without restarting the agent.
+```text
+Remove listener :4434?
+This stops accepting new inbound connections on it. Continue? [y/N]:
+```
 
-This command prompts for confirmation; pass `--yes` / `-y` to skip in scripts.
+Any answer other than `y` or `yes` prints `Aborted.` and exits with code 0. `--yes` skips the prompt; without it, a non-terminal stdin exits with code 6 (see [Confirmation prompts](overview.md#confirmation-prompts)).
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of the remote agent that owns the listener. Omit to act on the agent at `-a`. |
+
+### Output
+
+```text
+Listener removed: listener 127.0.0.1:18434 removed
+```
 
 ### Examples
 
@@ -87,63 +104,40 @@ This command prompts for confirmation; pass `--yes` / `-y` to skip in scripts.
 # Remove a dynamic listener from the local agent
 muti-metroo listener remove :4434
 
-# Remove from a remote agent
-muti-metroo listener remove :4434 -t abc123def456
+# Remove a listener from a remote agent without prompting
+muti-metroo listener remove :4434 -t abc123de --yes
 ```
-
-### Output
-
-```
-Listener removed: listener :4434 removed
-```
-
----
 
 ## listener list
-
-List all transport listeners.
 
 ```bash
 muti-metroo listener list [flags]
 ```
 
-### Description
-
-Displays every transport listener known to the agent: static (config-file) and dynamic (runtime). Reports transport, address, path, TLS mode, and whether a dial target is advertised.
+Lists all transport listeners of the agent, configured and dynamic.
 
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent API address (host:port or http(s):// URL) |
-| `--target` | `-t` | | Target agent ID (omit for local agent) |
-| `--json` | | `false` | Output in JSON format |
-
-### Examples
-
-```bash
-# List listeners on local agent
-muti-metroo listener list
-
-# List listeners on remote agent
-muti-metroo listener list -t abc123def456
-
-# JSON output
-muti-metroo listener list --json
-```
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Agent HTTP API address. See [Agent address](overview.md#agent-address). |
+| `-t`, `--target` | none | Agent ID (full or unique prefix) of a remote agent to query. Omit to query the agent at `-a`. |
+| `--json` | `false` | Print the full API response as JSON. |
 
 ### Output
 
-Standard output:
-
-```
-Listeners (2)
+```text
+Listeners (4)
 ADDRESS                  TRANS  PATH         TLS        TYPE     ADVERTISE
-:4433                    quic   -            tls        static   vps.example.com:4433
-127.0.0.1:3002           ws     /ws/         plaintext  dynamic  -
+127.0.0.1:18433          quic   -            tls        static   -
+127.0.0.1:18434          quic   -            tls        dynamic  -
+127.0.0.1:18435          ws     /ws/         plaintext  dynamic  -
+127.0.0.1:18436          h2     /mesh        tls        dynamic  vps.example.com:443
 ```
 
-JSON output:
+`TYPE` is `static` for a listener from the `listeners:` config section and `dynamic` for one added at runtime. `ADVERTISE` shows the advertised address, or `-` when none is set.
+
+With `--json`:
 
 ```json
 {
@@ -151,44 +145,51 @@ JSON output:
   "listeners": [
     {
       "transport": "quic",
-      "address": ":4433",
+      "address": "127.0.0.1:18433",
       "plaintext": false,
-      "advertise_address": "vps.example.com:4433",
       "dynamic": false
     },
     {
       "transport": "ws",
-      "address": "127.0.0.1:3002",
+      "address": "127.0.0.1:18435",
       "path": "/ws/",
       "plaintext": true,
+      "dynamic": true
+    },
+    {
+      "transport": "h2",
+      "address": "127.0.0.1:18436",
+      "path": "/mesh",
+      "plaintext": false,
+      "advertise_address": "vps.example.com:443",
       "dynamic": true
     }
   ]
 }
 ```
 
----
+### Examples
 
-## Authorization
+```bash
+# Listeners of the local agent
+muti-metroo listener list
 
-Dynamic listener modifications follow the same rules as dynamic route, forward, and peer management. If an agent has `management.public_key` configured but does NOT have the corresponding `management.private_key`, listener add/remove/list commands are rejected with HTTP 403 Forbidden. Add/remove on a remote agent (via `--target`) additionally require a valid management signature; `list` is read-only.
+# Listeners of a remote agent, as JSON
+muti-metroo listener list -t abc123de --json
+```
 
----
+## Persistence
 
-## Important Notes
+When `agent.data_dir` is set, every `listener add` and `listener remove` is written to the dynamic configuration journal and replayed when the agent starts. Dynamic listeners are also restored when the agent wakes from [sleep mode](sleep.md). Without a `data_dir`, or when the journal cannot be written, the change still takes effect but is lost on restart. See [Dynamic configuration persistence](../configuration/dynamic-config-persistence.md).
 
-### Persistence
+## Exit status
 
-Dynamic listeners survive agent restarts when `agent.data_dir` is configured: every add/remove is appended to a [dynamic config journal](/configuration/dynamic-config-persistence) under `data_dir/dynamic-config.log` and replayed on the next start. They are also restored when the agent wakes from sleep mode.
+Exit codes follow the table in [CLI overview](overview.md#exit-codes). For `add` and `remove`, a request the agent rejects (missing `--path`, `--plaintext` on a non-`ws` transport, loopback advertise address, config listener, unknown address) exits with 5. Declining the confirmation prompt exits with 0.
 
-If no `data_dir` is configured, or the journal file cannot be written, the runtime mutation still succeeds but remains ephemeral: the listener is lost on the next restart.
+## See Also
 
-Listeners declared in `config.yaml` take precedence and cannot be replaced or removed at runtime.
-
-### TLS Settings
-
-Dynamic listeners inherit the agent's global TLS certificate, key, and mTLS setting. Per-listener certificate overrides are not supported at runtime; use `config.yaml` if you need different TLS material for a specific listener. `--plaintext` (ws only) starts the listener without TLS for reverse-proxy deployments.
-
-### Replacing Dynamic Listeners
-
-Re-running `listener add` with the same address stops the old listener and starts a fresh one with the new settings. Config-file listeners cannot be replaced at runtime.
+- [Listener configuration](../configuration/listeners.md): define permanent listeners and per-listener TLS in YAML
+- [Listener management API](../api/listener-management.md): the HTTP endpoint behind the listener subcommands
+- [Transports](../concepts/transports.md): choose between QUIC, HTTP/2, and WebSocket
+- [muti-metroo peer](peer.md): dial a listener from another agent at runtime
+- [Reverse proxy deployment](../deployment/reverse-proxy.md): run a plaintext WebSocket listener behind a TLS proxy

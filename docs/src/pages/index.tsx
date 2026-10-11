@@ -52,9 +52,9 @@ function UseCases(): ReactNode {
             <div className={styles.useCase}>
               <Heading as="h3">Secure Remote Access</Heading>
               <p>
-                Access internal resources from anywhere without traditional VPN
-                infrastructure. End-to-end encryption ensures transit nodes
-                never see your traffic.
+                Reach internal resources through a SOCKS proxy without
+                traditional VPN infrastructure. Stream payloads are encrypted
+                end to end between ingress and exit agents.
               </p>
             </div>
           </div>
@@ -62,9 +62,9 @@ function UseCases(): ReactNode {
             <div className={styles.useCase}>
               <Heading as="h3">Multi-Site Connectivity</Heading>
               <p>
-                Connect data centers, offices, and cloud regions through a
-                self-healing mesh. Automatic route propagation handles topology
-                changes.
+                Connect data centers, offices, and cloud regions through one
+                mesh. Exit agents advertise their networks and the routes
+                propagate to every agent.
               </p>
             </div>
           </div>
@@ -82,8 +82,8 @@ function UseCases(): ReactNode {
               <Heading as="h3">IoT and Edge Networking</Heading>
               <p>
                 Connect distributed IoT devices and edge nodes through a
-                lightweight mesh. Single binary with no dependencies runs
-                anywhere - from Raspberry Pi to cloud VMs.
+                lightweight mesh. A single binary with no dependencies runs on
+                anything from a Raspberry Pi to a cloud VM.
               </p>
             </div>
           </div>

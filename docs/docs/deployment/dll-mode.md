@@ -1,262 +1,120 @@
 ---
 title: DLL Mode (Windows)
+description: Run Muti Metroo on Windows from a DLL loaded by rundll32.exe, with no console window and no Administrator rights.
 sidebar_position: 6
-description: Running Muti Metroo as a Windows DLL via rundll32.exe
 ---
 
 # DLL Mode (Windows)
 
-Run Muti Metroo as a DLL via `rundll32.exe` for background execution without a console window.
+Each release includes a Windows DLL build of the agent. Loaded with `rundll32.exe`, it runs the agent as a background process with no console window. Combined with a Registry Run entry, it starts the agent at every logon without Administrator rights.
 
-## Process Behavior
-
-When launched via `rundll32.exe`, the agent runs as a **background process** - similar to a service but without being a real Windows service:
-
-- **No console window**: The process runs silently without any visible window
-- **No taskbar presence**: Does not appear in the taskbar
-- **Visible in Task Manager**: Appears as `rundll32.exe` in the process list
-- **No automatic restart**: Does not survive system reboots (use Registry Run for persistence)
-- **No service management**: Cannot be controlled via `sc.exe` or Services console
-
-This makes DLL mode ideal for scenarios where you need background execution without the overhead of a full Windows service installation, but remember that you must configure persistence separately if needed.
-
-**When to use DLL mode:**
-- Background execution without visible console window
-- Quick deployments without service installation
-- Scenarios where hiding the console is important
-
-**When to use .exe instead:**
-- Normal operation with console output
-- Persistent service installation via `muti-metroo service install`
-- Interactive usage and debugging
+The DLL only runs the agent. Use `muti-metroo.exe` for every other command: `status`, `shell`, `upload`, `service`, and so on. Those commands talk to the running agent over its HTTP API, so they work the same against an agent started from the DLL.
 
 ## Download
 
-The DLL build is available on the [Download page](/download):
+Get the DLL that matches the host architecture from the [Download page](/download):
 
-- **x86_64**: `muti-metroo-windows-amd64.dll` (Windows amd64)
-- **ARM64**: `muti-metroo-windows-arm64.dll` (Windows arm64)
+| File | Architecture |
+|------|--------------|
+| `muti-metroo-windows-amd64.dll` | x86_64 |
+| `muti-metroo-windows-arm64.dll` | ARM64 |
 
-Use the DLL matching your host architecture and invoke it with the native `rundll32.exe` -- no emulation layer is required.
+Both are native builds. Load them with the `rundll32.exe` in `C:\Windows\System32`. The amd64 DLL is UPX-compressed; the ARM64 DLL is not.
 
-## Basic Usage
+## Exported functions
 
-The DLL exports a `Run` function that can be invoked via `rundll32.exe`:
+| Export | Arguments | Purpose |
+|--------|-----------|---------|
+| `Run` | `<config-path>` | Load the config and run the agent until the process is terminated. |
+| `Install` | `[service-name] <config-path>` | Install the DLL as a user service (Registry Run) and start it. |
+
+### `Run`
 
 ```powershell
-rundll32.exe C:\path\to\muti-metroo.dll,Run C:\path\to\config.yaml
+rundll32.exe C:\Users\alice\muti-metroo\muti-metroo.dll,Run C:\Users\alice\muti-metroo\config.yaml
 ```
 
-The DLL runs silently in the background without opening a console window.
+The agent loads the config, replays persisted runtime changes from its data directory, and runs until the `rundll32.exe` process is terminated. It appears in Task Manager as `rundll32.exe`.
 
-## Programmatic Installation via Install Export
+If the config cannot be loaded or the agent fails to start, the process exits silently. Test a new config with `muti-metroo.exe run -c <config>` first, where errors are printed to the console.
 
-The DLL also exports an `Install` function for programmatic service installation. This is useful for custom deployment tools and installers that need to set up the agent without requiring the CLI executable.
+Config embedding is not supported for DLL files: `muti-metroo embed-config` and `muti-metroo setup` refuse `.dll` targets. Always pass a config path.
+
+### `Install`
 
 ```powershell
 # Default service name (muti-metroo)
-rundll32.exe C:\path\to\muti-metroo.dll,Install C:\path\to\config.yaml
+rundll32.exe C:\Users\alice\muti-metroo\muti-metroo.dll,Install C:\Users\alice\muti-metroo\config.yaml
 
 # Custom service name
-rundll32.exe C:\path\to\muti-metroo.dll,Install my-tunnel C:\path\to\config.yaml
+rundll32.exe C:\Users\alice\muti-metroo\muti-metroo.dll,Install my-tunnel C:\Users\alice\muti-metroo\config.yaml
 ```
 
-The optional service name argument controls the Registry Run value name (converted to PascalCase, e.g., `my-tunnel` becomes `MyTunnel`). When omitted, it defaults to `muti-metroo`.
+`Install` does the same as `muti-metroo.exe service install --user --dll <dll> -c <config>`, for hosts where only the DLL is available. It:
 
-The `Install` export performs the following:
+1. Stops and removes an existing user service with the same name, so it can be used to upgrade.
+2. Writes the Registry Run value (`MutiMetroo` for the default name, `MyTunnel` for `my-tunnel`).
+3. Writes `%USERPROFILE%\.<name>\service.info`.
+4. Starts the agent through a temporary scheduled task.
 
-1. If an existing user service is detected, stops it and uninstalls it (upgrade handling)
-2. Creates the Registry Run key at `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-3. Writes a `service.info` file for status tracking and uninstall
-4. Starts the agent immediately via a scheduled task
+The arguments are split on the first space: with two arguments, the first is the service name. Keep the config and DLL paths free of spaces. `Install` reports nothing; check the result with `muti-metroo.exe service status`.
 
-The config file and DLL must both exist at the specified paths before calling `Install`.
+## Start at logon
 
-After installation, the agent can be managed using the standard CLI commands:
+Install the DLL as a user service with the CLI:
 
 ```powershell
-muti-metroo service status      # Check status
-muti-metroo service uninstall   # Remove service
+muti-metroo.exe service install --user --dll C:\Users\alice\muti-metroo\muti-metroo.dll -c C:\Users\alice\muti-metroo\config.yaml
 ```
 
-:::note
-The `Install` export is equivalent to running `muti-metroo service install --user --dll` via the CLI. Use the CLI when available; use the `Install` export when you only have the DLL and need to install without the CLI executable.
-:::
+See [System Service - Windows user service](/deployment/system-service#windows-user-service-registry-run) for the flags, the registry value it writes, and how to remove it.
 
-## Architecture
-
-Each release ships a native DLL for both Windows architectures:
-
-- `muti-metroo-windows-amd64.dll` -- x86_64 Windows
-- `muti-metroo-windows-arm64.dll` -- ARM64 Windows
-
-Download the DLL that matches the host architecture and invoke it with the standard `rundll32.exe` in `System32`. There is no need to use the `SysWOW64` emulation rundll32 on ARM64 -- the ARM64 DLL is a native PE image.
-
-## Configuration
-
-The DLL supports both external configuration files and [embedded configuration](/deployment/embedded-config). When no config path is provided, the DLL checks for embedded configuration automatically:
+To create the Run entry by hand instead:
 
 ```powershell
-# With external config file
-rundll32.exe muti-metroo.dll,Run C:\path\to\config.yaml
-
-# With embedded config (no arguments needed)
-rundll32.exe muti-metroo.dll,Run
-```
-
-## Termination
-
-Since the DLL runs without a console, there's no way to send Ctrl+C or signals for graceful shutdown. Terminate the process externally:
-
-```powershell
-# Terminate all rundll32 processes running the DLL
-taskkill /F /IM rundll32.exe
-
-# Or find and kill the specific process
-Get-Process rundll32 | Where-Object { $_.MainModule.FileName -like "*muti-metroo*" } | Stop-Process -Force
-```
-
-The agent handles abrupt termination gracefully - peer connections will timeout and reconnect when the agent restarts.
-
-## Persistence with Registry Run
-
-Since the DLL process does not survive reboots on its own, use the Registry Run key to start it automatically at user logon. No admin privileges are required.
-
-### Automated Installation (Recommended)
-
-The easiest way to set up persistence is using the CLI:
-
-```powershell
-# Install as user service (no admin required)
-muti-metroo service install --user --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-
-# Install with custom service name
-muti-metroo service install --user -n "My Tunnel" --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-```
-
-**Flags:**
-- `--user`: Install as user service (required for Registry Run mode)
-- `--dll <path>`: Path to muti-metroo.dll (required)
-- `-c, --config <path>`: Path to config file (required)
-- `-n, --name <name>`: Custom service name (default: muti-metroo). The name is converted to PascalCase for the Registry value (e.g., "My Tunnel" becomes "MyTunnel").
-
-This creates a Registry Run entry at `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that:
-- Starts immediately after installation (no reboot required)
-- Runs automatically at each user logon
-- Uses `rundll32.exe` with the DLL
-- Runs with current user privileges
-- No console window (background execution)
-
-**Management commands:**
-
-```powershell
-# Check status (shows DLL and config paths)
-muti-metroo service status
-
-# Uninstall
-muti-metroo service uninstall
-
-# View registry entry (default name)
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v Muti Metroo
-
-# View registry entry (custom name, e.g., -n "My Tunnel" becomes "MyTunnel")
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MyTunnel
-
-# Stop manually (if needed)
-taskkill /F /IM rundll32.exe
-```
-
-:::tip Registry Value Names
-The `-n` flag sets the service name, which is converted to PascalCase for the registry value:
-- `muti-metroo` (default) becomes `Muti Metroo`
-- `my-tunnel` becomes `MyTunnel`
-- `My Tunnel` becomes `MyTunnel`
-:::
-
-:::note
-To restart the service, uninstall and reinstall it, or log out and log back in.
-:::
-
-### Manual Setup
-
-Alternatively, create the registry entry manually:
-
-```powershell
-# Add Registry Run entry (no admin required)
-$dll = "C:\Users\$env:USERNAME\muti-metroo\muti-metroo.dll"
-$cfg = "C:\Users\$env:USERNAME\muti-metroo\config.yaml"
-$cmd = "rundll32.exe `"$dll`",Run `"$cfg`""
-
+$dll = "C:\Users\alice\muti-metroo\muti-metroo.dll"
+$cfg = "C:\Users\alice\muti-metroo\config.yaml"
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
-    -Name "Muti Metroo" -Value $cmd
-
-# Verify
-Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Muti Metroo"
+    -Name "MutiMetroo" -Value "C:\Windows\System32\rundll32.exe $dll,Run $cfg"
 ```
 
-### Admin: Windows Service (Alternative)
+A Run entry created by hand is not known to `muti-metroo service status` or `service uninstall`.
 
-For system-wide deployment that starts before any user logs in, use the Windows Service approach instead (requires Administrator):
+## Stop the agent
+
+The DLL does not handle console signals, and it does not act on [`muti-metroo stop`](/cli/stop). Terminate the process instead. To stop only the `rundll32.exe` process that loaded the agent DLL:
 
 ```powershell
-# Install as Windows Service (requires admin)
-muti-metroo.exe service install -c C:\ProgramData\muti-metroo\config.yaml
+Get-CimInstance Win32_Process -Filter "Name='rundll32.exe'" |
+    Where-Object { $_.CommandLine -like "*muti-metroo*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-Windows Service runs as SYSTEM with elevated privileges, starting at boot before user login.
+For an agent installed as a user service, `muti-metroo.exe service uninstall` stops the process and removes the Run entry.
 
-## Comparison: EXE vs DLL
+Terminating the process closes peer connections without a graceful shutdown. Peers detect the loss and reconnect when the agent starts again.
 
-| Feature | .exe | .dll |
-|---------|------|------|
-| Console window | Yes (visible) | No (hidden) |
-| Signal handling (Ctrl+C) | Yes | No |
-| Service installation | Yes (CLI) | Yes (Install export) |
-| Survives reboot | Yes (as service) | No (needs Registry Run) |
-| Background execution | Requires `start /b` | Native |
-| Embedded config | Yes | No (use config file) |
-| Interactive commands | Yes | No |
-| Graceful shutdown | Yes (via signals) | No (taskkill only) |
-| Process name in Task Manager | `muti-metroo.exe` | `rundll32.exe` |
+## Logging
 
-:::note Not a Windows Service
-The DLL runs as a regular background process, not a Windows service. This means:
-- It won't automatically restart after a crash
-- It won't start automatically after reboot (unless configured via Registry Run)
-- It cannot be managed through the Services console (`services.msc`)
+The agent writes its log to stderr, which is discarded when it runs under `rundll32.exe`. There is no option to log to a file. To observe a running DLL agent, enable the [HTTP API](/configuration/http) and use `muti-metroo.exe status`, `peer status`, and `route status`, or the dashboard endpoints.
 
-For true service behavior with automatic restart and boot persistence, use `muti-metroo.exe service install` instead.
-:::
+## EXE and DLL compared
 
-## Limitations
+| | `muti-metroo.exe` | DLL via `rundll32.exe` |
+|---|---|---|
+| Console window | Yes, unless started with `run --detach` | No |
+| Log output | Console (stderr) | Discarded |
+| Graceful shutdown | Ctrl+C, `muti-metroo stop` | No, terminate the process |
+| Embedded config | Supported | Not supported |
+| Boot or logon start | Windows Service (Administrator) | Registry Run (no Administrator) |
+| Management commands | Yes | No, use the EXE |
+| Process name | `muti-metroo.exe` | `rundll32.exe` |
 
-- **Not a real service**: Runs as a background process, not a Windows service
-- **No boot persistence**: Does not automatically start after reboot (use Registry Run)
-- **No automatic restart**: Will not restart after a crash (unlike a Windows service)
-- **No graceful shutdown**: The DLL cannot receive Windows signals for graceful termination
-- **Embedded config supported**: The DLL can use embedded configuration via `rundll32.exe muti-metroo.dll,Run`
-- **No service installation via CLI**: Use the .exe for `muti-metroo service install` (or use the `Install` DLL export for programmatic installation)
-- **No interactive commands**: Commands like `shell`, `upload`, `download` must use the .exe
-- **No console output**: Logs must be configured to file output for debugging
+The DLL runs with the privileges of the user who started `rundll32.exe`. Antivirus and application control products that restrict `rundll32.exe` may block this mode; use the EXE where that is the case.
 
-## Logging Configuration
+## See Also
 
-Since there's no console output, configure file-based logging in your config:
-
-```yaml
-agent:
-  log_format: json
-```
-
-## Security Considerations
-
-- The DLL runs with the same privileges as the `rundll32.exe` process
-- When running as SYSTEM via Windows Service, the agent has elevated privileges
-- Consider running under a dedicated service account with minimal permissions
-- The DLL is subject to the same Windows code signing requirements as .exe files
-
-## Next Steps
-
-- [Embedded Configuration](/deployment/embedded-config) - Single-file deployment (use .exe for this)
-- [System Service](/deployment/system-service) - Native Windows Service installation
-- [Download](/download) - Get the DLL binary
+- [System Service](/deployment/system-service) - Windows Service, Registry Run, and `run --detach`
+- [CLI - service](/cli/service) - `service install --user --dll` reference
+- [CLI - status](/cli/status) - Check a running agent from the command line
+- [Download](/download) - DLL and EXE builds for amd64 and ARM64

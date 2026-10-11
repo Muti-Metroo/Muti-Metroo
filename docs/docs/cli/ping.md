@@ -1,5 +1,8 @@
 ---
-title: ping
+title: muti-metroo ping
+sidebar_label: ping
+sidebar_position: 21
+description: Send ICMP echo requests from a remote agent to an IP address and report replies and round-trip times.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,19 +11,11 @@ title: ping
 
 # muti-metroo ping
 
-Send ICMP echo (ping) requests through a remote agent. Test network connectivity and measure latency to any IP address via the mesh network.
+Sends ICMP echo requests from a remote agent to an IP address, through the mesh. The remote agent sends the actual ICMP packets, so the result shows whether that agent can reach the destination, and the reported time includes the mesh path between you and that agent.
 
-**Quick examples:**
-```bash
-# Ping through a remote agent
-muti-metroo ping abc123def456 8.8.8.8
+The command connects to a gateway agent's HTTP API (`--agent`), which must have the remote API endpoints enabled (`http.remote_api`). The target agent must have ICMP enabled (`icmp.enabled`, on by default). See [ICMP configuration](../configuration/icmp.md).
 
-# Continuous ping
-muti-metroo ping -c 0 abc123def456 1.1.1.1
-
-# Custom interval and timeout
-muti-metroo ping -c 10 -i 500ms -t 3s abc123def456 8.8.8.8
-```
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
 ## Synopsis
 
@@ -30,168 +25,83 @@ muti-metroo ping [flags] <target-agent-id> <destination>
 
 ## Arguments
 
-- `<target-agent-id>`: The agent that sends the actual ICMP packets
-- `<destination>`: IP address to ping (domain names are not supported)
+| Argument | Description |
+| --- | --- |
+| `<target-agent-id>` | The agent that sends the ICMP packets. A full 32-character agent ID, or a unique prefix of one. |
+| `<destination>` | IPv4 or IPv6 address to ping. Host names are not accepted; resolve them first. |
+
+A prefix is resolved against the gateway agent's list of known agents. The command fails if no agent or more than one agent matches.
 
 ## Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Gateway agent API address (host:port or http(s):// URL) |
-| `--count` | `-c` | `4` | Number of echo requests (0 = infinite) |
-| `--interval` | `-i` | `1s` | Interval between requests |
-| `--timeout` | `-t` | `5s` | Per-echo timeout |
-| `-h, --help` | | | Show help |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Gateway agent HTTP API address, as `host:port` or a URL. See [Agent address](overview.md#agent-address). |
+| `-c`, `--count` | `4` | Number of echo requests to send. `0` sends until interrupted with Ctrl+C. |
+| `-i`, `--interval` | `1s` | Wait between requests, as a Go duration (`500ms`, `2s`). |
+| `-w`, `--timeout` | `5s` | How long to wait for each reply, as a Go duration. |
 
-## Requirements
+`-t` is a deprecated alias for `--timeout`; it still works but prints a warning to stderr. See [Deprecated commands and flags](overview.md#deprecated-commands-and-flags).
 
-The target agent must have ICMP enabled in its configuration (enabled by default):
+## Output
 
-```yaml
-icmp:
-  enabled: true
+```bash
+muti-metroo ping -c 3 abc123de 10.0.0.1
 ```
 
-See [ICMP Configuration](/configuration/icmp) for details.
+```text
+PING 10.0.0.1 via abc123def456
+Reply from 10.0.0.1: seq=1 time=23.4ms
+Reply from 10.0.0.1: seq=2 time=21.8ms
+Reply from 10.0.0.1: seq=3 time=22.1ms
+
+--- 10.0.0.1 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss
+rtt min/avg/max = 21.8/22.4/23.4 ms
+```
+
+The header shows the first 12 characters of the target agent ID. `time` is measured by the CLI, from sending the request to receiving the reply. A request without a reply within `--timeout` prints `seq=N: timeout`, and an error reported by the target agent prints `seq=N: error: <message>`. The statistics are printed when the count is reached or when you press Ctrl+C.
 
 ## Examples
 
-### Basic Ping
-
 ```bash
-muti-metroo ping abc123def456 8.8.8.8
+# Four pings from the target agent
+muti-metroo ping abc123def456789012345678901234ab 10.0.0.1
+
+# Use a short agent ID prefix
+muti-metroo ping abc123de 10.0.0.1
+
+# Through a different gateway agent
+muti-metroo ping -a 192.168.1.10:8080 abc123de 10.0.0.1
+
+# Ten pings, 500 ms apart, waiting at most 2 seconds for each reply
+muti-metroo ping -c 10 -i 500ms -w 2s abc123de 192.168.1.1
+
+# Ping until Ctrl+C
+muti-metroo ping -c 0 abc123de 10.0.0.1
+
+# IPv6 destination
+muti-metroo ping abc123de 2001:db8::1
 ```
 
-Output:
-
-```
-PING 8.8.8.8 via abc123def456
-Reply from 8.8.8.8: seq=1 time=23.4ms
-Reply from 8.8.8.8: seq=2 time=21.8ms
-Reply from 8.8.8.8: seq=3 time=22.1ms
-Reply from 8.8.8.8: seq=4 time=24.0ms
-
---- 8.8.8.8 ping statistics ---
-4 packets transmitted, 4 received, 0% packet loss
-rtt min/avg/max = 21.8/22.8/24.0 ms
-```
-
-### Continuous Ping
-
-Use `-c 0` for continuous ping until interrupted (Ctrl+C):
-
-```bash
-muti-metroo ping -c 0 abc123def456 8.8.8.8
-```
-
-### Custom Count and Interval
-
-Send 10 pings with 500ms interval:
-
-```bash
-muti-metroo ping -c 10 -i 500ms abc123def456 8.8.8.8
-```
-
-### Via Different Gateway Agent
-
-Connect through a specific gateway agent:
-
-```bash
-muti-metroo ping -a 192.168.1.10:8080 abc123def456 10.0.0.1
-```
-
-### Using Agent ID Prefix
-
-You can use just the first few characters of the agent ID:
-
-```bash
-# These are equivalent if "abc" uniquely identifies the agent
-muti-metroo ping abc 8.8.8.8
-muti-metroo ping abc123def456789012345678 8.8.8.8
-```
-
-### Shorter Timeout for Fast Networks
-
-```bash
-muti-metroo ping -t 1s abc123def456 192.168.1.1
-```
-
-## Output Format
-
-Each reply shows:
-- **seq**: Sequence number of the echo request
-- **time**: Round-trip time in milliseconds
-
-The statistics summary shows:
-- Packets transmitted and received
-- Packet loss percentage
-- RTT min/avg/max values
-
-## Error Messages
+## Error messages
 
 | Error | Cause |
-|-------|-------|
-| `destination must be a valid IP address` | Use IP address, not domain name |
-| `ICMP session failed: icmp not enabled` | Target agent does not have ICMP enabled |
-| `timeout` | No reply within timeout period |
+| --- | --- |
+| `destination must be a valid IP address: <value>` | The destination is a host name or not a valid address. |
+| `no agent found matching prefix: <prefix>` | No known agent ID starts with the prefix. |
+| `ambiguous prefix '<prefix>' matches N agents: ...` | Use a longer prefix or the full ID. |
+| `failed to connect to ICMP endpoint: ...` | The gateway agent is unreachable, rejected the bearer token, or has `http.remote_api` disabled. |
+| `ICMP session failed: <reason>` | The target agent refused the session, for example because ICMP is disabled there or the session limit is reached. |
 
-## How It Works
+## Exit status
 
-1. The CLI connects to the gateway agent's HTTP API via WebSocket
-2. An ICMP session is established through the mesh to the target agent
-3. The target agent sends real ICMP echo requests using unprivileged sockets
-4. Replies are encrypted and relayed back through the mesh
-5. All traffic between agents is E2E encrypted (transit nodes cannot see content)
+The command exits 0 once it has printed statistics, including when no replies were received; check the packet loss line. It exits 1 when the session cannot be set up (any error in the table above). See [Exit codes](overview.md#exit-codes).
 
-## Use Cases
+## See Also
 
-### Network Connectivity Testing
-
-Verify a target network is reachable through the mesh:
-
-```bash
-muti-metroo ping target-agent-id 10.0.0.1
-```
-
-### Latency Measurement
-
-Measure latency to a specific destination:
-
-```bash
-muti-metroo ping -c 100 target-agent-id 8.8.8.8
-```
-
-### Network Troubleshooting
-
-Test connectivity to different points in a network:
-
-```bash
-# Test gateway
-muti-metroo ping target-agent 192.168.1.1
-
-# Test internal server
-muti-metroo ping target-agent 192.168.1.100
-
-# Test external connectivity
-muti-metroo ping target-agent 8.8.8.8
-```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success (at least one reply received) |
-| 1 | Error or no replies received |
-
-## Limitations
-
-- **IP addresses only**: Domain names must be resolved beforehand
-- **Target agent requirement**: The target agent must have ICMP enabled
-
-Both IPv4 and IPv6 destinations are supported; the agent selects ICMPv4 or ICMPv6 automatically based on the destination address.
-
-## Related
-
-- [ICMP Configuration](/configuration/icmp) - Configure ICMP on agents
-- [Shell Command](/cli/shell) - Execute commands on remote agents
-- [Probe Command](/cli/probe) - Test connectivity to listeners
+- [ICMP configuration](../configuration/icmp.md): enable ICMP on an agent and set session limits
+- [ICMP relay](../features/icmp-relay.md): how ICMP echo works through the mesh
+- [ICMP HTTP API](../api/icmp.md): the WebSocket endpoint this command uses
+- [probe](probe.md): test a transport listener directly
+- [shell](shell.md): run diagnostic commands such as `traceroute` on a remote agent

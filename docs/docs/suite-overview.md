@@ -1,24 +1,20 @@
 ---
 sidebar_position: 10
 title: Suite Overview
-description: How Muti Metroo, Mutiauk, and Muti Metroo Manager work together as a complete networking solution
+description: How the Muti Metroo agent, the Mutiauk TUN interface, and the Muti Metroo Manager web dashboard work together.
 ---
 
-# The Muti Metroo Suite
+# Suite Overview
 
-Muti Metroo is part of a three-component suite designed to cover the full spectrum of mesh networking needs -- from encrypted traffic tunneling, to transparent OS-level routing, to browser-based management. Each component is a standalone binary that can be deployed independently, but together they form a complete networking solution.
+Muti Metroo is one of three tools that are designed to work together. Each is a standalone binary, and only the agent is required.
 
-## Component Roles
+| Component | Purpose | Platforms | Privileges |
+| --- | --- | --- | --- |
+| [Muti Metroo](/getting-started/overview) | Mesh agent: encrypted tunnels, SOCKS proxy ingress, multi-hop routing | Linux, macOS, Windows | Unprivileged |
+| [Mutiauk](/mutiauk) | TUN interface that forwards IP traffic into the agent's SOCKS5 proxy | Linux, macOS, Windows | Root or Administrator |
+| [Muti Metroo Manager](/muti-metroo-manager) | Web dashboard for an agent's HTTP API: topology, routes, management actions | Linux, macOS, Windows | Unprivileged |
 
-| Component                              | Purpose                                                                       | Platform                    | Requires Root |
-| -------------------------------------- | ----------------------------------------------------------------------------- | --------------------------- | ------------- |
-| [**Muti Metroo**](/getting-started/overview) | Mesh networking agent -- encrypted tunnels, SOCKS5 proxy, multi-hop routing   | All (Linux, macOS, Windows) | No            |
-| [**Mutiauk**](/mutiauk)        | TUN interface -- transparent L3 traffic interception through the SOCKS5 proxy | All (Linux, macOS, Windows) | Yes           |
-| [**Muti Metroo Manager**](/muti-metroo-manager)            | Web dashboard -- browser-based monitoring, management, and remote access      | All (Linux, macOS, Windows) | No            |
-
-## Architecture
-
-The following diagram shows how the three components interact:
+## How the components connect
 
 ```mermaid
 flowchart TB
@@ -38,77 +34,64 @@ flowchart TB
     Agent3 -->|TCP/UDP| Dest[Destinations]
 ```
 
-**Traffic paths:**
+- **Applications that support SOCKS** connect to the ingress agent's SOCKS proxy directly.
+- **Other applications** send ordinary IP traffic. Mutiauk captures it on a TUN interface and forwards it through the agent's SOCKS5 proxy.
+- **Operators** open Muti Metroo Manager in a browser. Manager proxies the agent's HTTP API to show the topology and run management actions.
 
-- **SOCKS-aware applications** connect directly to Muti Metroo's SOCKS5 proxy
-- **All other applications** have their traffic transparently intercepted by Mutiauk's TUN interface and forwarded through the SOCKS5 proxy
-- **Operators** use Muti Metroo Manager's web UI to monitor the mesh topology, manage routes, run management commands, and transfer files
+## Which components you need
 
-## When to Use What
+| Scenario | Components | Reason |
+| --- | --- | --- |
+| Route traffic from specific applications (browser, curl, SSH) | Muti Metroo | Configure each application to use the SOCKS proxy. |
+| Route traffic from applications without proxy support | Muti Metroo and Mutiauk | Mutiauk captures IP traffic, so no per-application settings are needed. |
+| Monitor and manage the mesh from a browser | Muti Metroo and Muti Metroo Manager | Manager provides the web dashboard. |
+| Transparent routing and browser management | All three | Combines the two cases above. |
 
-| Scenario                                                | Components Needed   | Why                                                              |
-| ------------------------------------------------------- | ------------------- | ---------------------------------------------------------------- |
-| Route traffic from a specific app (browser, curl)       | Muti Metroo only          | Configure the app to use SOCKS5 proxy directly                   |
-| Route all traffic from a machine transparently          | Muti Metroo + Mutiauk | Mutiauk intercepts L3 traffic so no per-app config is needed |
-| Monitor and manage the mesh from a browser              | Muti Metroo + Muti Metroo Manager   | Manager provides a visual dashboard and remote access tools      |
-| Full deployment with transparent routing and management | All three           | Complete solution for production environments                    |
+## Example deployment
 
-## Deployment Example
+### Step 1: Deploy the agents
 
-A realistic deployment using all three components:
-
-### Step 1: Deploy Muti Metroo Agents
-
-Set up the mesh by deploying agents on each host. At minimum, you need an ingress agent (where clients connect) and an exit agent (where traffic leaves the mesh).
+Deploy at least an ingress agent, where clients connect, and an exit agent, where traffic leaves the mesh. On each host:
 
 ```bash
-# On the ingress host
 muti-metroo init -d ./data
-muti-metroo run -c ./ingress-config.yaml
-
-# On the exit host
-muti-metroo init -d ./data
-muti-metroo run -c ./exit-config.yaml
+muti-metroo run -c ./config.yaml
 ```
 
-The agents connect to each other and advertise routes automatically. See [First Mesh](/getting-started/first-mesh) for a complete walkthrough.
+[Your First Mesh](/getting-started/first-mesh) shows the configuration for both agents.
 
-### Step 2: Add Mutiauk for Transparent Routing
+### Step 2: Add Mutiauk on client machines
 
-On any client that needs transparent access to the mesh, install Mutiauk and point it at the local ingress agent's SOCKS5 proxy:
+On a client that runs an ingress agent, run the Mutiauk setup wizard and point it at the agent's SOCKS5 proxy, `127.0.0.1:1080`. With autoroutes enabled, Mutiauk receives the mesh's CIDR routes from the agent. Then start the daemon:
 
 ```bash
 sudo mutiauk setup
-# Configure:
-#   SOCKS5 server: 127.0.0.1:1080
-#   Routes: networks reachable through the mesh
-
 sudo mutiauk daemon start
 ```
 
-Now all applications on this machine can reach destinations through the mesh without any proxy configuration.
+`mutiauk daemon start` runs in the foreground. To run it in the background, install it as a service with `mutiauk service install`. Applications on the machine now reach mesh destinations without proxy settings. See [Mutiauk](/mutiauk) for configuration details.
 
-### Step 3: Add Muti Metroo Manager for Web Monitoring
+### Step 3: Add Muti Metroo Manager
 
-On any machine with access to an agent's HTTP API, launch Muti Metroo Manager:
+On a machine that can reach an agent's HTTP API, start Manager and point it at that agent:
 
 ```bash
-muti-metroo-manager -agent http://192.168.1.10:8080
-# Open http://localhost:3000 in your browser
+muti-metroo-manager --agent http://192.168.1.10:8080
 ```
 
-The dashboard shows the mesh topology, agent status, routes, and provides management command and file transfer access to all reachable agents.
+Then open `http://localhost:3000` in a browser. If the agent's API requires a bearer token, pass it with `--agent-token`. See [Muti Metroo Manager](/muti-metroo-manager) for all options.
 
-## Component Downloads
+## Downloads
 
-| Component   | Download                                  |
-| ----------- | ----------------------------------------- |
-| Muti Metroo       | [Download page](/download)                |
-| Mutiauk | [Download section](/mutiauk#download) |
-| Muti Metroo Manager   | [Download section](/muti-metroo-manager#download)   |
+| Component | Download |
+| --- | --- |
+| Muti Metroo | [Download page](/download) |
+| Mutiauk | [Mutiauk download section](/mutiauk#download) |
+| Muti Metroo Manager | [Manager download section](/muti-metroo-manager#download) |
 
-## Next Steps
+## See Also
 
-- [Getting Started](/getting-started/overview) -- set up your first Muti Metroo mesh
-- [Mutiauk](/mutiauk) -- detailed Mutiauk configuration and usage
-- [Muti Metroo Manager](/muti-metroo-manager) -- detailed Muti Metroo Manager configuration and features
+- [Getting Started](/getting-started/overview): set up your first Muti Metroo agents
+- [Mutiauk](/mutiauk): Mutiauk installation, configuration, and autoroutes
+- [Muti Metroo Manager](/muti-metroo-manager): Manager installation, configuration, and features
+- [HTTP API Overview](/api/overview): the agent API that Manager and scripts use

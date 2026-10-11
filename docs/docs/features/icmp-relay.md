@@ -1,6 +1,7 @@
 ---
 title: ICMP Relay
-sidebar_position: 7
+description: Ping hosts from a chosen remote agent with muti-metroo ping, including the Linux sysctl that unprivileged ICMP needs.
+sidebar_position: 3
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,177 +10,114 @@ sidebar_position: 7
 
 # ICMP Relay
 
-Ping remote hosts through your mesh network. Test connectivity, measure latency, and diagnose network issues - all through your encrypted tunnel.
+`muti-metroo ping` sends ICMP echo requests from a remote agent of your choice, so you can check whether a host answers from inside a network that only that agent can reach. Your local agent carries each request through the mesh to the target agent, which sends the real echo request and returns the reply.
 
 ```bash
-# Ping through the mesh (requires target agent ID and destination)
-muti-metroo ping <target-agent-id> 8.8.8.8
-
-# Continuous ping
-muti-metroo ping <target-agent-id> -c 0 192.168.1.1
-
-# IPv6 ping
-muti-metroo ping <target-agent-id> 2001:4860:4860::8888
+muti-metroo ping 1f743225 10.0.0.1
 ```
 
-## How It Works
+```text
+PING 10.0.0.1 via 1f743225d524
+Reply from 10.0.0.1: seq=1 time=0.6ms
+Reply from 10.0.0.1: seq=2 time=0.6ms
+Reply from 10.0.0.1: seq=3 time=0.5ms
+Reply from 10.0.0.1: seq=4 time=0.7ms
 
-ICMP echo requests flow through your mesh just like TCP and UDP - encrypted end-to-end from ingress to exit.
+--- 10.0.0.1 ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss
+rtt min/avg/max = 0.5/0.6/0.7 ms
+```
 
 ```mermaid
 flowchart LR
-    A[CLI Client] -->|ICMP_OPEN| B[Ingress Agent]
+    A[muti-metroo ping] -->|HTTP API| B[Local Agent]
     B -->|Encrypted Mesh| C[Transit Agents]
     C -->|Encrypted Mesh| D[Target Agent]
     D -->|ICMP Echo| E[Destination]
 ```
 
-All ICMP payloads are encrypted end-to-end between ingress and exit using ChaCha20-Poly1305. Transit nodes cannot decrypt the traffic.
+Echo payloads are end-to-end encrypted between the local agent and the target agent. The destination IP and sequence numbers are visible to transit agents.
+
+[Mutiauk](/mutiauk) also forwards ping traffic from programs on its host through the relay.
 
 ## Requirements
 
-ICMP relay requires:
+- The target agent has ICMP enabled. It is enabled by default; see [ICMP Configuration](/configuration/icmp).
+- The target agent runs on Linux or macOS. Windows agents cannot send unprivileged ICMP, so pinging through a Windows agent fails.
+- On Linux, the `net.ipv4.ping_group_range` sysctl on the target agent's host includes the agent's group (see below).
+- The local agent can route to the target agent.
 
-1. **Agent** with ICMP enabled (enabled by default)
-2. A route from ingress to the target agent
-3. **Supported platform** on the target agent (see Platform Support below)
+### Linux sysctl
 
-## Platform Support
-
-ICMP uses unprivileged sockets and platform support varies:
-
-| Platform | Supported | Requirements |
-|----------|-----------|--------------|
-| **Linux** | Yes | `ping_group_range` sysctl must be configured |
-| **macOS** | Yes | Works out of the box (no configuration needed) |
-| **Windows** | No | Not supported - Windows lacks unprivileged ICMP socket support |
-
-:::warning Windows Agents
-ICMP relay does not work when the target agent runs on Windows. Use Linux or macOS agents for ICMP functionality.
-:::
-
-:::tip Configuration
-See [ICMP Configuration](/configuration/icmp) for all options including session limits and timeouts.
-:::
-
-## Linux System Requirements
-
-On Linux, the unprivileged ICMP ping sockets Muti Metroo uses require kernel configuration:
+The agent uses unprivileged ICMP sockets. On Linux the kernel only allows them for groups listed in `net.ipv4.ping_group_range`, and many distributions default to `1 0` (no groups). Running the agent as root does not bypass this check.
 
 ```bash
-# Check current setting
+# Show the current range
 sysctl net.ipv4.ping_group_range
 
-# Enable for all groups (run as root)
+# Allow all groups now
 sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
 
-# Make persistent
+# Keep the setting across reboots
 echo "net.ipv4.ping_group_range=0 2147483647" | sudo tee /etc/sysctl.d/99-muti-metroo-ping.conf
 ```
 
-Without this setting, ICMP fails with "failed to create ICMP socket".
-
-:::info No Root Required -- but root does not bypass the sysctl either
-Muti Metroo uses unprivileged ICMP ping sockets, so no root privileges are needed once the sysctl is configured. Conversely, running the agent as root does **not** let you skip it: the kernel gates ping sockets solely on `ping_group_range` and ignores `CAP_NET_RAW`, so an empty range fails even for root. The agent's GID must fall inside the range.
-:::
+No agent restart is needed; the socket is opened for each ping session. macOS needs no configuration.
 
 ## Usage
 
-### Basic Ping
-
 ```bash
-# Ping a host through a specific exit agent
-muti-metroo ping abc123def456 8.8.8.8
+# Four echo requests (the default)
+muti-metroo ping 1f743225 10.0.0.1
 
-# Output:
-# PING 8.8.8.8 via agent abc123def456
-# 64 bytes from 8.8.8.8: seq=1 time=12.3ms
-# 64 bytes from 8.8.8.8: seq=2 time=11.8ms
+# Ten requests, 500 ms apart
+muti-metroo ping -c 10 -i 500ms 1f743225 10.0.0.1
+
+# Until interrupted with Ctrl+C
+muti-metroo ping -c 0 1f743225 10.0.0.1
+
+# IPv6 destination
+muti-metroo ping 1f743225 2001:db8::10
+
+# Through an agent other than localhost:8080
+muti-metroo ping -a 192.168.1.10:8080 1f743225 10.0.0.1
 ```
 
-### Continuous Ping
-
-```bash
-# Ping indefinitely (Ctrl+C to stop)
-muti-metroo ping abc123def456 -c 0 192.168.1.1
-```
-
-### IPv6 Ping
-
-```bash
-# Ping IPv6 addresses
-muti-metroo ping abc123def456 2001:4860:4860::8888
-```
-
-### Via Specific Agent
-
-```bash
-# Ping through a specific agent's API
-muti-metroo ping -a 192.168.1.10:8080 abc123def456 8.8.8.8
-```
-
-## IPv4 and IPv6 Support
-
-ICMP supports both IP versions automatically:
-
-| Version | Protocol | Echo Request | Echo Reply |
-|---------|----------|--------------|------------|
-| IPv4 | ICMPv4 (1) | Type 8 | Type 0 |
-| IPv6 | ICMPv6 (58) | Type 128 | Type 129 |
-
-The agent detects the IP version from the destination address and uses the appropriate socket type.
-
-## End-to-End Encryption
-
-ICMP traffic is encrypted between ingress and exit:
-
-1. Ingress generates ephemeral X25519 keypair
-2. Exit generates ephemeral X25519 keypair
-3. Both derive shared secret via ECDH
-4. Each echo request/reply encrypted with ChaCha20-Poly1305
-
-Transit nodes cannot decrypt ICMP payloads.
+The destination must be an IP address; hostnames are rejected. The target agent ID can be a unique prefix. See [ping CLI](/cli/ping) for all flags.
 
 ## Troubleshooting
 
-### Failed to create ICMP socket (Linux)
+### failed to create ICMP socket
 
-```
-Error: ICMP open failed: failed to create ICMP socket
-```
-
-Configure the `ping_group_range` sysctl on the **exit** agent's host (this is required even when the agent runs as root):
-
-```bash
-sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
-echo "net.ipv4.ping_group_range=0 2147483647" | sudo tee /etc/sysctl.d/99-muti-metroo-ping.conf
+```text
+Error: ICMP session failed: failed to create ICMP socket
 ```
 
-No agent restart is needed -- the socket is created per ping session.
+The target agent's host does not allow unprivileged ICMP. On Linux, set `net.ipv4.ping_group_range` as shown above. On Windows, use a Linux or macOS agent instead.
 
-### ICMP Disabled
+### ICMP echo disabled
 
+```text
+Error: ICMP session failed: ICMP echo disabled
 ```
-Error: ICMP not enabled
+
+The target agent has `icmp.enabled: false`.
+
+### no route to agent
+
+```text
+Error: ICMP session failed: no route to agent 1f743225
 ```
 
-- Verify the target agent has `icmp.enabled: true`
-- Check that a route exists to the target agent
-- Ensure the target agent is connected to the mesh
+The local agent does not know a path to the target agent. Check `muti-metroo peer status` and `muti-metroo mesh-test`.
 
-### Session Timeout
+### Every request times out
 
-Sessions expire after `idle_timeout` (default 60 seconds) of inactivity. Each ping request resets the timer.
+The target agent sent the requests but got no reply. The destination may be down, or a firewall between the target agent and the destination drops ICMP.
 
-## Security Considerations
+## See Also
 
-1. **E2E encryption**: All ICMP data is encrypted through the mesh
-2. **Session limits**: Use `max_sessions` to prevent resource exhaustion
-3. **No DNS resolution**: Only IP addresses are accepted (no domain names)
-
-## Related
-
-- [Configuration - ICMP](/configuration/icmp) - Full configuration reference
-- [CLI - ping](/cli/ping) - CLI command reference
-- [Features - UDP Relay](/features/udp-relay) - UDP tunneling
-- [Configuration - Exit](/configuration/exit) - Exit routing setup
+- [ICMP Configuration](/configuration/icmp): enable ICMP and set session limits and timeouts
+- [ping CLI](/cli/ping): every flag of `muti-metroo ping`
+- [UDP Relay](/features/udp-relay): relay UDP traffic
+- [Access Control](/security/access-control): which agents answer ping requests

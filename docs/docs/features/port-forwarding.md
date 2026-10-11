@@ -1,6 +1,7 @@
 ---
 title: Port Forwarding
-sidebar_position: 3
+description: Publish a TCP service under a routing key on one agent and open a local port for it on any other agent in the mesh.
+sidebar_position: 6
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,232 +10,157 @@ sidebar_position: 3
 
 # Port Forwarding
 
-Expose local services through your mesh network. Services register themselves with a routing key, and any agent can create a local port that tunnels to that service - like lightweight service discovery built into your mesh.
+Port forwarding publishes a TCP service by name. An agent that can reach the service registers it under a routing key (an **endpoint**). Any other agent opens a local TCP port for the same key (a **listener**). Clients connect to the listener's port as if the service were local, and the mesh carries each connection to the endpoint agent, which connects to the service.
 
 ```mermaid
 flowchart LR
     subgraph SiteA["Site A"]
-        App[Client App] -->|"localhost:8080"| Listener[Listener Agent]
+        App[Client App] -->|"127.0.0.1:5432"| Listener[Listener Agent]
     end
 
     Listener -->|Encrypted| Transit[Transit]
     Transit -->|Encrypted| Endpoint[Endpoint Agent]
 
     subgraph SiteB["Site B"]
-        Endpoint -->|"localhost:3000"| Service[API Service]
+        Endpoint -->|"127.0.0.1:5432"| Service[PostgreSQL]
     end
 ```
 
-To the client app, it looks like a normal local port. The mesh handles routing and encryption transparently.
+Compared with the [SOCKS proxy](/features/socks5-proxy), port forwarding needs no proxy support in the client and no exit route for the service's IP. The client only knows a local port, and the service only needs to be reachable from the endpoint agent.
 
-## Service Discovery Pattern
+Endpoint keys are advertised through the mesh like routes, so every agent learns which keys exist and where they are served. This works as a small service registry: services register a key, and clients anywhere open a listener for it.
 
-Port forwarding doubles as a lightweight service discovery mechanism:
+## Publish a service
 
-1. **Services register** by configuring an endpoint with a routing key
-2. **Keys propagate** through the mesh automatically
-3. **Any agent** can create a listener for that key
-4. **Client apps** connect to a local port as if the service were local
-
-```mermaid
-flowchart TB
-    subgraph Services["Services Register (Endpoints)"]
-        S1["api-v1 -> localhost:3000"]
-        S2["config-server -> localhost:8000"]
-        S3["metrics -> localhost:9090"]
-    end
-
-    subgraph Mesh["Mesh Network"]
-        Routes["Route Table<br/>api-v1, config-server, metrics"]
-    end
-
-    subgraph Clients["Clients Discover (Listeners)"]
-        C1["localhost:3000 -> api-v1"]
-        C2["localhost:8080 -> config-server"]
-    end
-
-    Services --> Mesh
-    Mesh --> Clients
-```
-
-**Benefits:**
-- No separate service registry infrastructure needed
-- Services are discoverable across network boundaries
-- Client apps don't need mesh awareness - they just connect to localhost
-- E2E encryption protects all traffic automatically
-
-## How It Works
-
-Port forwarding creates **reverse tunnels** - the opposite direction from SOCKS5 proxy:
-
-| Direction | Flow | Use Case |
-|-----------|------|----------|
-| **SOCKS5** | Your app -> Mesh -> Remote server | Access remote resources |
-| **Port Forward** | Remote client -> Mesh -> Your service | Expose local services |
-
-**Endpoints** run on agents with access to your service. **Listeners** run on agents where clients will connect.
-
-## Configuration
-
-Port forwarding uses **routing keys** to match listeners with endpoints:
+On the agent that can reach the service, add an endpoint:
 
 ```yaml
-# On the SERVICE side (endpoint) - where your service runs
 forward:
   endpoints:
-    - key: "my-api"              # Routing key (advertised to mesh)
-      target: "localhost:3000"   # Your local service
+    - key: "postgres-main"
+      target: "127.0.0.1:5432"
+```
 
-# On the CLIENT side (listener) - where apps connect
+On the agent where clients run, add a listener for the same key:
+
+```yaml
 forward:
   listeners:
-    - key: "my-api"              # Must match endpoint key
-      address: ":3000"           # Local port for client apps
-      max_connections: 100       # Optional limit
+    - key: "postgres-main"
+      address: "127.0.0.1:5432"
+      max_connections: 50
 ```
 
-See [Configuration - Forward](/configuration/forward) for full reference.
-
-## Common Scenarios
-
-### Configuration Distribution
-
-Serve configuration files, scripts, and updates to remote sites:
-
-```yaml
-# Central server (endpoint)
-forward:
-  endpoints:
-    - key: "config-server"
-      target: "localhost:8000"
-```
+Clients on the listener host now connect to `127.0.0.1:5432`:
 
 ```bash
-# Start a simple HTTP server
-python3 -m http.server 8000 --directory ./configs
+psql -h 127.0.0.1 -p 5432 -U app appdb
 ```
 
-```yaml
-# Remote site agents (listeners)
-forward:
-  listeners:
-    - key: "config-server"
-      address: "127.0.0.1:8080"
-```
+All keys are described in [Forward Configuration](/configuration/forward).
 
-From any remote site:
+## Add forwards at runtime
+
+Endpoints and listeners can also be added to a running agent, locally or on a remote agent with `--target`:
+
 ```bash
-curl http://localhost:8080/site-config.yaml -o config.yaml
+# Endpoint side: register the key
+muti-metroo forward endpoint add postgres-main 127.0.0.1:5432 --target 1f743225d524f8acd3b42b55639702f0
+
+# Listener side: open the local port
+muti-metroo forward add postgres-main 127.0.0.1:5432 --max-connections 50
+
+# Inspect and remove
+muti-metroo forward endpoint list --target 1f743225d524f8acd3b42b55639702f0
+muti-metroo forward list
+muti-metroo forward remove postgres-main
 ```
 
-### Internal API Gateway
+Runtime forwards are restored after a restart when `agent.data_dir` is writable. See [forward CLI](/cli/forward) for every flag and [Runtime Configuration](/features/runtime-configuration) for the authorization these commands need.
 
-Make internal APIs accessible from all sites without VPN:
+## Publish services from a workstation with Mutiauk
+
+[Mutiauk](/mutiauk#expose-publishing-local-services) can register endpoints on an agent without running an agent itself. Its `expose` feature connects to the agent's SOCKS5 listener and registers routing keys for local folders or TCP services. The agent advertises them like other endpoints, labelled `expose:<key>`, and listeners anywhere in the mesh can use them.
+
+Exposed keys exist only while Mutiauk stays connected. They are withdrawn from the mesh when the connection closes and are not restored after an agent restart. A key that is already used by a configured or runtime endpoint, or by another Mutiauk session, is refused.
+
+Registration is available on every agent with a SOCKS5 listener and is gated only by SOCKS5 authentication. See [Access Control](/security/access-control#socks-listener) before exposing a SOCKS5 listener to other hosts.
+
+## Common patterns
+
+### Internal API at every branch
+
+One endpoint at headquarters, a listener on each branch agent:
 
 ```yaml
-# API server at headquarters (endpoint)
+# Headquarters agent
 forward:
   endpoints:
     - key: "internal-api"
-      target: "localhost:3000"
+      target: "127.0.0.1:3000"
 ```
 
 ```yaml
-# All branch office agents (listeners)
+# Branch office agents
 forward:
   listeners:
     - key: "internal-api"
       address: "127.0.0.1:3000"
 ```
 
-Applications at any branch office can call `http://localhost:3000/api/...` as if the API were local.
+Applications at each branch call `http://127.0.0.1:3000/` as if the API ran locally.
 
-### Database Access
-
-Provide secure database access across sites:
+### Several services on one host
 
 ```yaml
-# Database server (endpoint)
 forward:
   endpoints:
-    - key: "postgres-main"
-      target: "localhost:5432"
-```
-
-```yaml
-# Developer workstations (listeners)
-forward:
-  listeners:
-    - key: "postgres-main"
-      address: "127.0.0.1:5432"
-```
-
-Developers connect to `localhost:5432` - standard database tools work unchanged.
-
-### Multiple Services
-
-Register several services with different keys:
-
-```yaml
-# Service host (multiple endpoints)
-forward:
-  endpoints:
-    - key: "http-docs"
-      target: "localhost:80"
+    - key: "docs-http"
+      target: "127.0.0.1:80"
     - key: "api-gateway"
-      target: "localhost:8080"
-    - key: "metrics"
-      target: "localhost:9090"
+      target: "127.0.0.1:8080"
+    - key: "grafana"
+      target: "127.0.0.1:3001"
 ```
 
-### High Availability
+### Redundant endpoints
 
-Multiple agents can register the same endpoint key for redundancy:
+Two agents can register the same key. Each listener sends new connections to the endpoint with the fewest hops; if that endpoint disappears, its route expires or is withdrawn and the next one is used.
 
 ```yaml
-# Primary server
+# Primary and secondary hosts use the same entry
 forward:
   endpoints:
     - key: "api-v1"
-      target: "localhost:3000"
-
-# Secondary server (same key)
-forward:
-  endpoints:
-    - key: "api-v1"
-      target: "localhost:3000"
+      target: "127.0.0.1:3000"
 ```
 
-Listeners will route to the nearest available endpoint based on hop count.
+## Security
 
-## Security Features
+- Connections are end-to-end encrypted between the listener agent and the endpoint agent. See [End-to-End Encryption](/security/e2e-encryption).
+- An endpoint only connects to its own configured target. Clients cannot choose a different host or port through a key.
+- Anyone who can reach a listener's port can use the service. Bind listeners to `127.0.0.1` unless other hosts need them, and set `max_connections` to limit load.
+- Endpoint keys and their targets are visible to every agent in the mesh through route advertisements.
 
-- **E2E Encryption**: Each connection gets its own encrypted session (X25519 + ChaCha20-Poly1305). Transit agents cannot decrypt traffic.
+## Check forwarding
 
-- **Key-Based Access**: Only pre-configured routing keys work. Services must explicitly register to be discoverable.
-
-- **Connection Limits**: Set `max_connections` on listeners to prevent resource exhaustion.
-
-- **Local Binding**: Bind listeners to `127.0.0.1` to restrict access to local applications only.
-
-## Monitoring
-
-View active port forward routes via the dashboard API:
+List the key-to-listener pairings the agent knows about:
 
 ```bash
-curl http://localhost:8080/api/dashboard | jq '.forward_routes'
+curl -s http://localhost:8080/api/dashboard | jq '.forward_routes'
 ```
 
-The response shows all endpoint-listener pairings with hop counts.
+Each entry shows the key, the listener agent and address, the endpoint agent and target, and the hop count.
 
 ## Limitations
 
-- **TCP only**: UDP is not supported for port forwarding
-- **Dynamic management**: Routing keys can be managed at runtime via CLI (`muti-metroo forward add/remove/list`) or HTTP API (`/forward/manage`)
-- **Fixed ports**: Unlike ngrok, listener ports are not dynamically assigned
+- TCP only. UDP services cannot be forwarded.
+- Listener ports are fixed by the operator; there is no automatic port assignment.
 
-## Related
+## See Also
 
-- [Configuration - Forward](/configuration/forward) - Full configuration reference
-- [Concepts - Routing](/concepts/routing) - How routes propagate through the mesh
-- [Security - E2E Encryption](/security/e2e-encryption) - Encryption details
+- [Forward Configuration](/configuration/forward): endpoint and listener keys
+- [forward CLI](/cli/forward): runtime endpoints and listeners
+- [Forward Management API](/api/forward-management): HTTP endpoints behind the CLI
+- [Mutiauk](/mutiauk#expose-publishing-local-services): publish workstation services with `expose`
+- [Routing](/concepts/routing): how forward keys propagate

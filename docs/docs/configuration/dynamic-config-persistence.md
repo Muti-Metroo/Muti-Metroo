@@ -1,100 +1,87 @@
 ---
 title: Dynamic Config Persistence
-sidebar_position: 20
+description: How changes made to a running agent through the CLI or HTTP API are journaled in the data directory and restored after a restart.
+sidebar_position: 21
 ---
 
 # Dynamic Config Persistence
 
-Runtime mutations made through the CLI and HTTP API -- `muti-metroo peer add`, `muti-metroo listener add`, `muti-metroo forward add`, `muti-metroo forward endpoint add`, `muti-metroo route add`, `muti-metroo route comment`, `muti-metroo host add`, `muti-metroo display-name set`, and their `remove` counterparts -- are persisted to a journal file in the agent's data directory. When the agent restarts, the journal is replayed through the same code paths that originally handled the commands, restoring every dynamic change.
+Changes made to a running agent through the CLI or HTTP API are written to a journal in `agent.data_dir`. When the agent starts, it replays the journal, so runtime changes survive restarts. No configuration key controls this: setting `agent.data_dir` turns it on, and leaving `data_dir` empty keeps runtime changes in memory only.
 
-Persistence is automatic and opt-in by way of `agent.data_dir`: set one, and persistence is enabled. Leave it unset, and every runtime change stays ephemeral (the pre-3.4 behavior).
+## What is persisted
 
-## What gets persisted
+| CLI command                                         | HTTP endpoint                   |
+| --------------------------------------------------- | ------------------------------- |
+| `muti-metroo peer add`, `peer remove`               | `/peers/manage`                 |
+| `muti-metroo listener add`, `listener remove`       | `/listeners/manage`             |
+| `muti-metroo forward add`, `forward remove`         | `/forward/manage`               |
+| `muti-metroo forward endpoint add`, `endpoint remove` | `/forward/endpoints/manage`   |
+| `muti-metroo route add`, `route remove`             | `/routes/manage`                |
+| `muti-metroo route comment`, `route source-ip`, `route interface` | `/routes/manage`  |
+| `muti-metroo host add`, `host remove`               | `/hosts/manage`                 |
+| `muti-metroo host suffix add`, `host suffix remove` | `/hosts/suffixes/manage`        |
+| `muti-metroo display-name set`                      | `/display-name/manage`          |
 
-| Command                                  | Kind of change                                                |
-|------------------------------------------|---------------------------------------------------------------|
-| `muti-metroo peer add/remove`                  | Outbound peer dial and teardown                               |
-| `muti-metroo listener add/remove`              | Transport listener (QUIC/H2/WS) on ingress side               |
-| `muti-metroo forward add/remove`               | Port-forward listener on ingress side                         |
-| `muti-metroo forward endpoint add/remove`      | Port-forward endpoint on exit side                            |
-| `muti-metroo route add/remove`                 | CIDR exit route on exit side                                  |
-| `muti-metroo route comment`                    | Operator comment on a route (dynamic or config-seeded override) |
-| `muti-metroo host add/remove`                  | Mesh-host hostname registration                               |
-| `muti-metroo display-name set`                 | Agent display name override                                   |
-
-The equivalent HTTP endpoints (`/peers/manage`, `/listeners/manage`, `/forward/manage`, `/forward/endpoints/manage`, `/routes/manage`, `/hosts/manage`, `/display-name/manage`) persist the same way -- the CLI is just a wrapper around them.
-
-Changes driven by the main `config.yaml` (config peers, config listeners, config forward listeners, config routes) are NOT written to the journal: they are already durable in the config file.
+Entries from the configuration file are not journaled. Route comment, source IP, and interface changes are journaled for configured routes too, and override the file on restart.
 
 ## Journal file
 
-- **Location:** `<agent.data_dir>/dynamic-config.log`
-- **Format:** JSON Lines -- one event object per line, newline terminated
-- **Permissions:** `0600` (agent user only)
-- **Write mode:** append-only, fsynced after each event
+| Property    | Value                                         |
+| ----------- | --------------------------------------------- |
+| Location    | `<agent.data_dir>/dynamic-config.log`         |
+| Format      | JSON Lines, one event per line                |
+| Permissions | `0600`                                        |
+| Writes      | Appended and synced to disk after each change |
 
-Each event captures the verb plus the arguments originally passed to `Manage*`:
-
-```jsonl
+```text
 {"op":"display_name_set","ts":1712345678901234567,"name":"gateway-us-east"}
 {"op":"route_add","ts":1712345678912345678,"network":"10.0.0.0/8","metric":3,"comment":"office LAN"}
-{"op":"route_comment_set","ts":1712345678956789012,"network":"10.0.0.0/8","comment":"internal corp"}
 {"op":"forward_add","ts":1712345678923456789,"key":"web","address":":9090","max_connections":100}
-{"op":"forward_endpoint_add","ts":1712345678945678901,"key":"web","target":"127.0.0.1:3000"}
-{"op":"peer_add","ts":1712345678934567890,"address":"peer.example:4433","transport":"quic"}
-{"op":"listener_add","ts":1712345678939876543,"transport":"quic","address":":4434","advertise_address":"vps.example.com:4434"}
+{"op":"peer_add","ts":1712345678934567890,"address":"peer.example.com:4433","transport":"quic"}
 {"op":"host_add","ts":1712345678967890123,"name":"target-11.mesh","ipv4":"10.8.0.11"}
 ```
 
-Route comments survive journal compaction for both dynamic routes and config-seeded routes whose YAML comment was overridden via `muti-metroo route comment`.
+The journal contains no keys or passwords. The agent's identity files are separate files in the same directory.
 
-The file is safe to `cat` while the agent is running. You can also edit it by hand when the agent is stopped; malformed lines cause the replay to abort (with a warning) on the offending line number so mistakes are easy to locate.
+## Replay at startup
 
-## Replay on startup
+After the agent has started, it reads the journal and applies each event through the same code path as the original CLI or API request, in this order: display name, routes, forward listeners, forward endpoints, peers, transport listeners, mesh host suffixes, mesh hosts.
 
-After `agent.Start()` completes successfully, the agent loads the journal and replays each event through the same `Manage*` method that originally produced it. The replay:
+- An event that fails, for example a forward listener whose port is now taken, is logged as a warning and skipped; the rest are applied.
+- An event that conflicts with the configuration file, such as a peer address or route CIDR that the file now also lists, fails and is skipped.
+- If any line of the journal cannot be parsed, the whole journal is skipped and a warning names the line number.
 
-1. Applies `display_name_set` first, so the first post-restart advertisement carries the restored name.
-2. Applies routes, forward listeners, peers, and transport listeners in that order (the sets are independent).
-3. Logs a warning for any event that fails (for example a forward listener whose bound port is no longer available) and continues with the next event.
-4. Compacts the journal on success: the file is rewritten to the minimal set of "add"/"set" events that represent the current live state, collapsing long histories of add/remove churn into O(live entries).
+After replay, the agent rewrites the journal to the minimum set of events that reproduces the current state, so it does not grow with churn. Replayed entries are still listed as dynamic by `peer list`, `listener list`, `forward list`, and `route list`.
 
-Replayed entries are still tagged `Dynamic: true` in `muti-metroo peer list`, `muti-metroo listener list`, `muti-metroo forward list`, and `muti-metroo route list`, so the config-vs-dynamic distinction is preserved across restarts.
+## When the journal cannot be written
 
-## Fallback to ephemeral
+If the journal cannot be written, for example because `data_dir` is read-only or the disk is full, the change is still applied in memory and the agent logs a warning:
 
-Persistence is best-effort. If the journal file cannot be written -- wrong permissions on `data_dir`, a read-only filesystem, a full disk -- the runtime mutation still succeeds and the agent logs a warning that the change is ephemeral:
-
-```
-WARN  persist dynamic config failed; change is ephemeral  op=peer_add path=/data/dynamic-config.log error="open ...: permission denied"
+```text
+time=2026-10-11T14:50:05.746+03:00 level=WARN msg="persist dynamic config failed; change is ephemeral" error="open /data/dynamic-config.log: permission denied" op=peer_add path=/data/dynamic-config.log
 ```
 
-The mutation is applied in memory as usual; it just does not survive the next restart. Operators who deliberately want ephemeral behavior can unset `agent.data_dir`, which disables persistence entirely.
+The change is lost at the next restart.
 
-## Inspecting and clearing the journal
+## Inspecting and resetting
 
 ```bash
-# Inspect the current state
-cat /var/lib/muti-metroo/dynamic-config.log | jq
+jq . /var/lib/muti-metroo/dynamic-config.log
+```
 
-# Count pending events
-wc -l /var/lib/muti-metroo/dynamic-config.log
+To drop all runtime changes, stop the agent, delete the file, and start the agent again:
 
-# Reset all dynamic state (stop the agent first)
+```bash
+systemctl stop muti-metroo
 rm /var/lib/muti-metroo/dynamic-config.log
 systemctl start muti-metroo
 ```
 
-There is no dedicated CLI for inspecting or pruning the journal; the file format is stable and deliberately trivial to work with using standard shell tools.
+The file can be edited by hand while the agent is stopped.
 
-## Interaction with config entries
+## See Also
 
-- **Config peers/forwards/listeners take precedence.** A journal entry that conflicts with an entry in `config.yaml` (same peer address, same forward-listener key) is rejected on replay with a warning, and dropped during the next compaction.
-- **Config routes are not deduplicated against journal routes.** If `exit.routes` in `config.yaml` covers the same CIDR as a dynamic route, both are announced -- the route-selection algorithm already handles longest-prefix + metric tiebreaking.
-- **Unsetting a dynamic display name** (via `muti-metroo display-name set ""`) reverts to `agent.display_name` in the config and is recorded in the journal.
-
-## Security notes
-
-The journal file is written with mode `0600` and contains only data the operator has already sent over the network via the HTTP API. It does not contain TLS keys, passwords, or identity material -- the agent's identity stays in `agent_id` / `agent_key` alongside it.
-
-When using management key encryption, dynamic mutations are already restricted to agents with the private key; the journal file itself is not additionally encrypted.
+- [Agent](/configuration/agent#data-directory) for the data directory and the other files in it
+- [peer CLI](/cli/peer), [route CLI](/cli/route), and [forward CLI](/cli/forward) for the commands that create journal entries
+- [Mesh Hosts](/configuration/hosts) for runtime host and suffix changes
+- [Management](/configuration/management#command-signing-keys) for the signing keys runtime changes require

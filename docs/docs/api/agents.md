@@ -1,5 +1,7 @@
 ---
 title: Agent Endpoints
+description: List the agents in the mesh and read status, routes, peers, and interface addresses of any remote agent.
+sidebar_position: 3
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,143 +10,190 @@ title: Agent Endpoints
 
 # Agent Endpoints
 
-Query any agent in your mesh from any other agent. Get status, routes, and peer lists without direct access to the remote machine.
+These endpoints list the agents the local agent knows about and read state from any remote agent over the mesh, without direct network access to it. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `GET`.
 
-**Quick examples:**
+`{id}` is the full 32-character agent ID. The `/agents/{id}` endpoints do not work for the local agent's own ID; use [`/healthz`](/api/health#get-healthz) and the [dashboard endpoints](/api/dashboard) for local state.
+
+Other `/agents/{id}/...` endpoints are documented with their feature:
+
+| Endpoint | Page |
+| -------- | ---- |
+| `POST /agents/{id}/routes/manage` | [Route Management](/api/route-management#post-agentsidroutesmanage) |
+| `POST /agents/{id}/route/trace` | [Route Trace](/api/route-trace#post-agentsidroutetrace) |
+| `POST /agents/{id}/forward/manage`, `POST /agents/{id}/forward/endpoints/manage` | [Forward Management](/api/forward-management) |
+| `POST /agents/{id}/peers/manage` | [Peer Management](/api/peer-management#post-agentsidpeersmanage) |
+| `POST /agents/{id}/listeners/manage` | [Listener Management](/api/listener-management#post-agentsidlistenersmanage) |
+| `POST /agents/{id}/display-name/manage` | [Display Name Management](/api/display-name-management#post-agentsiddisplay-namemanage) |
+| `GET /agents/{id}/shell` | [Management Commands WebSocket](/api/shell) |
+| `GET /agents/{id}/icmp` | [ICMP Ping WebSocket](/api/icmp) |
+| `POST /agents/{id}/file/upload`, `file/download`, `file/browse` | [File Transfer](/api/file-transfer) |
+| `POST /agents/{id}/probe` | [Probe](/api/probe#post-agentsidprobe) |
+| `POST /agents/{id}/shutdown` | [Shutdown](/api/stop#post-agentsidshutdown) |
+
+## `GET /agents`
+
+Lists the local agent and every agent known through route and node advertisements.
 
 ```bash
-# List all known agents
 curl http://localhost:8080/agents
-
-# Get specific agent's status
-curl http://localhost:8080/agents/abc123def456/
-
-# See what routes an agent advertises
-curl http://localhost:8080/agents/abc123def456/routes
 ```
 
-## GET /agents
-
-List all known agents in the mesh.
-
-**Response:**
+**Response (200):**
 
 ```json
 [
   {
-    "id": "abc123def456789012345678901234ab",
-    "short": "abc123de",
-    "display_name": "Agent 1",
-    "local": true
+    "display_name": "gateway",
+    "id": "93cdf211bb05aa48900a61ab6699fbdd",
+    "local": true,
+    "short": "93cdf211"
   },
   {
-    "id": "def456789012345678901234567890cd",
-    "short": "def45678",
-    "local": false
+    "id": "653422d2fc10b554514c5cbe6e6cd6cd",
+    "local": false,
+    "short": "653422d2"
+  },
+  {
+    "id": "331974cd4a0be0d7f945ed9d367a0211",
+    "local": false,
+    "short": "331974cd"
   }
 ]
 ```
 
-## GET /agents/\{agent-id\}
+| Field | Description |
+| ----- | ----------- |
+| `id` | Full agent ID |
+| `short` | First 8 characters of the ID |
+| `display_name` | Display name; present only on the local entry |
+| `local` | `true` for the agent serving the request |
 
-Get status from specific agent.
+Use [`GET /api/nodes`](/api/dashboard#get-apinodes) when you need display names and system details for every agent. When the agent has `management.public_key` without `management.private_key`, the list contains only the local agent.
 
-**Response:**
+## `GET /agents/{id}`
+
+Fetches the status of a remote agent.
+
+```bash
+curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211
+```
+
+**Response (200):**
 
 ```json
 {
-  "agent_id": "abc123def456789012345678901234ab",
-  "running": true,
-  "peer_count": 3,
-  "stream_count": 42,
-  "route_count": 5,
-  "socks5_running": true,
-  "exit_running": false,
+  "accepts_signed_management": true,
+  "agent_id": "331974cd4a0be0d7f945ed9d367a0211",
   "can_sign_management": false,
-  "accepts_signed_management": true
+  "exit_running": true,
+  "peer_count": 1,
+  "route_count": 2,
+  "running": true,
+  "socks5_running": false,
+  "stream_count": 0
 }
 ```
 
-`can_sign_management` reports whether the remote agent holds the management signing private key (can initiate privileged operations). `accepts_signed_management` reports whether it holds the public key (accepts signed requests from others). Use these to decide which mesh agents can be offered as targets for management commands, file transfer, and dynamic config actions. See [Authentication](/security/authentication).
+The fields match [`GET /healthz`](/api/health#get-healthz), with `agent_id` added and the exit flag named `exit_running`.
 
-## GET /agents/\{agent-id\}/routes
+## `GET /agents/{id}/routes`
 
-Get route table from specific agent.
+Returns the remote agent's CIDR route table. Domain routes are not included.
 
-**Response:**
+```bash
+curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/routes
+```
+
+**Response (200):**
 
 ```json
 [
   {
-    "network": "10.0.0.0/8",
-    "next_hop": "def456...",
-    "origin": "abc123...",
-    "metric": 1,
-    "hop_count": 2
+    "network": "10.20.0.0/16",
+    "next_hop": "331974cd",
+    "origin": "331974cd",
+    "metric": 0,
+    "hop_count": 0
+  },
+  {
+    "network": "192.0.2.0/24",
+    "next_hop": "331974cd",
+    "origin": "331974cd",
+    "metric": 0,
+    "hop_count": 0
   }
 ]
 ```
 
-## GET /agents/\{agent-id\}/peers
+| Field | Description |
+| ----- | ----------- |
+| `network` | CIDR prefix |
+| `next_hop` | Short ID of the next hop, as seen from the remote agent |
+| `origin` | Short ID of the agent that advertises the route |
+| `metric` | Route metric |
+| `hop_count` | Hops from the remote agent to the origin; `0` for the remote agent's own routes |
 
-Get peer list from specific agent.
+## `GET /agents/{id}/peers`
 
-**Response:**
+Returns the full IDs of the remote agent's connected peers.
 
-```json
-["abc123def456789012345678901234ab", "def456789012345678901234567890cd"]
+```bash
+curl http://localhost:8080/agents/653422d2fc10b554514c5cbe6e6cd6cd/peers
 ```
 
-## GET /agents/\{agent-id\}/interfaces
+**Response (200):**
 
-List the IP addresses assigned to a remote agent's up interfaces. Same response
-shape as the local [GET /api/interfaces](/api/dashboard#get-apiinterfaces); used
-to pick a source IP when binding a route on a remote exit agent. Read-only.
+```json
+["93cdf211bb05aa48900a61ab6699fbdd", "331974cd4a0be0d7f945ed9d367a0211"]
+```
 
-## GET /agents/\{agent-id\}/shell
+## `GET /agents/{id}/interfaces`
 
-WebSocket endpoint for management command sessions.
+Lists every IP address on the remote agent's up interfaces. The response has the same shape as [`GET /api/interfaces`](/api/dashboard#get-apiinterfaces). Use it to choose a `source_ip` when binding a route on a remote exit agent.
 
-See [Management Commands WebSocket API](/api/shell).
+```bash
+curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/interfaces
+```
 
-## GET /agents/\{agent-id\}/icmp
+**Response (200):**
 
-WebSocket endpoint for ICMP ping sessions.
+```json
+{
+  "addresses": [
+    {
+      "interface": "lo0",
+      "ip": "127.0.0.1",
+      "family": "ipv4",
+      "loopback": true,
+      "link_local": false,
+      "global": false
+    },
+    {
+      "interface": "en0",
+      "ip": "192.168.1.10",
+      "family": "ipv4",
+      "loopback": false,
+      "link_local": false,
+      "global": true
+    }
+  ]
+}
+```
 
-See [ICMP Ping WebSocket API](/api/icmp).
+## Errors
 
-## POST /agents/\{agent-id\}/file/upload
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `agent ID required` | Path is `/agents/` with no ID |
+| 400 | `invalid agent ID format` | ID is not a full 32-character hex ID |
+| 403 | `topology restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 404 | HTML page | `http.remote_api` is disabled |
+| 405 | `method not allowed` | Method other than `GET` |
+| 502 | `failed to fetch: <reason>` | The agent is unknown, unreachable, or did not answer within 30 seconds; for example `failed to fetch: no route to agent 93cdf211` |
 
-Upload file to remote agent.
+## See Also
 
-See [File Transfer Endpoints](/api/file-transfer).
-
-## POST /agents/\{agent-id\}/file/download
-
-Download file from remote agent.
-
-See [File Transfer Endpoints](/api/file-transfer).
-
-## POST /agents/\{agent-id\}/file/browse
-
-Browse filesystem on remote agent.
-
-See [File Transfer Endpoints](/api/file-transfer).
-
-## POST /agents/\{agent-id\}/routes/manage
-
-Manage dynamic routes on remote agent.
-
-See [Route Management](/api/route-management).
-
-## POST /agents/\{agent-id\}/forward/manage
-
-Manage dynamic forward listeners on remote agent.
-
-See [Forward Management](/api/forward-management).
-
-## POST /agents/\{agent-id\}/display-name/manage
-
-Manage display name on remote agent.
-
-See [Display Name Management](/api/display-name-management).
+- [HTTP API Overview](/api/overview) - Endpoint index and authentication
+- [Dashboard Endpoints](/api/dashboard) - Topology and node details for the whole mesh
+- [CLI - status](/cli/status) - Read agent status from the command line
+- [Management Keys](/configuration/management) - Topology encryption and its restrictions

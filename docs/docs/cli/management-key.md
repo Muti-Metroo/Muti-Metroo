@@ -1,128 +1,135 @@
 ---
-title: management-key
+title: muti-metroo management-key
+sidebar_label: management-key
+sidebar_position: 9
+description: Generate the X25519 management keypair that encrypts mesh topology data, and derive its public key.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-inspecting.png" alt="Mole managing keys" style={{maxWidth: '180px'}} />
 </div>
 
-# management-key
+# muti-metroo management-key
 
-Protect your mesh topology from remote agents. Generate encryption keys that let management nodes see which systems are in the mesh while remote agents only see opaque IDs.
+Generates and inspects the X25519 management keypair. When agents have the management public key in `management.public_key`, they encrypt node information (hostnames, IP addresses, OS details) before flooding it through the mesh, and withhold route paths from their HTTP API. Route paths still travel unencrypted, because transit agents need them to forward streams. Only agents that also have `management.private_key` can decrypt and display the topology. No running agent is needed.
 
-**What this protects:** In multi-tenant or sensitive environments, remote agents only see encrypted topology data - no hostnames, no IP addresses, no OS details. They see only random-looking agent IDs.
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-**Quick setup:**
-```bash
-# Generate a keypair
-muti-metroo management-key generate
+Both keys are 32 bytes, written as 64 hexadecimal characters. Put the public key on every agent and the private key only on the operator agents that need to see the topology. The management keypair is separate from the Ed25519 signing keypair that authorizes privileged operations; see [muti-metroo signing-key](signing-key.md).
 
-# Add public key to ALL agents (they can encrypt but not decrypt)
-# Add private key ONLY to management nodes (they can see topology)
-```
-
-## Subcommands
-
-### generate
-
-Generate a new management keypair:
+## management-key generate
 
 ```bash
+muti-metroo management-key generate [flags]
+```
+
+Generates a new keypair. Without `--out`, both keys and ready-to-paste configuration snippets are printed to stdout, which leaves the private key in the terminal scrollback.
+
+With `--out <dir>`, the keys are written to `<dir>/management-public.key` (mode `0644`) and `<dir>/management-private.key` (mode `0600`), each as a single hex line, and only the public key is printed. The directory is created with mode `0700` if it does not exist. The command refuses to replace existing key files unless `--force` is given.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--out` | none | Directory to write the key files to. The private key is not printed. |
+| `--force` | `false` | Overwrite existing key files in the `--out` directory. |
+
+### Examples
+
+```bash
 muti-metroo management-key generate
 ```
 
-**Output:**
-```
+```text
+Tip: --out <dir> writes keys to disk with safe permissions and avoids
+     leaking the private key into terminal scrollback.
+
 === Management Keypair Generated ===
 
 Public Key (add to ALL agent configs):
-  a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
+  9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17
 
-Private Key (add ONLY to management node configs - KEEP SECRET!):
-  e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef
+Private Key (add ONLY to operator configs - KEEP SECRET!):
+  88f462338e9fb8970e782d8cd23d935a3f0769a1c48e777f7d68bd427f28e36a
 
-Configuration snippets:
-
-For ALL agents (remote agents and management nodes):
+Config snippet for field agents:
   management:
-    public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+    public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
 
-For MANAGEMENT nodes only (add private key):
+Config snippet for operator nodes:
   management:
-    public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-    private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
+    public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
+    private_key: "88f462338e9fb8970e782d8cd23d935a3f0769a1c48e777f7d68bd427f28e36a"
 ```
 
-### public
-
-Derive public key from a private key:
+Writing the keys to files:
 
 ```bash
-muti-metroo management-key public --private <private-key-hex>
+muti-metroo management-key generate --out ./keys
 ```
 
-**Flags:**
-- `--private`: Private key in hex format (64 characters)
+```text
+=== Management Keypair Generated ===
+Public Key:   keys/management-public.key (mode 0644)
+Private Key:  keys/management-private.key (mode 0600)
 
-:::tip Interactive Mode
-If the `--private` flag is not provided, the CLI prompts interactively for the private key (input is hidden for security).
-:::
+Public Key (also shown for convenience):
+  d6f5966b3291a457850a943988dbf3930697221b0e1bb1394261a94e3ff3de26
 
-**Example:**
+The private key is not echoed to stdout. Distribute it carefully.
+```
+
+## management-key public
+
 ```bash
-muti-metroo management-key public --private e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef
+muti-metroo management-key public [flags]
 ```
 
-**Output:**
+Derives the public key from a private key, for example to recover a lost public key or to check that a public and private key belong together.
+
+Without flags, the command prompts for the private key with input hidden; the prompt requires a terminal. With `--stdin`, it reads the private key from standard input, which accepts the file written by `generate --out`. Surrounding whitespace is ignored. The private key must decode to exactly 32 bytes.
+
+A hidden `--private <hex>` flag also accepts the key on the command line. It prints a warning to stderr, because the value is recorded in shell history and visible in the process list.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--stdin` | `false` | Read the private key from standard input instead of prompting. |
+
+### Examples
+
+```bash
+muti-metroo management-key public --stdin < ./keys/management-private.key
 ```
+
+```text
 Public Key:
-  a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
+  d6f5966b3291a457850a943988dbf3930697221b0e1bb1394261a94e3ff3de26
 ```
 
-## Usage Guide
+## Configuration
 
-### Initial Setup
+Field agents carry only the public key:
 
-1. **Generate keypair** on a management machine:
-   ```bash
-   muti-metroo management-key generate
-   ```
-
-2. **Save the private key** securely (password manager, encrypted file)
-
-3. **Distribute public key** to all agents via config
-
-4. **Add private key** only to management nodes that need topology visibility
-
-### Configuration
-
-**Remote agents** (encrypt only - cannot view topology):
 ```yaml
 management:
-  public_key: "a1b2c3d4..."
+  public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
 ```
 
-**Management nodes** (can encrypt and decrypt):
+Operator agents carry both:
+
 ```yaml
 management:
-  public_key: "a1b2c3d4..."
-  private_key: "e5f6a7b8..."
+  public_key: "9e5dcaa28cbc418e8e063ddd4c2920b8791ddf3111129d50bde2725be7c8fc17"
+  private_key: "88f462338e9fb8970e782d8cd23d935a3f0769a1c48e777f7d68bd427f28e36a"
 ```
 
-### Security Model
+The configuration validator rejects `private_key` without `public_key`. Agent IDs and advertised route prefixes stay in plaintext because routing needs them. An agent that has the public key but not the private key also limits its remote agent queries, mesh tests, and route traces to itself. The full behavior is described on the [management configuration](../configuration/management.md) page.
 
-| Role | Has Public Key | Has Private Key | Can View Topology |
-|------|---------------|-----------------|-------------------|
-| Remote Agent | Yes | No | No |
-| Management Node | Yes | Yes | Yes |
+## See Also
 
-### What Gets Protected
-
-- **Encrypted**: NodeInfo (hostname, OS, IP addresses, peer lists)
-- **Plaintext**: Agent IDs, route CIDRs (required for routing)
-
-Without the private key, agents see only opaque 128-bit agent IDs instead of meaningful system identification.
-
-## Related
-
-- [Configuration Overview](/configuration/overview)
+- [Management configuration](../configuration/management.md): the `management` section and what each key enables
+- [muti-metroo signing-key](signing-key.md): the separate keypair that authorizes privileged operations
+- [Security overview](../security/overview.md): how topology encryption fits into the security model
+- [muti-metroo config](config.md): validate a configuration after adding the keys

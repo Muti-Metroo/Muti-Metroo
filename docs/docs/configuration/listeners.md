@@ -1,5 +1,6 @@
 ---
 title: Listeners
+description: Configuration reference for transport listeners that accept QUIC, HTTP/2, and WebSocket connections from other agents, including TLS overrides and advertising.
 sidebar_position: 3
 ---
 
@@ -7,346 +8,135 @@ sidebar_position: 3
   <img src="/img/mole-inspecting.png" alt="Mole configuring listeners" style={{maxWidth: '180px'}} />
 </div>
 
-# Listener Configuration
+# Listeners
 
-Let other agents connect to you. Choose QUIC for best performance, HTTP/2 or WebSocket to bypass firewalls that block UDP.
-
-**Quick setup:**
-```yaml
-listeners:
-  - transport: quic           # Best performance (UDP)
-    address: "0.0.0.0:4433"
-
-  - transport: h2             # Firewall-friendly (TCP/HTTPS)
-    address: "0.0.0.0:443"
-    path: "/mesh"
-```
+The `listeners` list opens transport endpoints that other agents dial with their [`peers`](/configuration/peers) entries. An agent can run any number of listeners on different transports at once. Once a connection is up, traffic flows in both directions regardless of which side listened.
 
 ## Configuration
 
-Listeners use the global TLS configuration by default:
-
 ```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: true
-
 listeners:
-  - transport: quic             # quic, h2, ws
+  - transport: quic             # quic, h2, or ws
     address: "0.0.0.0:4433"     # Bind address
-```
 
-## Transport Types
-
-### QUIC Listener
-
-Best performance, UDP-based:
-
-```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: true
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
-```
-
-### HTTP/2 Listener
-
-TCP-based, firewall-friendly:
-
-```yaml
-listeners:
   - transport: h2
     address: "0.0.0.0:8443"
-    path: "/mesh"              # Required for h2 transport
-```
+    path: "/mesh"               # Required for h2 and ws
 
-### WebSocket Listener
-
-Maximum compatibility:
-
-```yaml
-listeners:
   - transport: ws
-    address: "0.0.0.0:443"
-    path: "/mesh"              # Required for WebSocket
-```
-
-### Plain WebSocket (Reverse Proxy)
-
-For deployments behind a reverse proxy that handles TLS termination:
-
-```yaml
-listeners:
-  - transport: ws
-    address: "127.0.0.1:8080"  # Bind to localhost only
+    address: "127.0.0.1:8081"
     path: "/mesh"
-    plaintext: true            # No TLS - proxy handles it
-```
+    plaintext: true             # ws only: no TLS, for use behind a reverse proxy
 
-The `plaintext` option:
-- Accepts unencrypted WebSocket connections (`ws://`)
-- Only available for `ws` transport
-- Does not require TLS certificates
-- Should only be used behind trusted reverse proxies
-
-**Security considerations:**
-- Always bind to `127.0.0.1` to prevent direct external access
-- Block the plaintext port from external access via firewall
-- mTLS client authentication is not available in this mode
-- Peer authentication and end-to-end encryption still work
-
-See [Reverse Proxy Deployment](/deployment/reverse-proxy) for Nginx, Caddy, and Apache configuration examples.
-
-## Multiple Listeners
-
-An agent can listen on multiple transports simultaneously:
-
-```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: true
-
-listeners:
-  # Primary: QUIC for direct connections
-  - transport: quic
-    address: "0.0.0.0:4433"
-
-  # Fallback: HTTP/2 for firewall traversal
-  - transport: h2
-    address: "0.0.0.0:8443"
-    path: "/mesh"
-
-  # Alternative: WebSocket for maximum compatibility
   - transport: ws
     address: "0.0.0.0:443"
     path: "/mesh"
-```
-
-## TLS Configuration
-
-### Using Global Settings
-
-By default, listeners use the global TLS configuration:
-
-```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: true
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
-    # Uses global cert, key, and mtls setting
-```
-
-### Per-Listener Overrides
-
-Override specific settings per listener:
-
-```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: true
-
-listeners:
-  # Uses global settings
-  - transport: quic
-    address: "0.0.0.0:4433"
-
-  # Override: different certificate
-  - transport: h2
-    address: "0.0.0.0:8443"
-    tls:
+    tls:                        # Optional per-listener overrides
       cert: "./certs/public.crt"
       key: "./certs/public.key"
-
-  # Override: disable mTLS
-  - transport: ws
-    address: "0.0.0.0:443"
-    tls:
       mtls: false
+    advertise:                  # Optional: publish a dial target to the mesh
+      address: "relay.example.com:443"
 ```
 
-### Mutual TLS (mTLS)
+## Keys
 
-mTLS is controlled by the global `mtls` setting or per-listener override:
+Each list entry accepts these keys:
+
+| Key                   | Type   | Default            | Description                                                                                                                      |
+| --------------------- | ------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`           | string | required           | `quic`, `h2`, or `ws`.                                                                                                           |
+| `address`             | string | required           | Bind address as `host:port`, `[ipv6]:port`, or `:port`.                                                                          |
+| `path`                | string | `""`               | HTTP path that accepts connections. Required for `h2` and `ws`; not used by `quic`.                                              |
+| `plaintext`           | bool   | `false`            | Serve WebSocket without TLS. Only valid with `transport: ws`.                                                                    |
+| `tls.cert`            | string | global `tls.cert`  | Certificate file for this listener.                                                                                              |
+| `tls.key`             | string | global `tls.key`   | Private key file for this listener.                                                                                              |
+| `tls.cert_pem`        | string | `""`               | Inline certificate PEM; takes precedence over `tls.cert`.                                                                        |
+| `tls.key_pem`         | string | `""`               | Inline private key PEM; takes precedence over `tls.key`.                                                                         |
+| `tls.mtls`            | bool   | global `tls.mtls`  | Require client certificates on this listener. Client certificates are always verified against the global `tls.ca`.               |
+| `advertise.address`   | string | required in block  | Public `host:port` other agents should dial. Loopback and unspecified hosts (`127.0.0.1`, `::1`, `0.0.0.0`, `::`) are rejected. |
+| `advertise.path`      | string | listener `path`    | Path to advertise, when a reverse proxy publishes the listener under a different path.                                          |
+| `advertise.transport` | string | listener transport | Transport to advertise (`quic`, `h2`, `ws`), when a proxy changes it.                                                            |
+
+A listener's `tls` block accepts the same keys as a peer's `tls` block, but `ca`, `ca_pem`, and `strict` only apply to peers and have no effect on a listener.
+
+## Transports
+
+| Transport | Protocol      | Notes                                                     |
+| --------- | ------------- | --------------------------------------------------------- |
+| `quic`    | UDP, TLS 1.3  | Lowest overhead. Needs UDP to be allowed on the path.     |
+| `h2`      | TCP, HTTP/2   | Looks like HTTPS. Needs `path`.                           |
+| `ws`      | TCP, WebSocket| Passes HTTP proxies and reverse proxies. Needs `path`.    |
+
+See [Transports](/concepts/transports) for a comparison.
+
+## TLS
+
+Without any certificate configured, each listener generates a self-signed ECDSA certificate at startup. To use your own certificate, set it globally in [`tls`](/configuration/tls-certificates) or per listener under `tls`. Certificate and key must be configured together, and certificates must use EC keys.
+
+When mTLS is in effect for a listener (global `tls.mtls: true`, or `tls.mtls: true` on the listener), the global `tls.ca` must be set; validation fails otherwise:
 
 ```yaml
 tls:
   ca: "./certs/ca.crt"
   cert: "./certs/agent.crt"
   key: "./certs/agent.key"
-  mtls: true                    # Global: require client certs
+  mtls: true
 
 listeners:
   - transport: quic
-    address: "0.0.0.0:4433"
-    # mTLS enabled (from global)
-
+    address: "0.0.0.0:4433"     # Requires client certificates
   - transport: h2
     address: "0.0.0.0:8443"
+    path: "/mesh"
     tls:
-      mtls: false               # Override: no client certs required
+      mtls: false               # No client certificates on this one
 ```
 
-With mTLS:
-- Only peers with valid certificates can connect
-- Provides mutual authentication
-- Recommended for production
-
-See [TLS Configuration](/configuration/tls-certificates) for details.
-
-## Bind Address
-
-### All Interfaces
-
-Accept connections from anywhere:
+## Plaintext WebSocket
 
 ```yaml
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"    # All IPv4 interfaces
-```
-
-### Specific Interface
-
-Bind to specific IP:
-
-```yaml
-listeners:
-  - transport: quic
-    address: "192.168.1.10:4433"   # Specific interface
-```
-
-### IPv6
-
-```yaml
-listeners:
-  - transport: quic
-    address: "[::]:4433"           # All IPv6 interfaces
-```
-
-### Localhost Only
-
-For testing or local-only access:
-
-```yaml
-listeners:
-  - transport: quic
-    address: "127.0.0.1:4433"      # Localhost only
-```
-
-## Port Selection
-
-| Transport | Default Port | Alternative Ports |
-|-----------|-------------|-------------------|
-| QUIC | 4433 | Any UDP port |
-| HTTP/2 | 8443, 443 | Any TCP port |
-| WebSocket | 443, 80 | Any TCP port |
-
-### Firewall Considerations
-
-```yaml
-# For restrictive firewalls, use HTTPS port
-listeners:
-  - transport: h2
-    address: "0.0.0.0:443"
-
-# Or WebSocket on standard HTTPS
 listeners:
   - transport: ws
-    address: "0.0.0.0:443"
+    address: "127.0.0.1:8081"
     path: "/mesh"
+    plaintext: true
 ```
 
-## URL Path
+A `plaintext` listener serves `ws://` without TLS, for deployments where a reverse proxy terminates TLS and forwards to the agent. mTLS does not apply. Agent traffic stays end-to-end encrypted, but bind the listener to loopback or otherwise keep it unreachable except from the proxy. Proxy configuration examples are in [Reverse Proxy Deployment](/deployment/reverse-proxy).
 
-HTTP/2 and WebSocket support URL paths:
+## Advertising a listener
 
 ```yaml
 listeners:
   - transport: h2
-    address: "0.0.0.0:443"
-    path: "/mesh/v1"
-```
-
-Peers must use matching path:
-
-```yaml
-peers:
-  - transport: h2
-    address: "server.example.com:443"
-    path: "/mesh/v1"
-```
-
-## Advertising a Listener
-
-Add an optional `advertise:` block to publish a listener's public dial target across the mesh. Other agents can then see and reach this listener through their topology view, including agents that have never directly peered with you.
-
-```yaml
-listeners:
-  - transport: h2
-    address: "0.0.0.0:3000"      # Bind locally on all interfaces
+    address: "0.0.0.0:3000"
     path: "/mesh"
     advertise:
-      address: "kreata.ee:3000"  # Public host:port to dial
-      # path defaults to listener.path; transport defaults to listener.transport
+      address: "relay.example.com:443"
+      path: "/agents/mesh"
 ```
 
-Without `advertise`, the listener is not propagated. This is opt-in by design: bind-only or NAT-shielded listeners must not be auto-advertised.
+With an `advertise` block, the agent includes the listener's public dial target in its node info, so other agents and the dashboard can see how to reach it. Without the block, the listener is not advertised; this keeps NAT-bound or internal listeners private.
 
-`advertise.address` must validate as `host:port` and may not be a loopback or unspecified address (`0.0.0.0`, `127.0.0.1`, `::`, `::1`). `advertise.path` and `advertise.transport` are only needed when a reverse proxy maps the public path or transport differently from the local listener.
+## Runtime management
+
+Listeners can be opened and closed on a running agent with [`muti-metroo listener`](/cli/listener) or the `/listeners/manage` HTTP endpoint. Runtime listeners use the global TLS settings and persist across restarts when `agent.data_dir` is set. Listeners from this file cannot be removed at runtime.
 
 ## Examples
 
-### Development
+### QUIC with an HTTP/2 fallback
 
 ```yaml
-tls:
-  ca: "./certs/ca.crt"
-  cert: "./certs/agent.crt"
-  key: "./certs/agent.key"
-  mtls: false                  # Relax for development
-
 listeners:
-  - transport: quic
-    address: "127.0.0.1:4433"
-```
-
-### Production (Multi-Transport)
-
-```yaml
-tls:
-  ca: "/etc/muti-metroo/certs/ca.crt"
-  cert: "/etc/muti-metroo/certs/agent.crt"
-  key: "/etc/muti-metroo/certs/agent.key"
-  mtls: true
-
-listeners:
-  # QUIC for performance
   - transport: quic
     address: "0.0.0.0:4433"
-
-  # HTTP/2 for TCP fallback
   - transport: h2
     address: "0.0.0.0:443"
     path: "/mesh"
 ```
 
-### Containers
+### Inline certificates from the environment
 
 ```yaml
 tls:
@@ -360,52 +150,12 @@ listeners:
     address: "0.0.0.0:4433"
 ```
 
-## Troubleshooting
+See [Environment Variables](/configuration/environment-variables#multiline-values) for how to pass PEM content through a variable.
 
-### Port Already in Use
+## See Also
 
-```bash
-# Find what's using the port
-lsof -i :4433
-netstat -tlnp | grep 4433
-
-# Kill the process or choose different port
-```
-
-### Permission Denied
-
-Ports below 1024 require root on Linux:
-
-```bash
-# Option 1: Use port > 1024
-address: "0.0.0.0:4433"
-
-# Option 2: Run as root (not recommended)
-sudo muti-metroo run -c config.yaml
-
-# Option 3: Use capabilities
-sudo setcap 'cap_net_bind_service=+ep' muti-metroo
-```
-
-### Certificate Errors
-
-```bash
-# Verify certificate
-muti-metroo cert info ./certs/agent.crt
-
-# Check key matches certificate
-openssl x509 -noout -pubkey -in agent.crt | openssl md5
-openssl ec -in agent.key -pubout 2>/dev/null | openssl md5
-# (should match)
-```
-
-## Runtime management
-
-Listeners can also be opened and closed on a running agent without editing this file, using `muti-metroo listener add/remove/list` (or the `/listeners/manage` HTTP endpoint). Dynamic listeners reuse the global TLS configuration and are persisted across restarts when `agent.data_dir` is set. See [Listener Commands](/cli/listener).
-
-## Related
-
-- [Listener Commands](/cli/listener) - Manage listeners at runtime
-- [Peers](/configuration/peers) - Outbound connections
-- [TLS Certificates](/configuration/tls-certificates) - Certificate management
-- [Transports](/concepts/transports) - Transport comparison
+- [Peers](/configuration/peers) for the dialing side of a connection
+- [TLS](/configuration/tls-certificates) for global certificate, CA, and mTLS settings
+- [listener CLI](/cli/listener) to add and remove listeners at runtime
+- [Transports](/concepts/transports) to choose between QUIC, HTTP/2, and WebSocket
+- [Reverse Proxy Deployment](/deployment/reverse-proxy) for plaintext WebSocket behind a proxy

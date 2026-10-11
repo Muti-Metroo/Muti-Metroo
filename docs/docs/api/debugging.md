@@ -1,263 +1,117 @@
 ---
-title: Debugging (pprof)
+title: Debugging Endpoints (pprof)
+description: Go runtime profiling endpoints for diagnosing CPU, memory, and goroutine problems in a running agent.
+sidebar_position: 18
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-drilling.png" alt="Mole debugging" style={{maxWidth: '180px'}} />
 </div>
 
-# Debugging Endpoints
+# Debugging Endpoints (pprof)
 
-Find memory leaks, CPU hotspots, and goroutine issues. These Go pprof endpoints help diagnose performance problems in running agents.
+The agent exposes the standard Go `net/http/pprof` endpoints for profiling CPU use, memory, and goroutines in a running process. They form the pprof group (`http.pprof`), which is enabled by default whenever the HTTP server is enabled and is disabled by `http.minimal: true`. When `http.token_hash` is set, these endpoints require the bearer token like any other.
 
-**Quick diagnostics:**
-```bash
-# CPU profile (30 seconds)
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-go tool pprof cpu.prof
+:::warning
+Profiles reveal stack traces, function names, file paths, command-line arguments, and memory contents of the agent. Set `http.pprof: false` on production agents unless you are actively debugging, and never expose the endpoints without a bearer token.
+:::
 
-# Memory usage
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-go tool pprof heap.prof
-
-# Goroutine count
-curl http://localhost:8080/debug/pprof/goroutine?debug=1 | head -1
+```yaml
+http:
+  enabled: true
+  address: "127.0.0.1:8080"
+  pprof: false
 ```
 
 ## Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/debug/pprof/` | GET | pprof index page |
-| `/debug/pprof/cmdline` | GET | Command line arguments |
-| `/debug/pprof/profile` | GET | CPU profile |
-| `/debug/pprof/symbol` | GET | Symbol lookup |
-| `/debug/pprof/trace` | GET | Execution trace |
-| `/debug/pprof/heap` | GET | Heap memory profile |
-| `/debug/pprof/goroutine` | GET | Goroutine stack traces |
-| `/debug/pprof/block` | GET | Block profile |
-| `/debug/pprof/mutex` | GET | Mutex contention profile |
-| `/debug/pprof/threadcreate` | GET | Thread creation profile |
+| Endpoint | Description |
+| -------- | ----------- |
+| `GET /debug/pprof/` | HTML index of the available profiles |
+| `GET /debug/pprof/profile?seconds=N` | CPU profile over `N` seconds (default 30) |
+| `GET /debug/pprof/trace?seconds=N` | Execution trace over `N` seconds (default 1) |
+| `GET /debug/pprof/heap` | Live heap allocations |
+| `GET /debug/pprof/allocs` | All allocations since start |
+| `GET /debug/pprof/goroutine` | Stacks of all goroutines |
+| `GET /debug/pprof/threadcreate` | Stacks that created OS threads |
+| `GET /debug/pprof/block` | Blocking on synchronization primitives |
+| `GET /debug/pprof/mutex` | Mutex contention |
+| `GET /debug/pprof/cmdline` | Command line of the process |
+| `GET /debug/pprof/symbol` | Symbol lookup for program counters |
 
-## CPU Profiling
+Profiles are returned in the binary pprof format for `go tool pprof`. Add `?debug=1` to `heap`, `allocs`, `goroutine`, `threadcreate`, `block`, or `mutex` for a text summary, or `?debug=2` to `goroutine` for full stack dumps. The block and mutex profiles are empty because the agent does not enable their sampling.
 
-Capture a 30-second CPU profile:
+## CPU profile
 
 ```bash
-# Capture profile
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-
-# Analyze with go tool
-go tool pprof cpu.prof
-
-# Interactive mode commands:
-# top         - show top functions
-# list func   - show annotated source for func
-# web         - open graph in browser
+curl -o cpu.prof "http://localhost:8080/debug/pprof/profile?seconds=30"
+go tool pprof -top cpu.prof
 ```
 
-### Web Interface
+Open an interactive view in the browser:
 
 ```bash
-# Start web server for interactive analysis
 go tool pprof -http=:8081 cpu.prof
 ```
 
-## Memory Profiling
-
-Capture heap profile:
+`go tool pprof` can also fetch the profile itself:
 
 ```bash
-# Current heap state
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-
-# Analyze
-go tool pprof heap.prof
-
-# Show allocations
-(pprof) top
-(pprof) list functionName
+go tool pprof "http://localhost:8080/debug/pprof/profile?seconds=30"
 ```
 
-### Memory Types
+## Memory
 
 ```bash
-# In-use memory (default)
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-
-# All allocations since start
-curl 'http://localhost:8080/debug/pprof/heap?debug=1' > heap.txt
+curl -o heap.prof http://localhost:8080/debug/pprof/heap
+go tool pprof -top heap.prof
 ```
 
-## Goroutine Analysis
-
-Dump all goroutine stacks:
+Compare two snapshots to see what grew:
 
 ```bash
-# Simple dump
-curl http://localhost:8080/debug/pprof/goroutine?debug=2
-
-# Machine-readable profile
-curl http://localhost:8080/debug/pprof/goroutine > goroutine.prof
-go tool pprof goroutine.prof
+curl -o heap-before.prof http://localhost:8080/debug/pprof/heap
+curl -o heap-after.prof http://localhost:8080/debug/pprof/heap
+go tool pprof -top -base heap-before.prof heap-after.prof
 ```
 
-### Detecting Goroutine Leaks
+## Goroutines
+
+The first line of the text summary is the goroutine count. A count that keeps growing under steady load indicates a leak.
 
 ```bash
-# Baseline
-curl http://localhost:8080/debug/pprof/goroutine?debug=1 | head -1
-# goroutine profile: total 42
-
-# After load test
-curl http://localhost:8080/debug/pprof/goroutine?debug=1 | head -1
-# goroutine profile: total 45 (should not grow unbounded)
+curl -s "http://localhost:8080/debug/pprof/goroutine?debug=1" | head -1
 ```
 
-## Block Profiling
-
-Find where goroutines block on synchronization:
-
-```bash
-curl http://localhost:8080/debug/pprof/block > block.prof
-go tool pprof block.prof
-
-# Show blocking operations
-(pprof) top
+```text
+goroutine profile: total 87
 ```
 
-**Note**: Block profiling has runtime overhead. Use only during debugging.
-
-## Mutex Contention
-
-Find mutex contention hotspots:
+Dump every goroutine stack to a file:
 
 ```bash
-curl http://localhost:8080/debug/pprof/mutex > mutex.prof
-go tool pprof mutex.prof
-
-(pprof) top
+curl -s -o goroutines.txt "http://localhost:8080/debug/pprof/goroutine?debug=2"
 ```
 
-## Execution Tracing
-
-Capture detailed execution trace:
+## Execution trace
 
 ```bash
-# Capture 5-second trace
-curl http://localhost:8080/debug/pprof/trace?seconds=5 > trace.out
-
-# Analyze with trace tool
+curl -o trace.out "http://localhost:8080/debug/pprof/trace?seconds=5"
 go tool trace trace.out
 ```
 
-The trace viewer shows:
-- Goroutine scheduling
-- System calls
-- GC events
-- Network I/O
+## Profiling a remote host
 
-## Continuous Profiling
-
-### Using curl in a Loop
+Keep the HTTP server bound to loopback and forward the port over SSH:
 
 ```bash
-#!/bin/bash
-while true; do
-    DATE=$(date +%Y%m%d_%H%M%S)
-    curl -s http://localhost:8080/debug/pprof/heap > heap_$DATE.prof
-    sleep 60
-done
+ssh -L 8080:127.0.0.1:8080 user@agent-host.example.com
 ```
 
-### Using pprof Directly
+Then run the commands above against `http://localhost:8080` on your workstation.
 
-```bash
-# Continuously profile, compare to base
-go tool pprof -base heap_base.prof heap_current.prof
-```
+## See Also
 
-## Remote Profiling
-
-Profile a remote agent:
-
-```bash
-# Direct connection
-go tool pprof http://agent-host:8080/debug/pprof/profile?seconds=30
-
-# Via SSH tunnel
-ssh -L 8080:localhost:8080 user@agent-host
-go tool pprof http://localhost:8080/debug/pprof/heap
-```
-
-## Common Debugging Scenarios
-
-### High Memory Usage
-
-```bash
-# Capture heap profile
-curl http://localhost:8080/debug/pprof/heap > heap.prof
-
-# Find largest allocations
-go tool pprof -top heap.prof
-
-# Find allocation sites
-go tool pprof heap.prof
-(pprof) top -cum
-```
-
-### High CPU Usage
-
-```bash
-# Profile for 30 seconds during high load
-curl http://localhost:8080/debug/pprof/profile?seconds=30 > cpu.prof
-
-# Find hot functions
-go tool pprof cpu.prof
-(pprof) top
-(pprof) list hotFunction
-```
-
-### Goroutine Leak
-
-```bash
-# Check goroutine count over time
-watch -n 5 'curl -s http://localhost:8080/debug/pprof/goroutine?debug=1 | head -1'
-
-# If growing, dump full trace
-curl http://localhost:8080/debug/pprof/goroutine?debug=2 > goroutines.txt
-```
-
-### Deadlock Detection
-
-```bash
-# Dump all goroutines
-curl http://localhost:8080/debug/pprof/goroutine?debug=2 | grep -A 100 "sync.Mutex"
-
-# Look for goroutines blocked on mutexes
-```
-
-## Security Considerations
-
-**Warning**: pprof endpoints expose sensitive information about the running process including:
-- Memory contents
-- Stack traces
-- Function names
-- File paths
-
-**Recommendations:**
-1. Bind HTTP server to localhost only in production
-2. Use firewall rules to restrict access
-3. Disable in highly sensitive environments
-4. Use authentication if exposing externally
-
-```yaml
-# Restrict to localhost
-http:
-  address: "127.0.0.1:8080"
-```
-
-## Related
-
-- [Troubleshooting - Performance](/troubleshooting/performance) - Performance issues
-- [API - Health](/api/health) - Health check endpoints
+- [HTTP Configuration](/configuration/http) - Enable or disable the pprof group
+- [Performance Troubleshooting](/troubleshooting/performance) - Diagnosing slow or resource-hungry agents
+- [HTTP API Overview](/api/overview) - Endpoint groups and authentication

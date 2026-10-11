@@ -1,6 +1,7 @@
 ---
 title: Docker Deployment
-sidebar_position: 3
+description: Build a Muti Metroo container image and run one or more agents with Docker and Docker Compose.
+sidebar_position: 4
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,207 +10,57 @@ sidebar_position: 3
 
 # Docker Deployment
 
-Run agents in containers for consistent, isolated deployments you can spin up anywhere Docker runs - your laptop, a server, or the cloud.
+Muti Metroo runs in a container like any other single-binary service. No prebuilt image is published, so you build the image yourself, either from a release binary or from source.
 
-**What you get:**
+## Build an image
 
-- Same agent behavior on any system
-- Easy multi-agent testing with Docker Compose
-- Clean teardown - remove container, everything is gone
-- No host system dependencies
+### From a release binary
 
-## Docker Image
-
-### Create Dockerfile
-
-Create a Dockerfile using the pre-built binary:
+This Dockerfile downloads the Linux release binary for the build platform:
 
 ```dockerfile
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates wget
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
 
-# Download the binary (adjust URL for your platform)
 ARG TARGETARCH
-RUN wget -O /usr/local/bin/muti-metroo \
-    https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-${TARGETARCH} && \
-    chmod +x /usr/local/bin/muti-metroo
+ADD --chmod=755 https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-${TARGETARCH} /usr/local/bin/muti-metroo
 
 WORKDIR /app
 ENTRYPOINT ["muti-metroo"]
 CMD ["run", "-c", "/app/config.yaml"]
 ```
 
-### Build Image
-
 ```bash
-# Build for current platform
 docker build -t muti-metroo .
-
-# Build with version tag
-docker build -t muti-metroo:v1.0.0 .
 ```
 
-## Running a Single Container
+`TARGETARCH` is set by BuildKit (`amd64` or `arm64`). To pin a release, replace `latest/download` with `download/<tag>`.
 
-### Basic Run
+### From source
+
+The repository's `Dockerfile` builds the binary from the checked-out source in a Go build stage and produces the same layout (`/usr/local/bin/muti-metroo`, working directory `/app`, default command `run -c /app/config.yaml`):
 
 ```bash
-docker run -d --name muti-metroo \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/certs:/app/certs \
-  -p 1080:1080 \
-  -p 4433:4433/udp \
-  -p 8080:8080 \
-  muti-metroo
+git clone https://github.com/postalsys/Muti-Metroo.git
+cd Muti-Metroo
+docker build -t muti-metroo .
 ```
 
-### With Environment Variables
+## Configure the agent for a container
 
-```bash
-docker run -d --name muti-metroo \
-  -e LOG_LEVEL=debug \
-  -e SOCKS_ADDR=0.0.0.0:1080 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/certs:/app/certs \
-  -p 1080:1080 \
-  -p 4433:4433/udp \
-  -p 8080:8080 \
-  muti-metroo
-```
-
-### With Secrets
-
-```bash
-docker run -d --name muti-metroo \
-  --env-file .env \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/certs:/app/certs \
-  -p 1080:1080 \
-  -p 4433:4433/udp \
-  -p 8080:8080 \
-  muti-metroo
-```
-
-## Docker Compose
-
-### Basic Setup
-
-```yaml
-# docker-compose.yml
-version: "3.8"
-
-services:
-  agent:
-    image: muti-metroo
-    restart: unless-stopped
-    ports:
-      - "1080:1080" # SOCKS5
-      - "4433:4433/udp" # QUIC
-      - "8080:8080" # HTTP API
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./data:/app/data
-      - ./certs:/app/certs:ro
-    environment:
-      - LOG_LEVEL=info
-```
-
-:::note
-Build your image first with `docker build -t muti-metroo .` before running docker compose.
-:::
-
-### Multi-Agent Testbed
-
-For a ready-to-run 6-agent example with SOCKS5 proxy, split exit routing, management commands, and file transfer, see [`examples/docker-tryout/`](https://github.com/postalsys/Muti-Metroo/tree/master/examples/docker-tryout) in the repository.
-
-```yaml
-# docker-compose.yml
-version: "3.8"
-
-services:
-  # Ingress agent
-  agent1:
-    image: muti-metroo
-    restart: unless-stopped
-    ports:
-      - "1081:1080"
-      - "8081:8080"
-      - "4433:4433/udp"
-    volumes:
-      - ./configs/agent1.yaml:/app/config.yaml:ro
-      - ./data/agent1:/app/data
-      - ./certs:/app/certs:ro
-    networks:
-      - mesh
-
-  # Transit agent
-  agent2:
-    image: muti-metroo
-    restart: unless-stopped
-    ports:
-      - "1082:1080"
-      - "8082:8080"
-      - "4434:4433/udp"
-    volumes:
-      - ./configs/agent2.yaml:/app/config.yaml:ro
-      - ./data/agent2:/app/data
-      - ./certs:/app/certs:ro
-    networks:
-      - mesh
-
-  # Exit agent
-  agent3:
-    image: muti-metroo
-    restart: unless-stopped
-    ports:
-      - "1083:1080"
-      - "8083:8080"
-      - "4435:4433/udp"
-    volumes:
-      - ./configs/agent3.yaml:/app/config.yaml:ro
-      - ./data/agent3:/app/data
-      - ./certs:/app/certs:ro
-    networks:
-      - mesh
-
-networks:
-  mesh:
-    driver: bridge
-```
-
-### With Health Checks
-
-```yaml
-services:
-  agent:
-    image: muti-metroo
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-```
-
-## Configuration for Docker
-
-### Agent Config
+Mount the config at `/app/config.yaml`, keep the data directory on a volume so the agent ID survives container re-creation, and bind listeners to `0.0.0.0` so published ports reach them:
 
 ```yaml
 agent:
-  id: "auto"
-  display_name: "${HOSTNAME:-docker-agent}"
+  display_name: "${AGENT_NAME:-docker-agent}"
   data_dir: "/app/data"
   log_level: "${LOG_LEVEL:-info}"
   log_format: "json"
 
 tls:
   ca: "/app/certs/ca.crt"
-  cert: "/app/certs/agent.crt"
-  key: "/app/certs/agent.key"
+  cert: "/app/certs/agent1.crt"
+  key: "/app/certs/agent1.key"
   mtls: true
 
 listeners:
@@ -225,180 +76,132 @@ http:
   address: "0.0.0.0:8080"
 ```
 
-### Docker-Internal Networking
+`${VAR:-default}` references are expanded from the container environment when the config is loaded. See [Environment Variables](/configuration/environment-variables).
 
-Use container names for peer addresses:
-
-```yaml
-# agent1.yaml - uses global TLS settings
-peers:
-  - id: "${AGENT2_ID}"
-    transport: quic
-    address: "agent2:4433"
-    # Uses global CA and cert/key
-
-# agent2.yaml
-peers:
-  - id: "${AGENT3_ID}"
-    transport: quic
-    address: "agent3:4433"
-    # Uses global CA and cert/key
-```
-
-## Docker Commands
-
-### Start
+Generate certificates on the host and mount them read-only:
 
 ```bash
-# Start all agents
-docker compose up -d
-
-# Start specific agents
-docker compose up -d agent1 agent2
-
-# View logs
-docker compose logs -f agent1
-
-# Stop all
-docker compose down
-```
-
-### Inspect and Debug
-
-```bash
-# Container status
-docker compose ps
-
-# Enter container shell
-docker compose exec agent1 sh
-
-# View agent logs
-docker compose logs agent1
-
-# Follow logs
-docker compose logs -f --tail=100 agent1
-
-# Check health
-docker compose exec agent1 wget -q -O - http://localhost:8080/health
-```
-
-### Certificate Management
-
-```bash
-# Generate certs on host, mount to container
 muti-metroo cert ca --cn "Docker Mesh CA" -o ./certs
-muti-metroo cert agent --cn "agent1" \
-  --ca ./certs/ca.crt \
-  --ca-key ./certs/ca.key \
-  -o ./certs
+muti-metroo cert agent --cn agent1 -o ./certs
 ```
 
-## Production Considerations
+`cert agent` names its output after the common name (`agent1.crt`, `agent1.key`) and signs with `./certs/ca.crt` and `./certs/ca.key` by default.
 
-### Resource Limits
+## Run a single container
+
+```bash
+docker run -d --name muti-metroo \
+  -e AGENT_NAME=gateway \
+  -v "$(pwd)/config.yaml:/app/config.yaml:ro" \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/certs:/app/certs:ro" \
+  -p 4433:4433/udp \
+  -p 127.0.0.1:1080:1080 \
+  -p 127.0.0.1:8080:8080 \
+  muti-metroo
+```
+
+QUIC listeners need the port published as UDP (`4433:4433/udp`). HTTP/2 and WebSocket listeners use TCP. The example publishes the SOCKS and HTTP API ports on the host's loopback interface only.
+
+Use `--env-file .env` instead of individual `-e` flags to keep values such as password hashes out of the shell history.
+
+## Docker Compose
 
 ```yaml
 services:
   agent:
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 1G
-        reservations:
-          cpus: "0.5"
-          memory: 256M
-```
-
-### Logging
-
-```yaml
-services:
-  agent:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
-
-### Secrets Management
-
-```yaml
-services:
-  agent:
-    secrets:
-      - tls_cert
-      - tls_key
-      - ca_cert
-
-secrets:
-  tls_cert:
-    file: ./certs/agent.crt
-  tls_key:
-    file: ./certs/agent.key
-  ca_cert:
-    file: ./certs/ca.crt
-```
-
-### Networking
-
-```yaml
-services:
-  agent:
-    network_mode: host # For better UDP performance (QUIC)
-```
-
-Or use bridge with explicit port mapping:
-
-```yaml
-services:
-  agent:
+    image: muti-metroo
+    restart: unless-stopped
+    environment:
+      AGENT_NAME: gateway
+      LOG_LEVEL: info
     ports:
       - "4433:4433/udp"
-    networks:
-      - mesh
+      - "127.0.0.1:1080:1080"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 ```
+
+The health check uses the `/health` endpoint, which returns `OK` while the agent runs. It requires `http.enabled: true`. `wget` is part of the Alpine base image.
+
+### Several agents on one Compose network
+
+Agents on the same Compose network reach each other by service name. Give each agent its own config file and data directory, and point peers at the other service's name:
+
+```yaml
+services:
+  agent1:
+    image: muti-metroo
+    volumes:
+      - ./configs/agent1.yaml:/app/config.yaml:ro
+      - ./data/agent1:/app/data
+      - ./certs:/app/certs:ro
+    ports:
+      - "127.0.0.1:1080:1080"
+
+  agent2:
+    image: muti-metroo
+    volumes:
+      - ./configs/agent2.yaml:/app/config.yaml:ro
+      - ./data/agent2:/app/data
+      - ./certs:/app/certs:ro
+```
+
+```yaml
+# configs/agent1.yaml (excerpt)
+peers:
+  - id: "auto"
+    transport: quic
+    address: "agent2:4433"
+```
+
+`id: "auto"` accepts whatever agent ID the peer presents. Replace it with agent2's ID once it is known, so the connection is rejected if a different agent answers.
+
+A complete multi-agent example with SOCKS ingress, split exit routing, management commands, and file transfer is in [`examples/docker-tryout/`](https://github.com/postalsys/Muti-Metroo/tree/master/examples/docker-tryout) in the repository. It builds the image from source with `docker compose up -d`.
+
+## Operations
+
+```bash
+# Follow logs
+docker compose logs -f agent
+
+# Run CLI commands against the agent inside the container
+docker compose exec agent muti-metroo status
+docker compose exec agent muti-metroo peer status
+
+# Restart after a config change
+docker compose restart agent
+```
+
+Containers run the agent as root, so the mounted data directory needs no special ownership.
+
+For QUIC-heavy deployments, `network_mode: host` avoids the overhead of Docker's UDP port forwarding. With host networking, `ports:` is ignored and listeners bind directly on the host.
 
 ## Troubleshooting
 
-### Container Won't Start
+**The container exits immediately.** Read the error with `docker compose logs agent`. Typical causes are a missing `/app/config.yaml` mount, a validation error, or a certificate path that does not exist inside the container. Validate the mounted config with the image itself:
 
 ```bash
-# Check logs
-docker compose logs agent1
-
-# Check docker compose config syntax
-docker compose config
-
-# Test agent starts successfully (will exit after init)
-docker compose run --rm agent1 timeout 5 ./muti-metroo run -c /app/config.yaml || true
+docker run --rm -v "$(pwd)/config.yaml:/app/config.yaml:ro" muti-metroo config validate /app/config.yaml
 ```
 
-### Network Issues
+**Peers cannot connect from outside.** Check that the listener binds to `0.0.0.0`, not `127.0.0.1`, and that QUIC ports are published with `/udp`.
 
-```bash
-# Check port bindings
-docker compose ps
+**A new agent ID on every start.** The data directory is not on a volume. Mount `/app/data`, or set `agent.id` and `agent.private_key` in the config.
 
-# Test internal connectivity
-docker compose exec agent1 nc -zv agent2 4433
+## See Also
 
-# Check DNS resolution
-docker compose exec agent1 nslookup agent2
-```
-
-### Permission Issues
-
-```bash
-# Check file permissions
-docker compose exec agent1 ls -la /app/
-
-# Fix data directory permissions
-docker compose exec agent1 chown -R 1000:1000 /app/data
-```
-
-## Next Steps
-
-- [System Service](/deployment/system-service) - Native installation
-- [Embedded Config](/deployment/embedded-config) - Single-file deployment
+- [System Service](/deployment/system-service) - Running the agent directly on the host
+- [Configuration Overview](/configuration/overview) - Every config section
+- [Environment Variables](/configuration/environment-variables) - `${VAR}` substitution in configs
+- [CLI - cert](/cli/cert) - Generating CA and agent certificates
+- [High Availability](/deployment/high-availability) - Redundant paths and exits

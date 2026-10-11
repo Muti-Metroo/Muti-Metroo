@@ -1,7 +1,7 @@
 ---
 sidebar_position: 9
 title: Muti Metroo Manager
-description: Web dashboard for managing and monitoring Muti Metroo mesh networks
+description: Install and run Muti Metroo Manager, the web UI that proxies a Muti Metroo agent's HTTP API to show the mesh topology and manage routes, forwards, DNS, shells, files, and sleep mode from a browser.
 ---
 
 export const DownloadButton = ({ href, children, primary }) => (
@@ -22,7 +22,7 @@ export const DownloadButtonGroup = ({ children }) => (
 import Tabs from "@theme/Tabs";
 import TabItem from "@theme/TabItem";
 
-# Muti Metroo Manager - Web Dashboard
+# Muti Metroo Manager
 
 <div style={{ textAlign: "center", marginBottom: "2rem" }}>
   <img
@@ -32,36 +32,22 @@ import TabItem from "@theme/TabItem";
   />
 </div>
 
-**Muti Metroo Manager** is a lightweight web dashboard for managing and monitoring Muti Metroo mesh networks. It runs as a standalone binary that reverse-proxies a Muti Metroo agent's HTTP API and serves an embedded React SPA.
+Muti Metroo Manager is a single binary that serves a browser UI for a Muti Metroo mesh. It connects to the HTTP API of one agent and reverse-proxies the browser's requests to it, so everything that agent can see or reach through the mesh is available in the UI: the topology, routes, port forwards, mesh hostnames, remote shells, file transfer, ping, and sleep mode.
 
-![Muti Metroo Manager topology view](/img/screenshots/muti-metroo-manager/01-topology.png)
+![Topology tab showing a four-agent mesh: gateway connected to transit and exit-cloud, and transit connected to exit-datacenter](/img/screenshots/muti-metroo-manager/01-topology.png)
 
-:::info Requires Running Agent
-Muti Metroo Manager connects to a Muti Metroo agent's HTTP API. The agent must have `http.enabled: true` with `http.dashboard: true` and `http.remote_api: true` in its configuration.
+```mermaid
+flowchart LR
+    Browser[Browser] -->|HTTP| Manager[Muti Metroo Manager<br/>:3000]
+    Manager -->|HTTP API| Agent[Muti Metroo agent<br/>:8080]
+    Agent -->|Mesh| Mesh[Other agents]
+```
+
+The React frontend is embedded in the binary; no web server or Node.js runtime is needed. The Manager keeps its own small SQLite database for UI state (settings, agent notes and icons, network names, station positions).
+
+:::warning The Manager has no login of its own
+Anyone who can open the Manager's address can use it with the permissions of the token it was started with. The default listen address `:3000` binds every interface. Bind it to `127.0.0.1:3000`, or put it behind a reverse proxy that authenticates users, on any host reachable from a network you do not trust.
 :::
-
-## Features
-
-| Feature                       | Description                                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Topology Map**              | Interactive pan/zoom/drag visualization of all agents and their connections, with live RTT heat, traffic-flow indicators, boot pulses, and an event ticker                                                                                                                                                                                             |
-| **Dashboard**                 | Real-time stats for peers, streams, routes, and system info                                                                                                                                                                                                                                                                                            |
-| **Route Management**          | View and manage CIDR and domain exit routes; trace how the agent would route a destination                                                                                                                                                                                                                                                             |
-| **DNS**                       | Manage mesh-host hostname registrations (`*.mesh -> IPv4/IPv6`) and TLD suffixes via `/hosts/manage` and `/hosts/suffixes/manage`                                                                                                                                                                                                                      |
-| **Port Forwards**             | Listener and endpoint subtabs with unpaired-route visibility                                                                                                                                                                                                                                                                                           |
-| **Management Commands**       | Browser-based terminal for running commands, with Reconnect on exit or error                                                                                                                                                                                                                                                                           |
-| **File Transfer**             | Upload and download files to/from remote agents                                                                                                                                                                                                                                                                                                        |
-| **Mesh Test**                 | Test connectivity between all agents in the mesh                                                                                                                                                                                                                                                                                                       |
-| **Ping**                      | Browser-driven ICMP echo from any agent to any IP, with sequence and RTT tracking                                                                                                                                                                                                                                                                      |
-| **Sleep/Wake**                | Trigger mesh-wide sleep and wake commands                                                                                                                                                                                                                                                                                                              |
-| **Downloads**                 | In-UI download links for Muti Metroo and Mutiauk release binaries (plus the user, operator, and slides PDFs) with SHA256 checksums; ships as an optional bundle alongside the binary, with a per-section "Create config" button that opens the matching wizard. The Muti Metroo Manager binary itself is downloaded out-of-band -- it does not appear in this tab. |
-| **Settings Overrides**        | Operator-configurable agent API URL and default SOCKS5 address are persisted in Muti Metroo Manager's local SQLite store; the bearer token used for proxied API calls lives in browser session storage and is not persisted across tab close.                                                                                                                    |
-| **Per-Agent Notes & Icons**   | Persistent operator notes and a platform/role icon per agent                                                                                                                                                                                                                                                                                           |
-| **Search & Deep-Linking**     | `/` to search by name, hostname, ID, or notes; `#/agents/<id>` URL hash links                                                                                                                                                                                                                                                                          |
-| **Health and Metrics**        | `/healthz` for liveness/readiness; optional Prometheus `/metrics` listener pinned to a private interface                                                                                                                                                                                                                                               |
-| **Structured Logs and Audit** | Text or JSON output, per-request IDs propagated via `X-Request-ID`, dedicated audit lines on every state change                                                                                                                                                                                                                                        |
-| **Layered Config**            | Defaults + TOML + env + flags with `muti-metroo-manager config show` reporting the source of every value                                                                                                                                                                                                                                                         |
-| **Single-Instance Lock**      | An exclusive lock on the data directory prevents two managers from racing on the same SQLite store                                                                                                                                                                                                                                                     |
 
 ## Download
 
@@ -128,304 +114,364 @@ Muti Metroo Manager connects to a Muti Metroo agent's HTTP API. The agent must h
   </TabItem>
 </Tabs>
 
-## Quick Start
+Each release also carries `checksums.txt` with SHA-256 sums of the binaries.
 
-```bash
-# Download (example: macOS Apple Silicon)
-curl -L -o muti-metroo-manager https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-darwin-arm64
-chmod +x muti-metroo-manager
+## Quick start
 
-# Launch (connects to local agent on port 8080)
-./muti-metroo-manager
+1. Make sure the agent has its HTTP API enabled (see [Agent requirements](#agent-requirements)).
+2. Download and start the Manager on a host that can reach the agent's API:
 
-# Open in browser
-open http://localhost:3000
-```
+   ```bash
+   curl -L -o muti-metroo-manager https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-linux-amd64
+   chmod +x muti-metroo-manager
+   ./muti-metroo-manager -addr 127.0.0.1:3000 -agent http://127.0.0.1:8080
+   ```
 
-The dashboard opens automatically at `http://localhost:3000` and connects to the Muti Metroo agent's HTTP API at `http://127.0.0.1:8080`.
+3. Open `http://localhost:3000` in a browser.
 
-## Command Surface
+The startup log lists the listen address, the agent URL and whether the agent answered, whether a token is set, and the data directory. If the agent is unreachable, the Manager still starts and keeps probing it.
 
-```bash
-muti-metroo-manager [run] [flags]            start the HTTP server (default subcommand)
-muti-metroo-manager check [flags]            validate config, probe agent, exit 0 / 1
-muti-metroo-manager config show [flags]      print the resolved config with provenance
-muti-metroo-manager config init [path]       emit a commented TOML config template
-muti-metroo-manager version | -V             print version and build info
-```
+## Agent requirements
 
-`check` is the subcommand systemd's `ExecStartPre=` should run -- it validates the config, the data dir, and upstream agent reachability without binding the listener, so a broken deploy fails before the long-lived process starts. `config show` reports each value alongside its source (default / TOML / env / flag), which makes "why is the agent URL wrong?" investigations a single command. `config init <path>` writes a commented TOML template that already lists every supported key with sane defaults.
-
-## CLI Flags
-
-The same flag set applies to `run` (default), `check`, and `config show`.
-
-| Flag                | Default                      | Description                                                                          |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `-config`           |                              | TOML config file. Values overridden by env vars, env vars overridden by flags.       |
-| `-addr`             | `:3000`                      | Address for the web UI to listen on.                                                 |
-| `-agent`            | `http://127.0.0.1:8080`      | Muti Metroo agent HTTP API URL.                                                            |
-| `-agent-token`      |                              | Bearer token. Visible via `/proc`; prefer `-agent-token-file` or the env var.        |
-| `-agent-token-file` |                              | File containing the bearer token (single line, trimmed).                             |
-| `-data-dir`         | OS-specific (see below)      | Directory for `muti-metroo-manager.db` and the instance lock.                                  |
-| `-downloads-bundle` | auto-detect alongside binary | Path to `muti-metroo-downloads-bundle.zip`. An explicit path that does not exist is fatal. |
-| `-no-downloads`     |                              | Disable the Downloads tab regardless of bundle presence.                             |
-| `-log-format`       | `text`                       | Log encoding: `text` (operator-readable) or `json` (SIEM).                           |
-| `-log-level`        | `info`                       | Minimum severity: `debug`, `info`, `warn`, `error`.                                  |
-| `-metrics-addr`     |                              | `host:port` for the `/metrics` listener; empty disables. Pin to a private interface. |
-| `-no-sounds`        |                              | Force the UI sound effects off regardless of per-user setting.                       |
-| `-version`, `-V`    |                              | Print version and exit.                                                              |
-
-**Data directory defaults:** `~/Library/Application Support/Muti-Metroo-Manager` on macOS, `/var/lib/muti-metroo-manager` for root on Linux, `$XDG_CONFIG_HOME/muti-metroo-manager` for unprivileged Linux users, `%LOCALAPPDATA%\muti-metroo-manager` on Windows. The directory holds the SQLite settings database and an exclusive lock file so only one instance runs per data dir.
-
-**Token environment variables:** the canonical name is `METROO_MANAGER_AGENT_TOKEN`. The legacy `MUTI_METROO_TOKEN` is still accepted but logs a deprecation warning at startup. `-agent-token` and `-agent-token-file` both override the env var; the file form is preferred for systemd / Kubernetes secrets.
-
-### Examples
-
-```bash
-# Connect to a remote agent
-./muti-metroo-manager -agent http://192.168.1.10:8080
-
-# Use a custom port for the web UI
-./muti-metroo-manager -addr :9090
-
-# Token from a file (preferred over -agent-token in production)
-./muti-metroo-manager -agent http://192.168.1.10:8080 -agent-token-file /etc/muti-metroo-manager/token
-
-# TOML-driven deploy (validate first, then start)
-./muti-metroo-manager check -config /etc/muti-metroo-manager/config.toml \
-  && ./muti-metroo-manager run -config /etc/muti-metroo-manager/config.toml
-
-# Render a starter config
-./muti-metroo-manager config init /etc/muti-metroo-manager/config.toml
-
-# Bind to all interfaces (accessible from other machines)
-./muti-metroo-manager -addr 0.0.0.0:3000 -agent http://10.0.0.5:8080
-
-# Mount a downloads bundle from a custom path
-./muti-metroo-manager -downloads-bundle /opt/muti-metroo/muti-metroo-downloads-bundle.zip
-
-# Explicitly disable the Downloads tab
-./muti-metroo-manager -no-downloads
-
-# Production: structured logs to stderr, /metrics on a private IP
-./muti-metroo-manager -config /etc/muti-metroo-manager/config.toml \
-  -log-format json -log-level info \
-  -metrics-addr 127.0.0.1:9101
-```
-
-## Agent Configuration Requirements
-
-The Muti Metroo agent must have its HTTP API enabled with dashboard and remote API endpoints active:
+The Manager uses the agent's dashboard (`/api/*`) and remote (`/agents/*`) endpoints. Both are on by default when the HTTP API is enabled:
 
 ```yaml
 http:
   enabled: true
-  address: ":8080"
-  dashboard: true # Required for /api/* endpoints
-  remote_api: true # Required for /agents/* endpoints
-```
-
-If the agent uses bearer token authentication, pass the token via `-agent-token-file`, `-agent-token`, or the `METROO_MANAGER_AGENT_TOKEN` environment variable:
-
-```yaml
-# Agent config with token protection
-http:
-  enabled: true
-  address: ":8080"
-  token_hash: "$2a$10$..." # Generated with: muti-metroo hash
+  address: "127.0.0.1:8080"
   dashboard: true
   remote_api: true
 ```
 
+Some operations need more than read access. They are greyed out or read-only in the UI when not available:
+
+| Operation                                                           | Requirement                                                                                     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Add, edit, or remove routes, peers, listeners, forwards, hostnames; rename agents | The connected agent holds `management.signing_private_key` ([Management keys](/configuration/management)) |
+| Shell                                                               | The same signing key, plus shell enabled on the target agent ([Shell](/configuration/shell))    |
+| Files                                                               | The same signing key, plus file transfer enabled on the target agent ([File Transfer](/configuration/file-transfer)) |
+| Ping                                                                | ICMP enabled on the target agent ([ICMP](/configuration/icmp)); not offered for Windows agents  |
+| Suspend and resume the mesh                                         | Sleep mode enabled on the connected agent ([Sleep](/configuration/sleep))                       |
+
+### Bearer token
+
+If the agent has `http.token_hash` set, the Manager needs the matching token. Give it to the Manager in one of these ways (highest precedence first):
+
+1. `-agent-token-file <path>`: a file with the token on one line. Preferred for systemd and Kubernetes secrets.
+2. `-agent-token <token>`: visible to other users through the process list; avoid in production.
+3. The `METROO_MANAGER_AGENT_TOKEN` environment variable. The older `MUTI_METROO_TOKEN` still works but logs a deprecation warning.
+
 ```bash
-# Token from a file (preferred for systemd / Kubernetes secrets)
 ./muti-metroo-manager -agent http://192.168.1.10:8080 \
   -agent-token-file /etc/muti-metroo-manager/token
-
-# Or as a flag (visible via /proc; avoid in production)
-./muti-metroo-manager -agent http://192.168.1.10:8080 -agent-token yourtoken
-
-# Or via environment variable
-export METROO_MANAGER_AGENT_TOKEN=yourtoken
-./muti-metroo-manager -agent http://192.168.1.10:8080
 ```
 
-## Architecture
+When the Manager has no token and the agent answers `401`, the browser shows an **Authentication required** dialog instead. The token entered there is kept in the browser's session storage, or in local storage for 8 hours when **Remember on this device for 8 hours** is ticked. **Sign out** in the actions menu clears it. A token configured on the Manager always replaces a token sent by the browser.
 
-Muti Metroo Manager acts as a reverse proxy between the browser and a Muti Metroo agent:
+## Using the web UI
 
-```mermaid
-flowchart LR
-    Browser[Browser] -->|HTTP| Manager[Muti Metroo Manager<br/>:3000]
-    Manager -->|HTTP API| Agent[Muti Metroo Agent<br/>:8080]
-    Agent -->|Mesh Protocol| Mesh[Mesh Network]
-```
+### Layout
 
-- **Browser**: Loads the React SPA from the Manager and makes API calls
-- **Manager**: Serves the embedded SPA and proxies API requests to the agent
-- **Agent**: Handles mesh operations and returns status/management data
+- **Header**: the connected agent's name and short ID, the main tabs, the actions menu (the vertical dots button), and a light/dark theme toggle. The theme follows the operating system preference until you change it and is remembered per browser.
+- **Main tabs**: **Topology**, **Routes**, **Port Forwarding**, **DNS**, and **Downloads** (only when a [downloads bundle](#downloads) is present).
+- **Actions menu**: **Mesh connectivity test**, **Generate Muti Metroo agent config...**, **Generate Mutiauk config...**, **Settings...**, **Suspend mesh** or **Resume mesh** (when sleep mode is enabled), and **Sign out** (when the browser holds a token).
+- **Footer**: the most recent topology event, the [mesh health](#mesh-test) summary, and the Manager version.
 
-The Manager binary embeds the entire React frontend at build time, so no separate web server or Node.js runtime is needed.
+![Actions menu open on the Topology tab, listing Mesh connectivity test, Generate Muti Metroo agent config, Generate Mutiauk config, Settings, and Suspend mesh](/img/screenshots/muti-metroo-manager/22-actions-menu.png)
 
-## Operations
+![Topology tab in the dark theme](/img/screenshots/muti-metroo-manager/25-topology-dark.png)
 
-### Health and Metrics
+Destructive actions (removing routes, peers, listeners, forwards, hostnames, suffixes, and files) ask for confirmation.
 
-Two HTTP endpoints are designed for monitoring infrastructure:
+### Topology
 
-- **`/healthz`** is on the main listener and reports the manager's own state plus a cached one-shot probe of the upstream agent (config validity, agent reachability, and -- if a token is set -- a successful `/healthz` round-trip to the agent). Suitable for Kubernetes liveness/readiness, ALB health checks, or systemd `WatchdogSec=`.
-- **`/metrics`** is on a separate optional listener (`-metrics-addr 127.0.0.1:9101`). Output is Prometheus text format with `metroo_manager_requests_total{method,path,status}`, `metroo_manager_request_duration_seconds_bucket{...}`, and `metroo_manager_agent_reachable`. The listener is disabled by default; pin it to a private interface when you turn it on.
+The **Topology** tab draws every agent as a station and every peer connection as a line between them. Click a station to open its [agent panel](#agent-panel). Hover a station or a connection for details, including the agent's notes.
 
-The `muti-metroo-manager check` subcommand runs the same upstream probe synchronously and exits 0 / 1, so a systemd unit can chain `ExecStartPre=/usr/local/bin/muti-metroo-manager check -config /etc/muti-metroo-manager/config.toml` before starting the real service.
+- **Zoom** with the mouse wheel, toward the cursor, from 0.25x to 5x. A short scroll still scrolls the page; zooming starts after a longer wheel movement.
+- **Pan** by dragging empty space.
+- **Move a station** by dragging it. Stations snap to a grid; hold Alt (Option on macOS) to place freely. Station positions are saved in the Manager database, so everyone using the same Manager sees the same layout. Pan and zoom are saved per browser.
+- **Reset view** (top left) appears when the view or any station has been moved, and restores the default layout.
+- **Fullscreen** toggle (bottom left).
 
-### Structured Logs and Audit Trail
+Connection lines are colored by round-trip time (under 50 ms, under 200 ms, slower) and marked when a peer is unresponsive. Lines that carry traffic are animated from the dialing side to the listening side. Joins, departures, link changes, route changes, and mesh test changes appear as events in the footer. Optional sound effects accompany peer joins and departures, mesh test results, and station clicks; turn them off in [Settings](#settings) or for all users with `-no-sounds`. Animations and sounds are off when the operating system requests reduced motion.
 
-`-log-format text` (default) is operator-readable; `-log-format json` writes one JSON object per line for ingestion into a SIEM or log aggregator. Every request gets a request ID -- propagated via `X-Request-ID` if the client supplies one, otherwise generated -- which appears in every log line emitted while handling that request. State-changing operations (route mutations, sleep/wake, settings overrides, file uploads/downloads) emit a dedicated `audit=true` log line so a 24/7 compliance audit can reconstruct who did what.
+#### Search
 
-### Single-Instance Lock
+Press `/` (from any tab) or click the search icon to search agents. Search matches the agent ID, IP addresses, role, display name, hostname, exit routes, domain routes, forward keys, SOCKS5 address, and notes, and shows which field matched. Use the arrow keys and Enter to open a result.
 
-On startup, Muti Metroo Manager takes an exclusive lock on a file inside `-data-dir` (`flock` on Linux/macOS, `LockFileEx` on Windows). A second instance pointed at the same data directory exits with a clear "another instance is running" error rather than silently corrupting the SQLite store or fighting over the listener. Each instance therefore needs its own `-data-dir`.
+![Topology search for "a" listing gateway, transit, and exit-datacenter with their short IDs](/img/screenshots/muti-metroo-manager/02-topology-search.png)
 
-### Layered Configuration
+#### Networks
 
-Resolution order, lowest precedence first: built-in defaults, `-config <path>` TOML file, environment variables, command-line flags. `muti-metroo-manager config show` prints the resolved value of every setting alongside a `source=` annotation, so an operator chasing "why is the agent URL different from what I set in TOML?" can see in one command whether an env var or flag is overriding it. `muti-metroo-manager config init <path>` writes a complete commented template ready to edit.
+Agents can be grouped into named boxes on the map. Set the **Networks** field on an agent's Info tab to a comma-separated list (for example `prod,edge-1`); agents that share a network are drawn inside the same box. Click a box label to rename it. Boxes can be nested and moved.
 
-## Feature Details
+![Topology tab with transit and exit-datacenter inside a datacenter network box and exit-cloud inside a cloud network box](/img/screenshots/muti-metroo-manager/21-topology-networks.png)
 
-### Topology Map
+### Agent panel
 
-The topology map provides a visual overview of all agents in the mesh and their peer connections. Agents are displayed with their display names, agent IDs, and connection status. Click on any agent to view detailed information.
+Clicking a station opens a side panel for that agent. The pencil button next to the name renames the agent (sets its display name). The panel has these tabs:
 
-The map is interactive: mouse wheel zooms toward the cursor (0.25x-5x), click-and-drag on empty space pans, and click-and-drag on a station repositions it. Pan, zoom, and station positions persist in `localStorage`, so a refresh keeps the operator view. A **Reset view** button appears when any of those are non-default. A fullscreen toggle is available on the map. The agent search collapses to an icon by default; the `/` hotkey expands it and focuses the input regardless of which tab is active.
+#### Info
 
-Live cues annotate the topology in real time:
+Agent ID, hostname, platform, version, uptime, PID, IP addresses, which capabilities are enabled (shell, file transfer, signing key), SOCKS5 address, and advertised routes. Below them are three fields stored in the Manager database:
 
-- **RTT heat** on each connection -- color shifts from cool (low latency) to warm (degraded) so a struggling link is visible at a glance.
-- **Traffic flow** animation on connections currently carrying streams, indicating direction.
-- **Boot sweep** on agents that just came online; a brief pulse marks the addition.
-- **Live ticker** on the bottom edge cycling through recent topology events.
-- **Ambient sound effects** for boot / disconnect / mesh-test results. The user toggle and the `-no-sounds` server flag both override the per-user setting; in noise-sensitive deployments (clinical, broadcast, control rooms) start the manager with `-no-sounds` and the sound system stays muted regardless of operator setting.
-- **Faint matrix-rain backdrop** behind the metro map. Decorative only; performance-bounded.
+- **Notes**: free text, saved when the field loses focus, on Ctrl+S or Cmd+S, and when the panel closes.
+- **Map icon**: an icon drawn on the station. **Choose...** opens a picker with operating system, network, compute, storage, industrial, and other device icons.
+- **Networks**: see [Networks](#networks).
 
-![Topology search](/img/screenshots/muti-metroo-manager/02-topology-search.png)
+![Info tab for gateway showing reachability, hostname, platform, version, IP address, SOCKS5 address, remote access status, map icon, networks, and notes](/img/screenshots/muti-metroo-manager/03-agent-info.png)
 
-### Dashboard
+#### Routes
 
-The dashboard shows real-time statistics for the connected agent, including:
+The agent's dynamic CIDR routes. Add a route (CIDR, metric, comment), remove one, or **Edit** one to change its comment, **Source IP**, and **Interface**. The Source IP and Interface fields suggest the agent's own addresses and network interfaces; a warning appears when the chosen source address belongs to a different interface. The meaning of each field is described in [route](/cli/route).
 
-- Connected peers and their connection status
-- Active streams and buffer usage
-- Route table (CIDR and domain routes)
-- System information (OS, architecture, uptime)
-- Forward route endpoints and listeners
+![Routes tab for exit-cloud listing its 0.0.0.0/0 and 172.31.0.0/16 routes with comments and metrics](/img/screenshots/muti-metroo-manager/05-agent-routes.png)
 
-### Route Management
+![Edit route dialog for 10.20.0.0/16 on exit-datacenter with comment, Source IP, and Interface fields filled in](/img/screenshots/muti-metroo-manager/20-route-edit-dialog.png)
 
-The Routes tab has two sub-tabs:
+#### Forwards
 
-- **Active routes** lists every CIDR and domain route advertised across the mesh, with origin agent, hop count, metric, and an editable comment per route. Comments on dynamic routes are mutated through `POST /routes/manage` (`set_comment` action) and propagate over the wire so they appear on every agent that learns the route. The edit dialog also sets an optional **Source IP** and egress **Interface** for the route, each a combobox seeded from the origin agent's interface addresses (`GET /api/interfaces`); a mismatch advisory appears when the chosen source IP lives on a different NIC than the pinned interface. Both bindings are local to the origin agent and survive restart.
-- **Test routing** posts a destination to the agent's `POST /route/trace` and renders three labelled views — **SOCKS** (the IP the SOCKS5 dial would pick), **TUN** (Layer 3 view, with default routes hidden client-side), and **Domain** (the domain-route table match) — plus a collapsible all-candidates dump showing every CIDR considered and why each loser lost.
+Two sub-tabs: **Listeners (ingress)** for forward listeners (key and address) and **Endpoints (exit)** for forward endpoints (key and target). A usage hint shows a ready-to-run `curl` command for the first listener, including a `--resolve` variant for TLS services that need the right SNI name. Endpoints registered by [Mutiauk expose](/mutiauk#expose-publishing-local-services) are marked as such.
 
-![Global route table](/img/screenshots/muti-metroo-manager/07-routes-table.png)
+![Forwards tab for transit showing the tools-share listener on port 8090 and the curl usage hint](/img/screenshots/muti-metroo-manager/06-agent-forwards.png)
 
-![Test routing sub-tab with a populated trace result](/img/screenshots/muti-metroo-manager/13-routes-test-routing.png)
+#### Connectivity
+
+Two sub-tabs:
+
+- **Peers**: the agent's peer connections. Add a peer by address, transport, path (for `h2` and `ws`), and optional keepalive; the Manager probes the address first and offers **Add anyway** if the probe fails. Runtime peers can be removed.
+- **Listeners**: transport listeners. Add one by transport (`quic`, `h2`, `ws`), bind address (for example `:4433`), path (`h2` and `ws`), optional advertise address (`host:port`, published to the mesh as a dial target), and the `plaintext` option for `ws` behind a TLS-terminating proxy. Listeners from the agent's config file are marked `static` and cannot be removed here.
+
+Without a management signing key on the connected agent, both sub-tabs are read-only. See [peer](/cli/peer) and [listener](/cli/listener) for what each field does.
+
+![Peers sub-tab for gateway listing inbound peers transit over QUIC and exit-cloud over WebSocket](/img/screenshots/muti-metroo-manager/04-agent-peers.png)
+
+![Listeners sub-tab for gateway listing its static QUIC listener on port 4433 and WebSocket listener on port 8443 with their advertise addresses](/img/screenshots/muti-metroo-manager/19-agent-listeners.png)
+
+#### Shell
+
+An interactive terminal on the agent. Pick a shell from the list to start a session. **Reconnect** appears when the session ends or fails, and **Copy CLI** copies the equivalent `muti-metroo shell` command.
+
+![Shell tab with a bash session on exit-datacenter showing the output of uname and ls](/img/screenshots/muti-metroo-manager/10-agent-shell.png)
+
+#### Files
+
+A file browser limited to the agent's allowed paths. The toolbar has **Up**, **Path**, **Upload**, and **Refresh**. **Path** (or clicking the leading `/` in the breadcrumb on Unix agents) opens a field to type a path; `~` expands to the agent user's home directory. Drop files or folders onto the list to upload them; folders upload recursively. Each entry has a menu to view (text, hex, image, or PDF), download (folders as `.tar.gz`), change permissions, or delete.
+
+![Files tab for exit-datacenter listing the configs and reports folders in /srv/files](/img/screenshots/muti-metroo-manager/11-agent-files.png)
+
+#### Ping
+
+Sends ICMP echo requests from the agent to an IP address: 10, 25, or 50 requests, or continuously, one per second. The table shows each sequence number, round-trip time, and result, with minimum, average, and maximum RTT, loss, and the source and destination addresses the exit used.
+
+![Ping tab for transit with a session to 8.8.8.8 showing three replies and RTT statistics](/img/screenshots/muti-metroo-manager/16-agent-ping.png)
+
+### Routes
+
+The **Routes** tab has two sub-tabs:
+
+- **Active routes**: every CIDR and domain route known in the mesh, with exit node, protocol, hop count, and comment. Click a row to open the exit agent's Routes tab.
+- **Test routing**: enter a destination to see how the connected agent would route it. The result shows the **SOCKS** match, the **TUN** match as Mutiauk would see it (default routes ignored), and the **SOCKS domain pattern** match, plus a collapsible list of all candidate routes and why each lost. This uses the same lookup as [route trace](/api/route-trace).
+
+![Active routes sub-tab listing the CIDR routes of exit-cloud and exit-datacenter and the *.corp.example.com domain route, with hop counts and comments](/img/screenshots/muti-metroo-manager/07-routes-table.png)
+
+![Test routing sub-tab tracing db.mesh: resolved through the mesh-host registry to 10.20.0.15 and routed via transit to exit-datacenter](/img/screenshots/muti-metroo-manager/13-routes-test-routing.png)
+
+### Port Forwarding
+
+The **Port Forwarding** tab lists every forward key in the mesh with its listeners and endpoints. A key that has a listener but no endpoint (or the reverse) is still listed, marked `- no endpoint -` or `- no listener -`.
+
+![Port Forwarding tab listing the tools-share key with its listener on transit and its endpoint on gateway](/img/screenshots/muti-metroo-manager/08-port-forwarding.png)
 
 ### DNS
 
-The DNS tab is split into two sub-tabs: **Hosts** and **TLDs**. Hosts is a CRUD UI for the agent's mesh-host registry: hostname &rarr; IPv4 / IPv6 mappings backed by `POST /hosts/manage`. Add a name, give it one or both IP families and an optional comment, and the entry is journalled to `agent.data_dir` so it survives restarts. Names ending in any of the configured TLD suffixes (default `.mesh`) are accepted; the active suffix set is reported back by the agent so the form can validate client-side. Bare TLDs without a label are also valid hostnames. Config-seeded entries appear in the list but cannot be removed - edit the agent's `mesh_hosts:` block and restart instead. The TLDs sub-tab manages the suffix set itself at runtime via `POST /hosts/suffixes/manage`. See [Hosts Configuration](/configuration/hosts) for the YAML schema and [Hosts Management API](/api/hosts-management) for the underlying endpoints.
+The **DNS** tab manages the connected agent's [mesh hostnames](/features/mesh-hostnames):
 
-![DNS tab listing registered mesh hostnames](/img/screenshots/muti-metroo-manager/12-domains-tab.png)
+- **Hosts**: add a hostname with IPv4, IPv6, or both, and an optional comment, or remove one. The name must end in one of the configured suffixes. Entries from the agent's config file cannot be removed here; the agent rejects the request.
+- **TLDs**: add or remove hostname suffixes. A suffix that still has hosts cannot be removed.
 
-### Port Forwards
+![Hosts sub-tab of the DNS tab listing build.mesh and db.mesh with their addresses and comments](/img/screenshots/muti-metroo-manager/12-domains-tab.png)
 
-The port forwards view pairs backend routes with topology data so a listener advertised without a matching endpoint (or vice versa) is still visible. In the agent panel, listeners and endpoints live in separate subtabs with a ready-to-paste `curl` example keyed off the first parseable listener port (including an SNI `--resolve` variant for TLS backends).
-
-![Port forwarding table with an unpaired listener](/img/screenshots/muti-metroo-manager/08-port-forwarding.png)
-
-![Listener/endpoint subtabs with usage hint](/img/screenshots/muti-metroo-manager/06-agent-forwards.png)
-
-### Connectivity
-
-The agent panel's **Connectivity** tab has two sub-tabs. **Peers** shows the agent's direct peer connections. **Listeners** manages the transport sockets the agent binds to accept inbound peers without editing its config: pick a transport (`quic` / `h2` / `ws`), enter a bind address (e.g. `:4433`), optionally set the HTTP path (ws/h2), a `plaintext` flag (ws, for reverse-proxy deployments), and an advertise `host:port` to publish a public dial target to the mesh. Config listeners are read-only; runtime-added ones carry a dynamic badge and can be removed (with a confirmation dialog). When the connected agent has no management signing key the sub-tab is read-only.
-
-### Management Commands
-
-Run commands on any reachable agent in the mesh from a browser-based terminal. Both streaming mode (for simple commands) and interactive mode (for programs like `htop` or `vim`) are supported. When a session ends or errors out, a **Reconnect** button reopens it. The target agent must have management commands enabled in its configuration.
-
-![PowerShell session on a Windows workstation](/img/screenshots/muti-metroo-manager/10-agent-shell-powershell.png)
-
-### File Transfer
-
-Upload and download files to/from any reachable agent through the browser. Supports individual files and directory transfers. The target agent must have file transfer enabled in its configuration.
-
-The file browser toolbar is laid out as four equal-weight text buttons -- **Up**, **Path**, **Upload**, **Refresh** -- with drag-and-drop carrying the primary upload affordance via a drop overlay. The breadcrumb's leading `/` segment is clickable: it opens an editable path input so an operator can jump directly to a known directory. The input expands a leading `~` to the agent user's home directory on Unix targets and shows a platform-appropriate placeholder (`~ or /path` on Unix, `~ or C:\path` on Windows).
-
-![File browser showing Browsable Paths on a Windows workstation](/img/screenshots/muti-metroo-manager/11-agent-files.png)
-
-### Mesh Test
-
-Run connectivity tests between all agents in the mesh. The test sends probe messages between every pair of agents and reports success/failure with latency measurements. The footer shows a persistent "Mesh: N/M reachable" summary that turns red when any remote agent is unreachable.
-
-![Footer mesh-health indicator](/img/screenshots/muti-metroo-manager/09-footer-mesh-health.png)
-
-### Ping
-
-Send ICMP echo requests from any agent to any reachable IP address. Configure the request count and interval, watch sequence numbers and round-trip times update in real time, and see the source/destination address pair the exit agent used. The target agent must have `icmp.enabled: true`; the browser tunnels each session over a dedicated WebSocket subprotocol.
-
-### Sleep/Wake Control
-
-Trigger mesh-wide sleep or wake commands from the dashboard. When sleep is activated, agents enter a low-power polling mode and disconnect from peers. Wake restores normal operation.
+![TLDs sub-tab of the DNS tab listing the .mesh suffix](/img/screenshots/muti-metroo-manager/17-dns-tlds.png)
 
 ### Downloads
 
-A top-level **Downloads** tab serves the current Muti Metroo and Mutiauk release binaries -- including the Windows DLL -- plus the user, operator, and slides PDFs, grouped by architecture (`amd64` / `arm64`) with SHA256 checksums and capture timestamps. Useful when handing an operator a single URL instead of separate release-page links. The Muti Metroo Manager binary itself is not delivered through this tab; operators download it directly from the release page or from the URL where the dashboard is hosted.
+The **Downloads** tab offers Muti Metroo and Mutiauk binaries and the documentation PDFs to whoever uses the Manager. Sections are **Documentation**, **Muti Metroo Agent**, **Muti Metroo Agent DLL**, and **Mutiauk**; each binary section has an `amd64`/`arm64` switch and lists the files per operating system with their SHA-256 checksums. Files download under plain names (`muti-metroo`, `muti-metroo.exe`, `muti-metroo.dll`, `mutiauk`, `user-manual.pdf`). The Agent and Mutiauk sections have a **Create config** button that opens the matching [config wizard](#config-wizards).
 
-The contents come from `muti-metroo-downloads-bundle.zip`, an optional file that the Muti Metroo Manager release ships alongside the binary. When the binary boots without `-downloads-bundle`, it looks for the zip in the same directory as the executable; if found, the Downloads tab appears and the startup log notes `downloads bundle: ... (N files)`. When no bundle is present (or `-downloads-bundle off` is passed), the tab is hidden and the rest of the dashboard works normally. Files are served with friendly download names (`muti-metroo`, `muti-metroo.exe`, `muti-metroo.dll`, `mutiauk`, `user-manual.pdf`) via `Content-Disposition`.
+The tab is shown only when the Manager finds a downloads bundle, `muti-metroo-downloads-bundle.zip`. It looks for the file next to its own binary, or at the path given with `-downloads-bundle`. The bundle is not a release asset; build it from the Manager source tree with `bundle-downloads.sh`, which collects the binaries and manuals from local Muti Metroo and Mutiauk release builds. `-no-downloads` hides the tab even when a bundle is present.
 
-Each binary section in the Downloads tab has a **Create config** button next to its arch tabs - clicking it opens the matching wizard (Agent or Entry) without leaving the tab. The button is shown only on sections that ship a wizard.
+![Downloads tab with the user manual and the Muti Metroo agent, agent DLL, and Mutiauk binaries with sizes and SHA-256 checksums](/img/screenshots/muti-metroo-manager/14-downloads-tab.png)
 
-### Config Wizards
+### Mesh test
 
-The dashboard includes two interactive configuration wizards reachable from the agent kebab menu and from the Downloads tab:
+The Manager runs a mesh connectivity test every 60 seconds and shows the result in the footer as `Mesh: N/M reachable`, highlighted when an agent is unreachable. The browser tab title and icon also indicate degraded agents. **Mesh connectivity test** in the actions menu runs a test immediately and opens a results dialog with one row per agent and its latency. See [mesh-test](/cli/mesh-test) for how the test works.
 
-- **Muti Metroo Agent wizard** (`ConfigWizard`) - guides through identity, listeners, peers, ingress/exit, HTTP API, and management keys. The peers step pre-populates from `advertised_listeners` reported on the topology poll, so an operator can pick a known agent rather than typing its address by hand. Each listener step also offers an "Advertise this listener" toggle that emits the corresponding `listeners[].advertise: {address, path, transport}` block in the YAML preview.
-- **Mutiauk wizard** (`EntryConfigWizard`) - five steps: **TUN interface**, **SOCKS5 proxy**, **Routes**, **Admin interface**, and **Review & download**. Autoroutes is a single toggle on the Routes step (on by default); there is no separate DNS-resolver step or autoroutes bearer-token field.
+![Mesh test results dialog showing all agents reachable with per-agent latency](/img/screenshots/muti-metroo-manager/15-mesh-test-modal.png)
 
-Both wizards perform inline **management-keypair validation**: when an operator pastes a private key, the wizard derives the public half and surfaces a mismatch on the same step. X25519 keys are 32-byte (64-hex) scalars; Ed25519 signing keys are 64-byte (128-hex) seed-with-public-tail values per Go's `crypto/ed25519` layout. Mismatches stop the wizard before download, so an operator never ends up with a config that fails to decrypt topology or sign privileged ops at runtime.
+![Footer with the last update time and the Mesh: 3/3 reachable summary](/img/screenshots/muti-metroo-manager/09-footer-mesh-health.png)
 
-The review step shows a YAML preview plus verified copy-paste deployment commands for the most common scenarios:
+### Sleep and wake
 
-- Foreground run (no privileges)
-- System service install (`systemd` on Linux, `launchd` on macOS, Windows Service on Windows)
-- Linux non-root install via cron (`muti-metroo service install --user ...`)
-- Windows DLL flow (`muti-metroo.exe service install --user --dll ... -c ...` or `rundll32.exe muti-metroo.dll,Run ...`)
+When sleep mode is enabled on the connected agent, the actions menu shows **Suspend mesh** (with a confirmation) or **Resume mesh**. While the mesh sleeps, a banner says so. Suspending disconnects peers and tunnels across the mesh; see [Sleep Mode](/features/sleep-mode).
 
-The commands are generated from the wizard's own paths and pinned to whatever the [`muti-metroo service`](/cli/service) command documents - see that page for per-platform details.
+![Suspend mesh confirmation in the actions menu with Cancel and Confirm buttons](/img/screenshots/muti-metroo-manager/26-sleep-confirm.png)
+
+### Config wizards
+
+Two wizards build configuration files in the browser:
+
+- **Generate Muti Metroo agent config**: steps for basics, network listeners, TLS, peers, SOCKS5, exit routes, monitoring, shell, file transfer, and management keys, then **Review & download**. The network step can advertise a listener as a public dial target. The peers step lists dial targets that other agents advertise, each with a **Use** button. The management key step checks that pasted private and public keys belong together. The review step shows the YAML and commands to run the agent in the foreground, install it as a service, install it as a user without root on Linux, or run the Windows DLL.
+- **Generate Mutiauk config**: **TUN interface**, **SOCKS5 proxy**, **Routes** (autoroutes on by default), **Admin interface**, and **Review & download**. The review step shows the YAML and the commands to start Mutiauk or install it as a service on Linux, macOS, and Windows.
+
+Open them from the actions menu, from **Create config** on the Downloads tab, or from the empty topology view.
+
+![Agent config wizard on the Review & download step showing the generated YAML for a branch-office agent with a QUIC listener, a peer, SOCKS5, and an exit route](/img/screenshots/muti-metroo-manager/24-agent-wizard-review.png)
+
+![Mutiauk config wizard on its first step, TUN interface](/img/screenshots/muti-metroo-manager/18-config-wizard-entry.png)
 
 ### Settings
 
-A persistent settings dialog lets operators override the agent API URL, the default SOCKS5 address surfaced in setup hints, and the bearer token used for proxied API calls. Values are stored in Muti Metroo Manager's local SQLite store (`muti-metroo-manager.db`) and survive restarts; the [Mutiauk](/mutiauk) wizard seeds itself from the same values.
+**Settings...** in the actions menu opens a dialog with:
 
-### Per-Agent Notes and Icons
+- **Muti Metroo agent API address**: the agent API address the UI shows, for example in copied commands.
+- **SOCKS5 proxy address**: the SOCKS5 address the UI shows for the connected agent.
+- **Sound effects**: on or off. Greyed out when the Manager runs with `-no-sounds`.
 
-Each agent has a free-text notes field (saved on blur or Ctrl/Cmd-S) and a selectable icon (Linux/macOS/Windows, router, switch, database, valve, pump, ...). Both persist in the Muti Metroo Manager SQLite store and survive restarts. Notes are surfaced on station hover; icons render on the map.
+Both addresses are labels only; the agent the Manager talks to is set with `-agent`. Settings are stored in the Manager database and apply to every browser.
 
-![Agent Info tab with icon picker and notes](/img/screenshots/muti-metroo-manager/03-agent-info.png)
+![Settings dialog with the agent API address, SOCKS5 proxy address, and Sound effects fields](/img/screenshots/muti-metroo-manager/23-settings-dialog.png)
 
-### Keyboard Shortcuts and Deep Links
+### Keyboard shortcuts and links
 
-| Shortcut | Action                                                        |
-| -------- | ------------------------------------------------------------- |
-| `/`      | Focus the search box (switches to the topology tab if needed) |
-| `Esc`    | Close the active agent panel                                  |
+| Key            | Action                                                                  |
+| -------------- | ----------------------------------------------------------------------- |
+| `/`            | Open agent search (switches to the Topology tab)                        |
+| `Esc`          | Close the agent panel, cancel a rename, or clear the search             |
+| Ctrl+S, Cmd+S  | Save the agent's notes                                                  |
+| Alt (dragging) | Move a station without snapping to the grid                             |
 
-URL hashes like `#/agents/<id>` (short or full ID) open an agent panel directly. Destructive actions -- removing routes, peers, or port forwards -- go through a confirmation dialog.
+Each tab has its own URL path (`/topology`, `/routes/active`, `/routes/test`, `/forwards`, `/dns/hosts`, `/dns/tlds`, `/downloads`). Add `?agent=<id>` with a short or full agent ID to open that agent's panel, for example `http://localhost:3000/topology?agent=abc12345`. Older `#/agents/<id>` links are redirected.
 
-## Related
+## Command-line reference
 
-- [Suite Overview](/suite-overview) - How Muti Metroo, Mutiauk, and Muti Metroo Manager work together
-- [Muti Metroo Download](/download) - Main Muti Metroo agent binary
-- [HTTP API Reference](/api/overview) - API endpoints that Muti Metroo Manager uses
-- [Mutiauk TUN Interface](/mutiauk) - Transparent traffic routing companion tool
-- [Dashboard API](/api/dashboard) - JSON endpoints for topology and stats
+```text
+muti-metroo-manager [run] [flags]          start the HTTP server (default)
+muti-metroo-manager check [flags]          validate config + probe agent, exit 0/1
+muti-metroo-manager config show [flags]    print resolved config with provenance
+muti-metroo-manager config init [path]     emit a commented TOML config template
+muti-metroo-manager version | -V           print version and build info
+```
+
+- `check` validates the configuration, the data directory, and the downloads bundle path, and calls the agent's `/healthz`. It exits 0 when all pass and 1 otherwise, without starting the listener.
+- `config show` prints every setting with its source (`default`, `file`, `env`, `flag`, or `token-file`).
+- `config init` writes a commented TOML file with every key; `-force` overwrites an existing file.
+
+### Flags
+
+These flags apply to `run`, `check`, and `config show`. Flags use a single dash.
+
+| Flag                | Default                  | Description                                                                                         |
+| ------------------- | ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `-config`           |                          | TOML config file                                                                                    |
+| `-addr`             | `:3000`                  | Listen address for the UI. The default binds every interface.                                      |
+| `-agent`            | `http://127.0.0.1:8080`  | Agent HTTP API URL (`scheme://host:port[/prefix]`)                                                  |
+| `-agent-token`      |                          | Bearer token for the agent                                                                          |
+| `-agent-token-file` |                          | File containing the bearer token                                                                    |
+| `-data-dir`         | see [Data directory](#data-directory) | Directory for the database and the instance lock                                       |
+| `-downloads-bundle` | next to the binary       | Path to `muti-metroo-downloads-bundle.zip`                                                          |
+| `-no-downloads`     | `false`                  | Hide the Downloads tab                                                                              |
+| `-log-level`        | `info`                   | `debug`, `info`, `warn`, or `error`                                                                 |
+| `-log-format`       | `text`                   | `text` or `json`                                                                                    |
+| `-metrics-addr`     |                          | Listen address for the [metrics](#metrics) endpoint; empty disables it                              |
+| `-no-sounds`        | `false`                  | Turn UI sound effects off for all users                                                             |
+
+### Config file
+
+Settings are resolved in this order, later ones winning: built-in defaults, the TOML file given with `-config`, environment variables, flags. Each flag has a TOML key with underscores instead of dashes:
+
+```toml
+addr = "127.0.0.1:3000"
+agent = "http://127.0.0.1:8080"
+agent_token_file = "/etc/muti-metroo-manager/token"
+data_dir = "/var/lib/muti-metroo-manager"
+downloads_bundle = ""
+no_downloads = false
+log_level = "info"
+log_format = "json"
+metrics_addr = ""
+no_sounds = false
+```
+
+The token itself cannot be set in the TOML file; use `agent_token_file`.
+
+### Environment variables
+
+| Variable                     | Description                                     |
+| ---------------------------- | ----------------------------------------------- |
+| `METROO_MANAGER_AGENT_TOKEN` | Bearer token for the agent                      |
+| `MUTI_METROO_TOKEN`          | Deprecated name for the same; logs a warning    |
+
+### Data directory
+
+The data directory holds `muti-metroo-manager.db` (the SQLite database) and `muti-metroo-manager.lock`. Back up the database with your config. Defaults:
+
+| Platform            | Default                                              |
+| ------------------- | ---------------------------------------------------- |
+| macOS               | `~/Library/Application Support/Muti-Metroo-Manager`  |
+| Linux, as root      | `/var/lib/muti-metroo-manager`                       |
+| Linux, other users  | `$XDG_CONFIG_HOME/muti-metroo-manager` (`~/.config/muti-metroo-manager`) |
+| Windows             | `%AppData%\muti-metroo-manager`                      |
+
+Only one Manager can use a data directory at a time. A second instance pointed at the same directory exits with `another muti-metroo-manager instance is already running`. Give each instance its own `-data-dir`.
+
+## Operations
+
+### Health check
+
+`GET /healthz` on the main listener returns the Manager's status and the result of its last probe of the agent. It always answers `200`; check `agent_reachable` in the body.
+
+```bash
+curl http://localhost:3000/healthz
+```
+
+```json
+{"status":"ok","version":"0.2.39","agent_reachable":true,"agent_status":200,"agent_latency_ms":2,"agent_checked_ago_s":4}
+```
+
+### Metrics
+
+With `-metrics-addr` set, a separate listener serves Prometheus text format at `/metrics`: `metroo_manager_requests_total` and `metroo_manager_request_duration_seconds` (by method, route, and status) and `metroo_manager_agent_reachable`. Bind it to a private address.
+
+```bash
+./muti-metroo-manager -addr 127.0.0.1:3000 -metrics-addr 127.0.0.1:9101
+curl http://127.0.0.1:9101/metrics
+```
+
+### Logs
+
+Logs go to standard error, as text or (with `-log-format json`) one JSON object per line. Every request is logged with method, path, status, latency, client address, and a request ID. The ID is taken from the client's `X-Request-ID` header (which is also passed on to the agent) or generated, and is returned in the response. Changes to the Manager's own state (settings, agent notes and icons, network names, station positions) also produce a log line with `audit=true`. Operations performed on the agent appear in the request log.
+
+### Running as a service
+
+The Manager repository has a systemd unit (`contrib/systemd/muti-metroo-manager.service`) and a launchd plist (`contrib/launchd/`). The systemd unit runs as a dedicated user, validates with `check` before each start, and reads `/etc/muti-metroo-manager/config.toml`:
+
+```bash
+sudo useradd --system --no-create-home muti-metroo-manager
+sudo install -m 755 muti-metroo-manager /usr/local/bin/muti-metroo-manager
+sudo install -d -m 750 -o muti-metroo-manager -g muti-metroo-manager \
+  /var/lib/muti-metroo-manager /etc/muti-metroo-manager
+sudo /usr/local/bin/muti-metroo-manager config init /etc/muti-metroo-manager/config.toml
+sudo cp muti-metroo-manager.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now muti-metroo-manager
+```
+
+Edit `config.toml` before starting, at least `addr`, `agent`, and `agent_token_file`.
+
+## See Also
+
+- [Suite Overview](/suite-overview): how Muti Metroo, Mutiauk, and Muti Metroo Manager fit together
+- [HTTP Configuration](/configuration/http): enable the agent API and set its bearer token
+- [Management Keys](/configuration/management): the signing key that unlocks changes from the UI
+- [Dashboard API](/api/dashboard): the endpoints behind the topology and route views
+- [Mutiauk TUN Interface](/mutiauk): the TUN tool that the Mutiauk wizard configures

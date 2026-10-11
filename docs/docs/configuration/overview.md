@@ -1,5 +1,7 @@
 ---
-title: Overview
+title: Configuration Overview
+sidebar_label: Overview
+description: How the Muti Metroo YAML configuration file is structured, loaded, validated, and where each top-level section is documented.
 sidebar_position: 1
 ---
 
@@ -7,44 +9,23 @@ sidebar_position: 1
   <img src="/img/mole-inspecting.png" alt="Mole inspecting configuration" style={{maxWidth: '180px'}} />
 </div>
 
-# Configuration Reference
+# Configuration Overview
 
-Control every aspect of your agent through a single YAML file. Start with the minimal config and add sections as you need them.
+An agent reads all of its settings from one YAML file. Every section is optional: a key that is not set keeps its built-in default, and validation runs once over the merged result before the agent starts.
 
-## Quick Reference
+## Configuration file
 
-| I want to...                  | Section                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| Set agent name and logging    | [Agent](/configuration/agent)                                           |
-| Accept incoming connections   | [Listeners](/configuration/listeners)                                   |
-| Connect to other agents       | [Peers](/configuration/peers)                                           |
-| Create a SOCKS5 proxy         | [SOCKS5](/configuration/socks5)                                         |
-| Route traffic to destinations | [Exit](/configuration/exit)                                             |
-| Publish mesh-local hostnames  | [Hosts](/configuration/hosts)                                           |
-| Set up port forwarding        | [Forward](/configuration/forward)                                       |
-| Enable UDP relay              | [UDP](/configuration/udp)                                               |
-| Enable ICMP ping              | [ICMP](/configuration/icmp)                                             |
-| Configure sleep mode          | [Sleep](/configuration/sleep)                                           |
-| Enable management commands    | [Management Commands](/configuration/shell)                             |
-| Enable file transfer          | [File Transfer](/configuration/file-transfer)                           |
-| Configure HTTP API            | [HTTP](/configuration/http)                                             |
-| Tune route propagation        | [Routing](/configuration/routing)                                       |
-| Persist runtime CLI changes   | [Dynamic Config Persistence](/configuration/dynamic-config-persistence) |
-| Encrypt mesh topology         | [Management](/configuration/management)                                 |
-| Set up TLS certificates       | [TLS Certificates](/configuration/tls-certificates)                     |
-| Use secrets from environment  | [Environment Variables](/configuration/environment-variables)           |
-
-## Configuration File
-
-Muti Metroo uses YAML configuration files. The default location is `./config.yaml`, but you can specify a different path:
+`muti-metroo run` reads `./config.yaml` unless `-c` names another file:
 
 ```bash
-muti-metroo run -c /path/to/config.yaml
+muti-metroo run -c /etc/muti-metroo/config.yaml
 ```
 
-## Minimal Configuration
+A binary with an embedded configuration ignores `-c` and uses the embedded copy. See [Embedded Configuration](/deployment/embedded-config).
 
-The simplest working configuration:
+The configuration is read once at startup. To apply an edit, restart the agent. Several settings can also be changed on a running agent through the CLI or HTTP API (peers, listeners, routes, forwards, mesh hosts, display name); those changes are stored separately, see [Dynamic Config Persistence](/configuration/dynamic-config-persistence).
+
+## Minimal configuration
 
 ```yaml
 agent:
@@ -52,7 +33,7 @@ agent:
 
 listeners:
   - transport: quic
-    address: ":4433"
+    address: "0.0.0.0:4433"
 
 socks5:
   enabled: true
@@ -65,157 +46,91 @@ exit:
 
 http:
   enabled: true
-  address: ":8080"
+  address: "127.0.0.1:8080"
 ```
 
-TLS certificates are auto-generated at startup. See [TLS Certificates](/configuration/tls-certificates) for custom certificate setup.
+TLS certificates are generated at startup when none are configured. See [TLS](/configuration/tls-certificates).
 
-## Full Example
+The repository ships a commented example with every section: [configs/example.yaml](https://github.com/postalsys/Muti-Metroo/blob/master/configs/example.yaml).
 
-See [configs/example.yaml](https://github.com/postalsys/Muti-Metroo/blob/master/configs/example.yaml) for a fully commented configuration file with all options.
+## Top-level sections
 
-## Configuration Sections
+| Key                   | Purpose                                                    | Reference                                                 |
+| --------------------- | ---------------------------------------------------------- | --------------------------------------------------------- |
+| `default_action`      | What an embedded-config binary does with no arguments      | [below](#default_action)                                  |
+| `agent`               | Identity, data directory, logging, startup delay           | [Agent](/configuration/agent)                             |
+| `listeners`           | Accept transport connections from other agents             | [Listeners](/configuration/listeners)                     |
+| `peers`               | Dial other agents                                          | [Peers](/configuration/peers)                             |
+| `tls`                 | Certificates, CA, mTLS, strict verification, ClientHello   | [TLS](/configuration/tls-certificates)                    |
+| `protocol`            | ALPN, HTTP header, and WebSocket subprotocol identifiers   | [Protocol](/configuration/protocol)                       |
+| `socks5`              | SOCKS4/4a/5 ingress proxy                                  | [SOCKS Proxy](/configuration/socks5)                      |
+| `exit`                | CIDR and domain exit routes, exit DNS                      | [Exit](/configuration/exit)                               |
+| `mesh_hosts_suffixes` | DNS suffixes allowed for mesh host names                   | [Mesh Hosts](/configuration/hosts)                        |
+| `mesh_hosts`          | Mesh-local hostname registry                               | [Mesh Hosts](/configuration/hosts)                        |
+| `forward`             | Port forward endpoints and listeners                       | [Forward](/configuration/forward)                         |
+| `udp`                 | UDP relay for SOCKS5 UDP ASSOCIATE                         | [UDP](/configuration/udp)                                 |
+| `icmp`                | ICMP echo relay                                            | [ICMP](/configuration/icmp)                               |
+| `routing`             | Route advertisement and expiry                             | [Routing](/configuration/routing)                         |
+| `connections`         | Keepalive, dial timeout, reconnection backoff              | [Connections](/configuration/connections)                 |
+| `limits`              | Stream limits and stream open timeout                      | [Limits](/configuration/limits)                           |
+| `http`                | HTTP API server, endpoint groups, bearer token             | [HTTP API](/configuration/http)                           |
+| `management`          | Topology encryption keys and command signing keys          | [Management](/configuration/management)                   |
+| `shell`               | Remote management commands                                 | [Shell](/configuration/shell)                             |
+| `file_transfer`       | Remote file upload and download                            | [File Transfer](/configuration/file-transfer)             |
+| `sleep`               | Mesh hibernation                                           | [Sleep](/configuration/sleep)                             |
 
-### Core
+## `default_action`
 
-| Section     | Purpose                 | Documentation                                       |
-| ----------- | ----------------------- | --------------------------------------------------- |
-| `agent`     | Agent identity, logging | [Agent](/configuration/agent)                       |
-| `tls`       | Global TLS settings     | [TLS Certificates](/configuration/tls-certificates) |
-| `listeners` | Accept peer connections | [Listeners](/configuration/listeners)               |
-| `peers`     | Connect to other agents | [Peers](/configuration/peers)                       |
+```yaml
+default_action: help # run (implicit) or help
+```
 
-### Ingress
+| Key              | Type   | Default         | Description                                                                                                                                                  |
+| ---------------- | ------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `default_action` | string | unset (= `run`) | Applies only to a binary with an embedded configuration that is started with no arguments. Unset or `run` starts the agent; `help` prints usage instead. Any other value fails validation. |
 
-| Section             | Purpose                | Documentation                     |
-| ------------------- | ---------------------- | --------------------------------- |
-| `socks5`            | SOCKS5 proxy           | [SOCKS5](/configuration/socks5)   |
-| `forward.listeners` | Port forward listeners | [Forward](/configuration/forward) |
+It has no effect when the configuration is loaded from a file.
 
-### Exit
+## Environment variables
 
-| Section             | Purpose                      | Documentation                     |
-| ------------------- | ---------------------------- | --------------------------------- |
-| `exit`              | CIDR and domain routes       | [Exit](/configuration/exit)       |
-| `mesh_hosts`        | Mesh-local hostname registry | [Hosts](/configuration/hosts)     |
-| `forward.endpoints` | Port forward endpoints       | [Forward](/configuration/forward) |
-| `udp`               | UDP relay                    | [UDP](/configuration/udp)         |
-| `icmp`              | ICMP ping                    | [ICMP](/configuration/icmp)       |
-
-### Remote Access
-
-| Section         | Purpose                  | Documentation                                 |
-| --------------- | ------------------------ | --------------------------------------------- |
-| `shell`         | Remote command execution | [Shell](/configuration/shell)                 |
-| `file_transfer` | File upload/download     | [File Transfer](/configuration/file-transfer) |
-
-### HTTP API
-
-| Section | Purpose                 | Documentation               |
-| ------- | ----------------------- | --------------------------- |
-| `http`  | Health, dashboard, APIs | [HTTP](/configuration/http) |
-
-### Tuning
-
-| Section       | Purpose                 | Documentation                                       |
-| ------------- | ----------------------- | --------------------------------------------------- |
-| `routing`     | Route advertisement     | [Routing](/configuration/routing)                   |
-| `connections` | Keepalive, reconnection | [Routing](/configuration/routing#connection-tuning) |
-| `limits`      | Stream limits, buffers  | [Routing](/configuration/routing#resource-limits)   |
-
-### Sleep
-
-| Section | Purpose               | Documentation                 |
-| ------- | --------------------- | ----------------------------- |
-| `sleep` | Mesh hibernation mode | [Sleep](/configuration/sleep) |
-
-### Runtime State
-
-| Section          | Purpose                                                                         | Documentation                                                           |
-| ---------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `agent.data_dir` | Persist runtime `peer`/`forward`/`route`/`display-name` changes across restarts | [Dynamic Config Persistence](/configuration/dynamic-config-persistence) |
-
-### Security
-
-| Section      | Purpose              | Documentation                                       |
-| ------------ | -------------------- | --------------------------------------------------- |
-| `management` | Topology encryption  | [Management](/configuration/management)             |
-| `protocol`   | Protocol identifiers | [TLS Certificates](/configuration/tls-certificates) |
-
-## Environment Variables
-
-All configuration values support environment variable substitution:
+Every value in the file can reference environment variables with `${VAR}` or `${VAR:-default}`:
 
 ```yaml
 agent:
   data_dir: "${DATA_DIR:-./data}"
   log_level: "${LOG_LEVEL:-info}"
-
-socks5:
-  auth:
-    users:
-      - username: "${SOCKS_USER}"
-        password_hash: "${SOCKS_PASS_HASH}"
 ```
 
-Syntax:
-
-- `${VAR}` - Use environment variable (kept as literal if not set)
-- `${VAR:-default}` - Use default if variable not set
-
-See [Environment Variables](/configuration/environment-variables) for more details.
+An unset variable without a default is left in the file as the literal text `${VAR}`. Syntax rules and pitfalls are on [Environment Variables](/configuration/environment-variables).
 
 ## Validation
 
-Configuration is validated on startup. Common errors:
-
-```
-ERROR  Invalid configuration: socks5.address: invalid address format
-ERROR  Invalid configuration: listeners[0].tls.cert: file not found
-ERROR  Invalid configuration: peers[0].id: invalid agent ID format
-```
-
-## Reloading
-
-Configuration cannot be reloaded without restart. To apply changes:
+The agent validates the configuration before it starts and refuses to start if anything is invalid. All errors are reported together. To check a file without starting an agent:
 
 ```bash
-# Stop agent (Ctrl+C or SIGTERM)
-# Edit config.yaml
-# Start agent
-muti-metroo run -c ./config.yaml
+muti-metroo config validate ./config.yaml
 ```
 
-## Best Practices
-
-1. **Use environment variables** for secrets (passwords, keys)
-2. **Keep configs in version control** (without secrets)
-3. **Use display_name** for easier dashboard identification
-4. **Start minimal** and add features as needed
-5. **Test configuration** before production deployment
-
-## Embedded Configuration
-
-For single-file deployments, configuration can be embedded in the binary:
-
-```yaml
-# When running embedded binary without arguments
-default_action: run # Auto-start agent
-# default_action: help # Show help (default)
+```text
+Error: operation rejected: config validation failed: validation errors:
+  - invalid log_level: verbose (must be debug, info, warn, or error)
+  - listeners[0]: path is required for h2 transport
+  - peers[0]: id is required
 ```
 
-The setup wizard can create embedded binaries:
+To see the effective configuration with defaults filled in and secrets redacted, or only the keys that differ from the defaults:
 
 ```bash
-muti-metroo setup
-# Choose "Embed in binary" for configuration delivery
+muti-metroo config show ./config.yaml
+muti-metroo config show ./config.yaml --diff-from-default
 ```
 
-See [Embedded Configuration](/deployment/embedded-config) for details.
+Validation checks syntax, required keys, value ranges, and key formats. It does not open certificate files or check that addresses are free; those problems surface when `muti-metroo run` starts the corresponding component.
 
-## Next Steps
+## See Also
 
-- [Agent Configuration](/configuration/agent) - Identity and logging
-- [Listeners](/configuration/listeners) - Transport setup
-- [Peers](/configuration/peers) - Connecting to other agents
-- [Getting Started](/getting-started/overview) - First-time setup
+- [Agent](/configuration/agent) for identity and the data directory, the first section most configurations set
+- [config CLI](/cli/overview) for `config validate` and `config show` exit codes
+- [Environment Variables](/configuration/environment-variables) for substitution syntax
+- [Embedded Configuration](/deployment/embedded-config) for single-file binaries that use `default_action`
+- [Interactive Setup](/getting-started/interactive-setup) to generate a configuration with the wizard

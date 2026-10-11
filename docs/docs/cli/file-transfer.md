@@ -1,122 +1,141 @@
 ---
-title: File Transfer (upload/download)
+title: muti-metroo upload and download
+sidebar_label: upload / download
+sidebar_position: 23
+description: Copy files and directories to and from a remote agent through the mesh with the upload and download commands.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-reading.png" alt="Mole transferring files" style={{maxWidth: '180px'}} />
 </div>
 
-# File Transfer Commands
+# muti-metroo upload and download
 
-Move files and directories to and from remote agents through the mesh. Works with any file size - data streams directly without loading into memory.
+`upload` copies a local file or directory to a remote agent, and `download` copies a file or directory from a remote agent to the local machine. Data streams through the mesh without being held in memory. Directories are detected automatically and sent as a gzip-compressed tar archive, which is unpacked on the receiving side.
 
-**Quick examples:**
-```bash
-# Upload a file
-muti-metroo upload abc123 ./local-file.txt /tmp/remote-file.txt
+Requirements:
 
-# Download a file
-muti-metroo download abc123 /etc/config.yaml ./config.yaml
+- The gateway agent (`--agent`) has the HTTP API with remote endpoints enabled (`http.remote_api`) and holds the mesh signing private key (`management.signing_private_key`).
+- The target agent has `management.signing_public_key` set, file transfer enabled (`file_transfer.enabled: true`), and the remote path inside `file_transfer.allowed_paths`. Single files larger than `file_transfer.max_file_size` (500 MB by default) are rejected.
 
-# Upload an entire directory
-muti-metroo upload abc123 ./my-folder /tmp/my-folder
-```
+See [File transfer configuration](../configuration/file-transfer.md) and [Authentication](../security/authentication.md).
 
-## muti-metroo upload
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-Upload file or directory to remote agent.
+Both commands take the target agent as a full 32-character agent ID or a unique prefix of one, resolved against the gateway agent's list of known agents. The remote path must be absolute: it starts with `/`, or with a drive letter such as `C:\` or `C:/` for Windows targets.
 
-### Usage
+## upload
 
 ```bash
 muti-metroo upload [flags] <target-agent-id> <local-path> <remote-path>
 ```
 
+Uploads `<local-path>` to `<remote-path>` on the target agent. `<remote-path>` is the full destination path, not a directory to copy into. For a directory, the contents of `<local-path>` are unpacked into `<remote-path>`, and file modes inside the directory are preserved.
+
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent HTTP API address (host:port or http(s):// URL) |
-| `--token` | | | Bearer token for the agent HTTP API (or set `MUTI_METROO_TOKEN`) |
-| `--timeout` | `-t` | `5m` | Transfer timeout (e.g., 30s, 5m, 1h) |
-| `--rate-limit` | | | Max transfer speed (e.g., 100KB, 1MB, 10MiB) |
-| `--resume` | | `false` | Resume interrupted transfer if possible |
-| `--quiet` | `-q` | `false` | Suppress progress output |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Gateway agent HTTP API address, as `host:port` or a URL. See [Agent address](overview.md#agent-address). |
+| `-w`, `--timeout` | `5m` | Maximum time for the whole transfer, as a Go duration (`30s`, `1h`) or plain seconds. Set it higher for large files on slow links. |
+| `--rate-limit` | none | Maximum transfer speed, such as `100KB`, `1MB`, or `10MiB`. `KB` and `MB` are powers of 1000; `KiB` and `MiB` are powers of 1024. |
+| `--resume` | `false` | Accepted for symmetry with `download`, but an upload always starts from the beginning. Ignored for directories, with a warning. |
+| `-q`, `--quiet` | `false` | Do not print progress or the summary line. |
 
-File transfer is authorized by the mesh management Ed25519 signing key (see [Authentication](/security/authentication)). The local agent reached via `-a` must have `management.signing_private_key` set, and the target agent must have `management.signing_public_key` set. There is no per-file password.
+`-t` is a deprecated alias for `--timeout`; it still works but prints a warning to stderr. See [Deprecated commands and flags](overview.md#deprecated-commands-and-flags).
+
+### Output
+
+```bash
+muti-metroo upload abc123de ./data.bin /tmp/data.bin
+```
+
+```text
+Uploading data.bin (3.0 MB) to abc123def456:/tmp/data.bin
+Uploaded 3.0 MB to /tmp/data.bin in 250ms (12 MB/s)
+```
+
+While a file is transferring, a progress bar with percentage, speed, and estimated time is shown on one line and cleared at the end. Directory uploads show no progress bar, and the reported size is the size of the compressed archive.
 
 ### Examples
 
 ```bash
-# Upload file
-muti-metroo upload abc123 ./data.bin /tmp/data.bin
+# Upload a file
+muti-metroo upload abc123de ./config.yaml /etc/app/config.yaml
 
-# Upload directory (auto-detected)
-muti-metroo upload abc123 ./mydir /tmp/mydir
+# Upload a directory
+muti-metroo upload abc123de ./my-folder /tmp/my-folder
 
-# Via different agent (HTTP API host:port)
-muti-metroo upload -a 192.168.1.10:8080 abc123 data.txt /tmp/data.txt
+# Upload to a Windows target
+muti-metroo upload abc123de ./tool.exe 'C:\Temp\tool.exe'
 
-# Rate-limited upload (100 KB/s)
-muti-metroo upload --rate-limit 100KB abc123 ./large.iso /tmp/large.iso
+# Through a different gateway agent
+muti-metroo upload -a 192.168.1.10:8080 abc123de ./data.txt /tmp/data.txt
 
-# Resume interrupted upload
-muti-metroo upload --resume abc123 ./huge.iso /tmp/huge.iso
+# Limit to 100 KB/s and allow up to an hour
+muti-metroo upload --rate-limit 100KB -w 1h abc123de ./large.iso /tmp/large.iso
 ```
 
-## muti-metroo download
-
-Download file or directory from remote agent.
-
-### Usage
+## download
 
 ```bash
 muti-metroo download [flags] <target-agent-id> <remote-path> <local-path>
 ```
 
+Downloads `<remote-path>` from the target agent to `<local-path>`. `<local-path>` is the full destination path; missing parent directories are created and an existing file is overwritten. A single file keeps the file mode it has on the remote agent. A remote directory is unpacked into `<local-path>`, which is created if needed.
+
+A file is written to `<local-path>.partial` while it downloads, with progress tracked in `<local-path>.partial.json`, and renamed to `<local-path>` when complete. If the download is interrupted, these files stay in place and `--resume` continues from where it stopped.
+
 ### Flags
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--agent` | `-a` | `localhost:8080` | Agent HTTP API address (host:port or http(s):// URL) |
-| `--token` | | | Bearer token for the agent HTTP API (or set `MUTI_METROO_TOKEN`) |
-| `--timeout` | `-t` | `5m` | Transfer timeout (e.g., 30s, 5m, 1h) |
-| `--rate-limit` | | | Max transfer speed (e.g., 100KB, 1MB, 10MiB) |
-| `--resume` | | `false` | Resume interrupted transfer if possible |
-| `--quiet` | `-q` | `false` | Suppress progress output |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-a`, `--agent` | `localhost:8080` | Gateway agent HTTP API address, as `host:port` or a URL. See [Agent address](overview.md#agent-address). |
+| `-w`, `--timeout` | `5m` | Maximum time for the whole transfer, as a Go duration (`30s`, `1h`) or plain seconds. Set it higher for large files on slow links. |
+| `--rate-limit` | none | Maximum transfer speed, such as `100KB`, `1MB`, or `10MiB`. `KB` and `MB` are powers of 1000; `KiB` and `MiB` are powers of 1024. |
+| `--resume` | `false` | Continue an interrupted file download from the existing `.partial` file. Not supported for directories. |
+| `-q`, `--quiet` | `false` | Do not print progress. |
 
-Like `muti-metroo upload`, downloads are authorized by the mesh management signing key. See [Authentication](/security/authentication).
+`-t` is a deprecated alias for `--timeout`; it still works but prints a warning to stderr. See [Deprecated commands and flags](overview.md#deprecated-commands-and-flags).
+
+### Output
+
+```bash
+muti-metroo download abc123de /var/log/app.log ./app.log
+```
+
+```text
+Downloading abc123def456:/var/log/app.log to /home/user/app.log
+Downloading...
+Downloaded 3.0 MB to /home/user/app.log in 0.4s (7.5 MB/s)
+```
+
+A directory download prints `Downloading... OK` followed by `Extracted directory to <path> in <seconds>s`. A resumed download prints `Resuming from offset <bytes> (of <total>)` and reports how much was added.
 
 ### Examples
 
 ```bash
-# Download file
-muti-metroo download abc123 /etc/config.yaml ./config.yaml
+# Download a file
+muti-metroo download abc123de /etc/app/config.yaml ./config.yaml
 
-# Download directory
-muti-metroo download abc123 /var/log/app ./logs
+# Download a directory
+muti-metroo download abc123de /var/log/app ./app-logs
 
-# Rate-limited download (1 MB/s)
-muti-metroo download --rate-limit 1MB abc123 /data/backup.tar.gz ./backup.tar.gz
+# Limit to 1 MB/s
+muti-metroo download --rate-limit 1MB abc123de /data/backup.tar.gz ./backup.tar.gz
 
-# Resume interrupted download
-muti-metroo download --resume abc123 /data/large.iso ./large.iso
-
-# Combine rate limit and resume
-muti-metroo download --rate-limit 500KB --resume abc123 /data/huge.iso ./huge.iso
+# Continue an interrupted download, allowing up to two hours
+muti-metroo download --resume -w 2h abc123de /data/large.iso ./large.iso
 ```
 
-## Implementation Notes
+## Exit status
 
-- Directories are automatically tar/gzip compressed
-- File permissions are preserved
-- Streaming transfer (no size limits)
-- Remote paths beginning with `~`, `~/`, or `~\` (Windows) are expanded to the agent user's home directory before path-allowlist checks. The expansion is server-side, so the same shorthand works for upload, download, and the `/agents/{id}/file/browse` API.
-
-:::tip Agent ID Prefix
-You can use a short agent ID prefix (e.g., `abc123`) instead of the full 32-character ID. The prefix is automatically resolved to the full agent ID.
-:::
+Both commands exit 0 when the transfer completes and 1 on any failure, including `remote path must be absolute`, a path outside `allowed_paths`, a file over the size limit, an unreachable gateway, or a transfer that exceeds `--timeout`. A missing or extra argument exits 2. See [Exit codes](overview.md#exit-codes).
 
 ## See Also
 
-- [File Transfer Feature](/features/file-transfer) - Detailed documentation
+- [File transfer](../features/file-transfer.md): how transfers work and how to restrict them
+- [File transfer configuration](../configuration/file-transfer.md): `enabled`, `allowed_paths`, and `max_file_size`
+- [File transfer HTTP API](../api/file-transfer.md): the endpoints these commands use, including directory browsing
+- [Authentication](../security/authentication.md): the signing keys that authorize transfers
+- [shell](shell.md): run commands on a remote agent

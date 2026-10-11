@@ -1,5 +1,6 @@
 ---
 title: Routing
+description: How exit routes propagate through a Muti Metroo mesh, how an ingress agent picks a route for each destination, and when routes expire.
 sidebar_position: 4
 ---
 
@@ -9,45 +10,24 @@ sidebar_position: 4
 
 # Routing
 
-When you connect to a destination, your traffic automatically finds its way to the right exit. You don't configure paths manually - exit agents advertise what they can reach, and the mesh figures out how to get there.
+You do not configure paths through the mesh. Exit agents advertise what they can reach, the advertisements spread to every connected agent, and each ingress agent picks the matching route when a client connects.
 
-**How it works in practice:**
+For example:
 
-- Exit agent inside corporate network advertises `10.0.0.0/8`
-- Exit agent in the cloud advertises `0.0.0.0/0` (everything else)
-- You connect to `10.1.2.3` - traffic goes to corporate exit
-- You connect to `8.8.8.8` - traffic goes to cloud exit
+- An exit agent inside a corporate network advertises `10.0.0.0/8`.
+- An exit agent in the cloud advertises `0.0.0.0/0`.
+- A client connecting to `10.1.2.3` goes through the corporate exit, because `/8` is more specific than `/0`.
+- A client connecting to `8.8.8.8` goes through the cloud exit, the only route that matches.
 
-## Route Propagation
+## Route types
 
-Routes spread through the mesh using flood-based advertising. Each exit announces its routes, and agents pass them along to their peers:
+| Type | Matches | Example | Where DNS is resolved | Configured with |
+| ---- | ------- | ------- | --------------------- | --------------- |
+| **CIDR** | IPv4 and IPv6 addresses | `10.0.0.0/8` | At the ingress agent | `exit.routes`, `muti-metroo route add` |
+| **Domain** | Host names | `*.internal.example.com` | At the exit agent | `exit.domain_routes` |
+| **Forward** | Port forward keys | `web-server` | Not applicable | `forward.endpoints`, `muti-metroo forward endpoint add` |
 
-```mermaid
-sequenceDiagram
-    participant Exit as Exit Agent<br/>(advertises 10.0.0.0/8)
-    participant Transit as Transit Agent
-    participant Ingress as Ingress Agent
-
-    Exit->>Transit: Route: 10.0.0.0/8, metric=0
-    Note over Transit: Stores route (metric=1)<br/>Forwards original advertisement
-    Transit->>Ingress: Route: 10.0.0.0/8, metric=0
-    Note over Ingress: Stores route (metric=1)<br/>Now knows how to reach 10.0.0.0/8
-```
-
-**Key properties:**
-
-- Routes include a **metric** (hop count) that each agent increments when storing locally
-- Routes have a **TTL** and expire if not refreshed
-- Loop prevention ensures routes don't circulate indefinitely
-
-## Route Types
-
-Muti Metroo supports two types of traffic routes for SOCKS5 proxy connections:
-
-| Type       | Matches      | Example           | DNS Resolution   |
-| ---------- | ------------ | ----------------- | ---------------- |
-| **CIDR**   | IP addresses | `10.0.0.0/8`      | At ingress agent |
-| **Domain** | Domain names | `*.internal.corp` | At exit agent    |
+Domain routes let an exit resolve names that only its own network's DNS knows about. They only apply when the client sends the host name to the proxy instead of an IP address: use `socks5h://` rather than `socks5://` with curl, or SOCKS4a rather than SOCKS4.
 
 ```mermaid
 flowchart LR
@@ -56,115 +36,136 @@ flowchart LR
     end
 
     subgraph Exit1[Exit: Corporate]
-        R1["10.0.0.0/8<br/>*.internal.corp"]
+        R1["10.0.0.0/8<br/>*.internal.example.com"]
     end
 
     subgraph Exit2[Exit: Cloud]
         R2["0.0.0.0/0"]
     end
 
-    Client -->|"api.internal.corp"| Ingress
-    Ingress -->|Domain Route| Exit1
+    Client -->|"api.internal.example.com"| Ingress
+    Ingress -->|Domain route| Exit1
 
     Client2[Client] -->|"8.8.8.8"| Ingress
-    DNS -->|CIDR Route| Exit2
+    DNS -->|CIDR route| Exit2
 ```
 
-## Agent Reachability
+Every agent is also reachable by its agent ID for management operations (shell, file transfer, ping, and status queries), whether or not it advertises any routes. Agents announce their presence automatically when they join the mesh; no configuration is needed.
 
-Every agent in the mesh is automatically reachable by its ID, regardless of whether it has exit routes configured. This is separate from CIDR and domain traffic routing above.
+## Route propagation
 
-Management operations use agent presence for routing:
+Each exit agent sends its routes to its peers, and every agent passes the advertisement on to its own peers. An agent does not send an advertisement back to an agent that has already seen it, so advertisements do not loop.
 
-- **Management commands** - execute commands on any agent
-- **File transfer** - upload/download files to any agent
-- **ICMP ping** - send ping requests from any agent
-- **Status queries** - check health and routes on any agent
+```mermaid
+sequenceDiagram
+    participant Exit as Exit Agent<br/>(advertises 10.0.0.0/8)
+    participant Transit as Transit Agent
+    participant Ingress as Ingress Agent
 
-No configuration is needed -- agents advertise their presence automatically when they join the mesh.
+    Exit->>Transit: Route: 10.0.0.0/8
+    Note over Transit: Stores route via Exit
+    Transit->>Ingress: Route: 10.0.0.0/8
+    Note over Ingress: Stores route via Transit<br/>(path: Transit, Exit)
+```
 
-## Route Selection
+Exits re-send their routes every `routing.advertise_interval` (default `2m`), and immediately when a route is added or removed at runtime. To push the current routes right away:
 
-### Priority Order
+```bash
+curl -X POST http://localhost:8080/routes/advertise
+```
 
-For domain-based requests (connecting to a hostname):
+See [Routing configuration](/configuration/routing) for the interval and TTL settings.
 
-1. **Domain routes** are checked first
-2. If no domain route matches, DNS resolution happens at the ingress
-3. **CIDR routes** are then used based on the resolved IP
+## Route selection
 
-For IP-based requests (connecting to an IP address):
+### Order of checks
 
-1. **CIDR routes** are used directly
+When a client connects to a **host name**:
 
-### CIDR Route Matching (Longest Prefix)
+1. The ingress agent checks its **domain routes**. If one matches, the stream goes to that exit, and the exit resolves the name.
+2. Otherwise the ingress agent resolves the name itself (the [mesh host registry](/configuration/hosts) first, then DNS) and continues with the resulting IP address.
 
-When multiple CIDR routes match a destination, the **most specific route wins**:
+When a client connects to an **IP address**, or after step 2, the ingress agent uses its **CIDR routes**.
 
-| CIDR       | Next Hop | Metric |
-| ---------- | -------- | ------ |
-| 1.2.3.4/32 | Agent A  | 3      |
-| 1.2.3.0/24 | Agent B  | 2      |
-| 0.0.0.0/0  | Agent C  | 1      |
+### CIDR matching
 
-| Destination | Winner  | Reason                       |
-| ----------- | ------- | ---------------------------- |
-| 1.2.3.4     | Agent A | /32 is most specific         |
-| 1.2.3.100   | Agent B | /24 is more specific than /0 |
-| 8.8.8.8     | Agent C | Only /0 matches              |
+The most specific matching prefix wins:
 
-If routes have the same prefix length, the one with the **lowest metric** (fewest hops) wins.
+| CIDR | Advertised by |
+| ---- | ------------- |
+| `192.0.2.4/32` | Agent A |
+| `192.0.2.0/24` | Agent B |
+| `0.0.0.0/0` | Agent C |
 
-### Domain Route Matching
+| Destination | Selected | Reason |
+| ----------- | -------- | ------ |
+| `192.0.2.4` | Agent A | `/32` is the most specific match |
+| `192.0.2.100` | Agent B | `/24` is more specific than `/0` |
+| `198.51.100.7` | Agent C | Only `/0` matches |
 
-Domain routes support two pattern types:
+When several routes have the same prefix length, the route with the lowest metric wins. If the metrics are also equal, the route from the agent with the lowest agent ID wins, so the choice is the same on every restart.
 
-| Pattern           | Matches           | Does NOT Match                   |
-| ----------------- | ----------------- | -------------------------------- |
-| `api.example.com` | `api.example.com` | `foo.example.com`                |
-| `*.example.com`   | `foo.example.com` | `example.com`, `a.b.example.com` |
+### Domain matching
 
-Wildcards use **single-level matching** only. If multiple agents advertise the same pattern, lowest metric wins.
+| Pattern | Matches | Does not match |
+| ------- | ------- | -------------- |
+| `api.example.com` | `api.example.com` | `www.example.com` |
+| `*.example.com` | `www.example.com` | `example.com`, `a.b.example.com` |
 
-## Route Expiration
+An exact pattern is checked before a wildcard. Wildcards match a single label only. When several exits advertise the same pattern, the lowest metric wins.
 
-Routes are not permanent. They expire if the advertising agent:
+### Route metrics
 
-- Goes offline
-- Stops refreshing the advertisement
-- Becomes unreachable through the mesh
+Each exit route has a base metric: the `metric` field of an entry in `exit.routes`, or `--metric` on `muti-metroo route add`. It defaults to `0`. Give a backup exit a higher metric than the primary exit for the same range to make the primary preferred.
 
-The mesh automatically removes stale routes, and traffic switches to alternative paths if available.
+To see which route an agent would use for a destination:
 
-When the advertising agent **explicitly removes** a dynamic route (`muti-metroo route remove`, `muti-metroo forward remove`, `muti-metroo forward endpoint remove`, or an expose session disconnect), it floods a per-route withdrawal so peers prune their tables immediately instead of waiting for `route_ttl` to elapse. The same path applies to CIDR, domain, and forward routes alike.
+```bash
+muti-metroo route trace 192.0.2.4
+```
 
-## Redundant Paths
+See [`route trace`](/cli/route) for the output.
 
-Multiple agents can advertise the same route for high availability:
+## Route expiration and withdrawal
+
+Routes are removed from an agent's table when:
+
+- **The peer they were learned through disconnects.** The agent drops every route learned over that connection immediately.
+- **The advertising agent stops refreshing them.** Routes not refreshed within `routing.route_ttl` (default `5m`) expire.
+- **The advertising agent removes them.** Removing a runtime route (`muti-metroo route remove`, `muti-metroo forward remove`, `muti-metroo forward endpoint remove`, or a disconnecting expose session) sends a withdrawal through the mesh, so other agents drop it at once instead of waiting for the TTL.
+
+When a route disappears, new connections use the next best matching route, if there is one. Connections already open over the removed path are not moved.
+
+## Redundant exits
+
+Several exits can advertise the same range:
 
 ```mermaid
 flowchart LR
     Ingress[Ingress] --> Transit[Transit]
-    Transit --> Exit1[Exit A<br/>10.0.0.0/8<br/>metric=1]
-    Transit --> Exit2[Exit B<br/>10.0.0.0/8<br/>metric=2]
+    Transit --> Exit1["Exit A<br/>10.0.0.0/8<br/>metric 0"]
+    Transit --> Exit2["Exit B<br/>10.0.0.0/8<br/>metric 10"]
 
     Exit1 -.->|Primary| Target[10.1.2.3]
     Exit2 -.->|Backup| Target
 ```
 
-- Both routes are stored
-- Traffic uses the route with the lowest metric
-- If one exit disconnects, traffic automatically switches to the other
+- Agents store both routes.
+- New connections use Exit A, which has the lower metric.
+- If Exit A disconnects, its route is removed and new connections use Exit B.
 
-## Best Practices
+See [High Availability](/deployment/high-availability) for complete examples.
 
-1. **Use specific routes**: Prefer `/24` over `/0` when possible for better control
-2. **Minimize default routes**: Only one exit should advertise `0.0.0.0/0` in most topologies
-3. **Match topology depth**: Set max hops to match your actual mesh depth
-4. **Consider route count**: More routes mean more memory at each agent
+## Recommendations
 
-## Next Steps
+- **Advertise specific ranges.** A `/24` gives more control than `/0`, and lets other exits serve other ranges.
+- **Keep default routes few.** In most meshes only one exit, or one primary and one backup, should advertise `0.0.0.0/0`.
+- **Set metrics deliberately** when more than one exit serves the same range.
 
-- [Streams](/concepts/streams) - How data flows through routes
-- [Exit Routing](/features/exit-routing) - Configure exit routes
-- [Configuration Reference](/configuration/overview) - Routing configuration options
+## See Also
+
+- [Exit Routing](/features/exit-routing): configure CIDR and domain routes on an exit
+- [Routing configuration](/configuration/routing): advertisement interval, route TTL, and related settings
+- [`route` command](/cli/route): add, remove, list, and trace routes at runtime
+- [Agent Roles](/concepts/agent-roles): which agents advertise routes and which use them
+- [Streams](/concepts/streams): what happens after a route is selected

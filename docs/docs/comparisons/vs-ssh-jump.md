@@ -1,5 +1,6 @@
 ---
 title: SSH Jump vs Muti Metroo
+description: How SSH jump hosts (ProxyJump) and a Muti Metroo mesh compare for reaching hosts across network boundaries, and when each fits.
 sidebar_position: 2
 ---
 
@@ -9,29 +10,29 @@ sidebar_position: 2
 
 # SSH Jump Hosts vs Muti Metroo
 
-SSH jump hosts (ProxyJump) and Muti Metroo both solve the problem of reaching hosts across network boundaries. This comparison helps you choose the right approach for your use case.
+SSH jump hosts (`ProxyJump`, `ssh -J`) and Muti Metroo both let you reach hosts that are not directly reachable from where you are. They take different approaches: SSH chains authenticated sessions through existing SSH servers, while Muti Metroo runs its own agents that form a mesh and route traffic between them. This page compares the two so you can choose.
 
-## Quick Comparison
+## Summary
 
-| Aspect | SSH Jump | Muti Metroo + Mutiauk |
-|--------|----------|----------------------|
-| **Setup** | SSH config + keys on each host | Agent deployment + YAML config |
-| **Protocol Support** | SSH only (TCP via port forwarding) | TCP, UDP, ICMP natively |
-| **Multi-hop** | ProxyJump chain (linear) | Native flood-based routing (any topology) |
-| **Authentication** | SSH keys or passwords | TLS certificates + optional mTLS |
-| **Encryption** | SSH encryption | TLS transport + E2E encryption |
-| **Application Support** | SSH-aware apps or explicit port forwards | Any app via SOCKS5 or TUN |
-| **Firewall Traversal** | Port 22 (often blocked) | HTTP/2, WebSocket (port 443) |
-| **Persistence** | Session-based | Always-on mesh |
-| **Root Required** | No | No (Mutiauk TUN: yes) |
-| **Dependencies** | OpenSSH on all hosts | Single binary, no dependencies |
-| **Platform Support** | Linux/macOS (Windows requires setup) | Linux, macOS, Windows natively |
+| Aspect | SSH jump hosts | Muti Metroo |
+| ------ | -------------- | ----------- |
+| **What runs on each hop** | An SSH server (OpenSSH `sshd`) | The `muti-metroo` agent, a single binary |
+| **Privileges on each hop** | An account on the host; installing `sshd` needs administrator rights | None; the agent runs as an unprivileged user |
+| **Topology** | A linear chain, given per connection | Any topology; routes propagate automatically |
+| **Traffic types** | TCP (port forwards, `ssh -D` SOCKS proxy) | TCP and UDP through the SOCKS5 proxy; ICMP echo through `muti-metroo ping` |
+| **Application access** | SSH-aware tools, explicit port forwards, or a SOCKS proxy | A SOCKS proxy, port forwards, or all traffic through [Mutiauk](/mutiauk) (which needs root or Administrator) |
+| **Authentication** | SSH keys or passwords, per hop and per user | TLS between agents (CA verification and mutual TLS optional), agent ID pinning, optional SOCKS username/password |
+| **Encryption** | SSH session encryption | TLS 1.3 on every peer link, plus end-to-end encryption between ingress and exit |
+| **Transports** | SSH over TCP, any port; through HTTP proxies with `ProxyCommand` | QUIC, HTTP/2, or WebSocket; WebSocket through HTTP proxies |
+| **Lifetime** | Per session; reconnect by hand or with tools such as `autossh` | Agents run continuously and reconnect on their own |
+| **Remote commands and file copy** | Built in (`ssh`, `scp`, `sftp`) | `muti-metroo shell`, `upload`, and `download`; disabled by default and require the management signing key |
+| **Platforms** | Clients everywhere; `sshd` is common on Linux and macOS and an optional feature on Windows | Linux, macOS, and Windows |
 
-## Architecture Comparison
+## How each one works
 
-### SSH Jump: Linear Chain
+### SSH jump hosts: a chain of sessions
 
-SSH jump hosts create a **linear chain** where each hop is a separate SSH connection:
+With `ProxyJump`, your SSH client connects to the first jump host, asks it to forward a TCP connection to the next host, and runs the next SSH session through that forwarded connection. Each hop is a separate SSH session with its own authentication, and the session to the final host is encrypted end to end through the jump hosts.
 
 ```mermaid
 flowchart LR
@@ -52,25 +53,20 @@ flowchart LR
     end
 
     Client -->|"SSH"| Jump1
-    Jump1 -->|"SSH"| Jump2
-    Jump2 -->|"SSH"| Target
+    Jump1 -->|"TCP forward"| Jump2
+    Jump2 -->|"TCP forward"| Target
 ```
 
-**How it works:**
-1. SSH client connects to Jump Host 1
-2. Jump Host 1 opens SSH connection to Jump Host 2
-3. Jump Host 2 opens SSH connection to Target
-4. Each hop requires SSH server running and credentials configured
+Every hop needs a running SSH server that allows TCP forwarding, and you need credentials for every hop.
 
-### Muti Metroo: Mesh Network
+### Muti Metroo: a mesh of agents
 
-Muti Metroo creates a **mesh network** where you configure peer connections in any topology and routes propagate automatically:
+Muti Metroo agents connect to each other as peers. Exit agents advertise the networks they can reach, the advertisements spread through the mesh, and an ingress agent sends each client connection to the matching exit. Transit agents relay the traffic without being able to decrypt it.
 
 ```mermaid
 flowchart LR
     subgraph Your Machine
         App[Application]
-        TUN[Mutiauk TUN]
     end
 
     subgraph Mesh Network
@@ -83,32 +79,21 @@ flowchart LR
         Target[Target Host]
     end
 
-    App --> TUN
-    TUN -->|"SOCKS5"| A
-    A <-->|"QUIC/HTTP/2/WS"| B
-    B <-->|"QUIC/HTTP/2/WS"| C
+    App -->|"SOCKS5"| A
+    A <-->|"QUIC, HTTP/2, or WS"| B
+    B <-->|"QUIC, HTTP/2, or WS"| C
     C --> Target
 ```
 
-**How it works:**
-1. Deploy agents on available hosts (no SSH server required)
-2. Configure peer connections between agents (any topology)
-3. Routes flood through connected peers automatically
-4. Traffic finds its path to the exit agent
+See [Architecture](/concepts/architecture) for details.
 
-## Multi-hop Configuration
+## Multi-hop configuration
 
-### SSH: ProxyJump Chain
+### SSH
 
-Configure multi-hop access in `~/.ssh/config`:
+In `~/.ssh/config`:
 
-```
-# Two-hop jump
-Host target-server
-    HostName 10.20.30.40
-    User admin
-    ProxyJump jump1,jump2
-
+```text
 Host jump1
     HostName jump1.example.com
     User jumpuser
@@ -117,70 +102,60 @@ Host jump2
     HostName 192.168.1.10
     User jumpuser
     ProxyJump jump1
+
+Host target-server
+    HostName 10.20.30.40
+    User admin
+    ProxyJump jump2
 ```
 
-Or use command line:
+Or on the command line:
 
 ```bash
-# Single jump
-ssh -J jump1.example.com admin@target
-
-# Multiple jumps
-ssh -J jump1.example.com,jump2.internal admin@target
+ssh -J jumpuser@jump1.example.com,jumpuser@192.168.1.10 admin@10.20.30.40
 ```
 
-**Requirements:**
-- SSH server on every hop
-- Credentials (keys/passwords) for each hop
-- Manual chain configuration for each target
+Each new target needs its own host entry or command line.
 
-**Windows limitation:** If any hop in the chain is a Windows machine, SSH jump becomes problematic. Windows does not include an SSH server by default - OpenSSH Server is an optional feature that must be manually installed and configured. In enterprise environments, this is often not permitted or available, breaking the SSH chain.
+### Muti Metroo
 
-### Muti Metroo: Automatic Routing
-
-Configure agents with peer connections:
+Each agent lists the peers it dials. The exit agent advertises the network:
 
 ```yaml
-# Agent B (transit) - connects to A and C
+# Agent B (transit): dials Agent C; Agent A dials Agent B
+listeners:
+  - transport: quic
+    address: "0.0.0.0:4433"
+
 peers:
-  - id: "agent-a-id..."
-    transport: quic
-    address: "agent-a.example.com:4433"
-  - id: "agent-c-id..."
+  - id: "auto"
     transport: quic
     address: "192.168.1.50:4433"
 ```
 
 ```yaml
-# Agent C (exit) - advertises routes
+# Agent C (exit)
+listeners:
+  - transport: quic
+    address: "0.0.0.0:4433"
+
 exit:
+  enabled: true
   routes:
     - "10.20.30.0/24"
 ```
 
-**That's it.** Routes propagate automatically. No per-target configuration needed.
+Every host in `10.20.30.0/24` is then reachable through Agent A's SOCKS proxy, with no per-target configuration:
 
 ```bash
-# Access any host in the advertised range
-curl --socks5 localhost:1080 http://10.20.30.40/
-
-# Or with Mutiauk for transparent access
-curl http://10.20.30.40/
+curl -x socks5h://localhost:1080 http://10.20.30.40/
 ```
 
-## Platform Considerations
+See [Your First Mesh](/getting-started/first-mesh) for a complete walkthrough.
 
-### SSH: The Windows Problem
+## Windows on the path
 
-SSH jump chains assume all intermediate hosts run an SSH server. This works well in Unix/Linux environments but creates significant challenges in mixed environments:
-
-**Windows machines typically lack SSH:**
-- OpenSSH Server is **not installed by default** on Windows
-- It's an optional Windows feature requiring admin privileges to enable
-- Many enterprise environments restrict or prohibit enabling SSH on Windows
-- Even when available, configuration differs from Unix (paths, permissions, shell)
-
-**Real-world scenario:**
+SSH jump chains need an SSH server on every intermediate host. On Windows, OpenSSH Server is an optional feature that an administrator must install, enable, and open in the firewall. Where that is not permitted, the chain cannot pass through that host.
 
 ```mermaid
 flowchart LR
@@ -189,11 +164,11 @@ flowchart LR
     end
 
     subgraph DMZ
-        Linux[Linux Server<br/>SSH OK]
+        Linux[Linux Server<br/>sshd running]
     end
 
     subgraph Internal
-        Windows[Windows Server<br/>No SSH]
+        Windows[Windows Server<br/>no sshd]
     end
 
     subgraph Target
@@ -201,35 +176,15 @@ flowchart LR
     end
 
     Client -->|SSH| Linux
-    Linux -.->|"SSH?"| Windows
-    Windows -.->|"???"| Final
-
-    style Windows fill:#ffcccc,stroke:#cc0000
+    Linux -.->|"no SSH server"| Windows
+    Windows -.-> Final
 ```
 
-If your path to a target network passes through a Windows machine, the SSH chain breaks. You would need to:
-1. Request admin access to install OpenSSH Server
-2. Configure the SSH service and firewall rules
-3. Set up authentication (keys or passwords)
-4. Hope IT security approves the change
+A Muti Metroo agent runs on Windows as an ordinary process, without administrator rights, and can dial out to other agents:
 
-### Muti Metroo: Cross-Platform by Design
-
-Muti Metroo agents run natively on Windows, Linux, and macOS without any additional dependencies:
-
-```bash
-# Same binary works everywhere
-# Linux
-./muti-metroo run -c config.yaml
-
-# Windows
+```powershell
 .\muti-metroo.exe run -c config.yaml
-
-# macOS
-./muti-metroo run -c config.yaml
 ```
-
-**Mixed environment example:**
 
 ```mermaid
 flowchart LR
@@ -252,305 +207,131 @@ flowchart LR
     App -->|SOCKS5| Linux
     Linux <-->|HTTP/2| Windows
     Windows --> Final
-
-    style Windows fill:#ccffcc,stroke:#00cc00
 ```
 
-No SSH server needed. The same agent binary runs on any platform, connecting via QUIC, HTTP/2, or WebSocket.
+## Traffic types
 
-## Protocol Support
+### SSH
 
-### SSH: TCP Only (via Port Forwarding)
-
-SSH natively handles SSH protocol only. For other protocols, you need explicit port forwards:
+OpenSSH forwards TCP:
 
 ```bash
-# Local port forward (TCP only)
-ssh -L 8080:internal-web:80 jump-host
+# Local port forward
+ssh -L 8080:10.20.30.40:80 admin@jump1.example.com
 
 # Dynamic SOCKS proxy
-ssh -D 1080 jump-host
-
-# Then use with SOCKS-aware tools
-curl --socks5 localhost:1080 http://internal-web/
+ssh -D 1080 admin@jump1.example.com
+curl -x socks5h://localhost:1080 http://10.20.30.40/
 ```
 
-**Limitations:**
-- No native UDP support
-- No ICMP (can't ping through SSH)
-- Each port forward must be configured explicitly
-- SOCKS proxy works but adds complexity
+The `ssh -D` SOCKS proxy handles TCP connections only. UDP and ICMP, for example DNS queries to an internal resolver or `ping`, are not forwarded.
 
-### Muti Metroo: Native TCP, UDP, ICMP
+### Muti Metroo
+
+The SOCKS5 proxy handles TCP connections and UDP (SOCKS5 UDP ASSOCIATE). ICMP echo is available from the CLI, through a chosen agent:
 
 ```bash
-# TCP - works via SOCKS5 or Mutiauk
-curl --socks5 localhost:1080 http://internal-web/
+# TCP through the SOCKS proxy
+curl -x socks5h://localhost:1080 http://10.20.30.40/
 
-# UDP - native via SOCKS5 UDP ASSOCIATE
-# DNS queries, game traffic, etc. work transparently
-
-# ICMP - ping through the mesh
-muti-metroo ping <exit-agent-id> 10.20.30.40
+# ICMP echo from the agent with the given ID
+muti-metroo ping a1b2c3d4e5f60718293a4b5c6d7e8f90 10.20.30.40
 ```
 
-With Mutiauk TUN, all protocols work transparently:
+With [Mutiauk](/mutiauk), which creates a TUN interface and needs root or Administrator, applications use the mesh without any proxy settings, including UDP and ICMP:
 
 ```bash
-sudo mutiauk daemon start
-
-# TCP
-curl http://internal-web/
-
-# UDP (DNS)
-dig @10.20.30.1 internal.corp
-
-# ICMP
+curl http://10.20.30.40/
+dig @10.20.30.1 internal.example.com
 ping 10.20.30.40
 ```
 
-## Application Integration
+See [UDP Relay](/features/udp-relay) and [ICMP Relay](/features/icmp-relay).
 
-### SSH: Manual Configuration Per-App
+## Firewalls and proxies
 
-**Option 1: SOCKS proxy**
-
-```bash
-# Start SOCKS proxy
-ssh -D 1080 -J jump1,jump2 target-network-host
-
-# Configure each application
-curl --socks5 localhost:1080 http://internal/
-export http_proxy=socks5://localhost:1080
-```
-
-**Option 2: Explicit port forwards**
+SSH runs on any TCP port, so an SSH server listening on 443 passes many firewalls that block 22. Through an HTTP proxy, SSH needs a `ProxyCommand`:
 
 ```bash
-# Forward specific ports
-ssh -L 8080:web-server:80 -L 5432:db-server:5432 jump-host
-
-# Access via localhost
-curl http://localhost:8080
-psql -h localhost -p 5432
+ssh -o ProxyCommand='nc -X connect -x proxy.example.com:8080 %h %p' admin@jump1.example.com
 ```
 
-**Option 3: SSH native (for SSH-aware tools)**
+Muti Metroo chooses a transport per link:
 
-```bash
-# Git over SSH
-git clone ssh://jump1/user@internal-git/repo.git
-
-# SCP
-scp -J jump1,jump2 file.txt target:/path/
-```
-
-### Muti Metroo: Universal Access
-
-**Option 1: SOCKS5 proxy (no root)**
-
-```bash
-# Any SOCKS5-aware application works
-curl --socks5 localhost:1080 http://internal/
-```
-
-**Option 2: Mutiauk TUN (transparent)**
-
-```bash
-sudo mutiauk daemon start
-
-# Every application works - no configuration
-curl http://internal/
-psql -h db-server.internal
-ping web-server.internal
-```
-
-## Firewall Traversal
-
-### SSH: Port 22 Challenges
-
-SSH typically requires port 22, which is often:
-- Blocked by corporate firewalls
-- Monitored and logged
-- Rate-limited or geo-blocked
-- Requires firewall exceptions
-
-**Workarounds exist but add complexity:**
-```bash
-# SSH over HTTPS port (if server configured)
-ssh -p 443 user@host
-
-# SSH over HTTP proxy
-ssh -o ProxyCommand='nc -X connect -x proxy:8080 %h %p' user@host
-```
-
-### Muti Metroo: Built-in Firewall Bypass
-
-Multiple transport options designed for restrictive networks:
-
-| Transport | Port | Firewall Behavior |
-|-----------|------|-------------------|
-| **QUIC** | 4433 (configurable) | May be blocked (UDP) |
-| **HTTP/2** | 443 | Looks like HTTPS traffic |
-| **WebSocket** | 443 | Works through HTTP proxies |
+| Transport | Runs over | Notes |
+| --------- | --------- | ----- |
+| QUIC | UDP | Any port; blocked where UDP is filtered |
+| HTTP/2 | TCP with TLS | Any port, commonly 443 |
+| WebSocket | TCP with TLS | Any port, commonly 443; can dial through an HTTP proxy and run behind a reverse proxy or CDN |
 
 ```yaml
-# Through corporate proxy
 peers:
-  - id: "relay-agent..."
+  - id: "auto"
     transport: ws
     address: "wss://relay.example.com:443/mesh"
-    proxy: "http://corporate-proxy:8080"
+    proxy: "http://proxy.example.com:8080"
 ```
 
-## Connection Persistence
+See [Transports](/concepts/transports).
 
-### SSH: Session-Based
+## Connection lifetime
 
-SSH connections are session-based:
-- Connection closes when you disconnect
-- Requires reconnection after network interruption
-- No automatic recovery
-- Must re-authenticate on each connection
+An SSH session ends when the network connection drops, and you reconnect and re-authenticate. Tools such as `autossh` (reconnects), `mosh` (roaming), and `tmux` or `screen` (session persistence) help.
 
-```bash
-# Connection lost = start over
-ssh -J jump1,jump2 target
-# Network blip...
-# Connection reset. Re-authenticate.
-ssh -J jump1,jump2 target
-```
-
-**Workarounds:**
-- `autossh` for automatic reconnection
-- `mosh` for mobile connections
-- `tmux`/`screen` for session persistence
-
-### Muti Metroo: Always-On Mesh
-
-Agents maintain persistent connections with automatic recovery:
-
-- Exponential backoff reconnection (1s to 60s)
-- Keepalive with configurable intervals
-- Route table survives reconnections
-- No re-authentication needed
-
-```yaml
-# Automatic reconnection built-in
-connections:
-  idle_threshold: 5m
-  timeout: 90s
-  keepalive_jitter: 0.2
-```
-
-Run as system service for true always-on:
+Muti Metroo agents keep their peer connections up and reconnect with exponential backoff (1s initial delay, up to 60s, with jitter, retrying indefinitely by default). A dropped link does not need operator action, although client connections that were using it are closed and must be reopened. Agents can run as a system service:
 
 ```bash
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
 ```
 
-## Security Comparison
+See [Peers configuration](/configuration/peers) for the reconnection settings and [System Service](/deployment/system-service) for service installation.
 
-### SSH Security Model
+## Security
 
-- **Authentication**: Public key or password
-- **Encryption**: SSH protocol (ChaCha20-Poly1305 or AES)
-- **Trust**: Each hop sees plaintext (can be mitigated with SSH tunneling inside SSH)
-- **Key management**: Distribute public keys to each host
+| | SSH jump hosts | Muti Metroo |
+| --- | --- | --- |
+| **Hop authentication** | SSH keys or passwords for each hop | TLS between agents. By default certificates are self-signed and not verified, and any agent that can reach a listener can connect; CA verification and mutual TLS restrict this. Peer entries can pin the expected agent ID. |
+| **Client authentication** | Each user authenticates to each hop | Optional SOCKS username/password on the ingress agent |
+| **Intermediate hops** | Jump hosts forward the encrypted inner session and cannot read it | Transit agents relay end-to-end encrypted streams and cannot read them |
+| **Where traffic leaves encryption** | The final SSH host (for `-L` and `-D`, traffic to the destination is unencrypted unless the application encrypts it) | The exit agent (traffic to the destination is unencrypted unless the application encrypts it) |
+| **Remote command execution** | Any authenticated user with a shell | Disabled by default; requires requests signed with the management signing key |
 
-### Muti Metroo Security Model
+See [Security Overview](/security/overview) and [TLS and mTLS](/security/tls-mtls).
 
-- **Authentication**: TLS certificates + optional mTLS
-- **Transport encryption**: TLS 1.3
-- **E2E encryption**: X25519 + ChaCha20-Poly1305
-- **Transit trust**: Transit agents cannot decrypt traffic
+## When to use SSH jump hosts
 
-```mermaid
-flowchart LR
-    subgraph E2E["End-to-End Encrypted"]
-        Client[Client]
-        Exit[Exit Agent]
-    end
-
-    Client -->|"TLS + E2E"| Transit[Transit Agent]
-    Transit -->|"TLS + E2E"| Exit
-
-    style Transit fill:#f9f9f9,stroke:#ccc
-```
-
-## When to Use SSH Jump
-
-SSH jump hosts excel when:
-
-- **Already have SSH access**: Jump hosts are already deployed and configured
-- **Simple linear topology**: A -> B -> C chain is sufficient
-- **SSH-native workflows**: Using git, scp, rsync over SSH
-- **Temporary access**: Quick one-off access to a remote host
-- **No additional software**: Can't deploy agents on intermediate hosts
-- **Homogeneous Unix/Linux environment**: All hosts in the chain run Linux/macOS with SSH servers available - no Windows machines in the path
-
-**Typical workflow:**
-```bash
-# Quick access through jump hosts
-ssh -J bastion.example.com admin@internal-server
-
-# Port forward for specific service
-ssh -L 5432:db.internal:5432 -J bastion admin@app-server
-psql -h localhost -p 5432
-```
-
-## When to Use Muti Metroo
-
-Muti Metroo excels when:
-
-- **Mixed OS environments**: Path includes Windows machines where SSH is unavailable
-- **Need UDP or ICMP**: DNS, VoIP, ping, game traffic
-- **Complex topologies**: Multiple sites, redundant paths, mesh networks
-- **Firewall traversal**: Port 22 blocked, need HTTP/2 or WebSocket
-- **Always-on connectivity**: Persistent access without session management
-- **Multiple users**: Team needs shared infrastructure access
-- **Any application**: Tools that don't support SOCKS or SSH
-- **Transit security**: Don't trust intermediate hosts with your traffic
-
-**Typical workflow:**
-```bash
-# Deploy agents (once)
-muti-metroo run -c config.yaml
-
-# Access everything transparently
-sudo mutiauk daemon start
-curl http://internal-api/
-ping internal-server
-dig @internal-dns internal.corp
-```
-
-## Hybrid Approach
-
-You can use both together. Access Muti Metroo agents via SSH for management while using the mesh for traffic:
+- SSH access to the hosts on the path already exists.
+- The path is a short, fixed chain.
+- You work with SSH-native tools such as `git`, `scp`, and `rsync`.
+- You need one-off access and do not want to deploy anything.
+- Every host on the path runs an SSH server you can use.
 
 ```bash
-# SSH to manage an agent
-ssh admin@agent-host
-
-# Traffic flows through the mesh
-curl --socks5 localhost:1080 http://internal/
+ssh -J admin@bastion.example.com admin@10.20.30.40
+ssh -L 5432:10.20.30.41:5432 -J admin@bastion.example.com admin@10.20.30.40
 ```
 
-Or use SSH as a transport for initial agent deployment in locked-down environments.
+## When to use Muti Metroo
 
-## Summary
+- A host on the path has no SSH server and you cannot install one, for example a Windows host.
+- You need UDP or ICMP, not only TCP.
+- The topology has several sites, branches, or redundant paths.
+- Outbound traffic must go through an HTTP proxy, or only HTTPS is allowed.
+- Access should stay up without a person keeping sessions open.
+- Intermediate hosts should not be able to read the traffic they relay.
 
-| Choose | When You Need |
-|--------|---------------|
-| **SSH Jump** | Quick access with existing SSH infrastructure, SSH-native tools, simple chains, Unix/Linux-only environments |
-| **Muti Metroo** | Mixed OS environments (Windows in path), UDP/ICMP support, complex topologies, firewall bypass, always-on mesh, E2E encryption |
+## Using both
 
-SSH jump hosts are the pragmatic choice when you already have SSH access across a homogeneous Unix/Linux environment. Muti Metroo provides a more capable solution for mixed OS environments, complex networking scenarios, protocol diversity, and persistent infrastructure connectivity.
+The two are not exclusive. You can use SSH to install and manage agents, and the mesh to carry traffic. SSH itself also runs through the mesh:
+
+```bash
+ssh -o ProxyCommand='nc -x localhost:1080 %h %p' admin@10.20.30.40
+```
 
 ## See Also
 
-- [Core Concepts - Architecture](/concepts/architecture) - How Muti Metroo works
-- [Mutiauk TUN Interface](/mutiauk) - Transparent routing with TUN
-- [Transports](/concepts/transports) - QUIC, HTTP/2, WebSocket options
-- [Security - E2E Encryption](/security/e2e-encryption) - How E2E encryption works
-- [Deployment - System Service](/deployment/system-service) - Always-on deployment
+- [Architecture](/concepts/architecture): how agents connect and relay traffic
+- [Transports](/concepts/transports): QUIC, HTTP/2, and WebSocket and when to use each
+- [Mutiauk](/mutiauk): route all traffic from a host through the mesh without proxy settings
+- [End-to-End Encryption](/security/e2e-encryption): what transit agents can and cannot see
+- [System Service](/deployment/system-service): run agents continuously

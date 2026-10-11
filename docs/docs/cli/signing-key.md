@@ -1,167 +1,136 @@
 ---
-title: signing-key
+title: muti-metroo signing-key
+sidebar_label: signing-key
+sidebar_position: 10
+description: Generate the Ed25519 signing keypair that authorizes privileged operations, and derive its public key.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-inspecting.png" alt="Mole managing signing keys" style={{maxWidth: '180px'}} />
 </div>
 
-# signing-key
+# muti-metroo signing-key
 
-Authenticate sleep/wake commands with Ed25519 signatures. Generate signing keypairs that let authorized operators control mesh hibernation while preventing unauthorized parties from putting your mesh to sleep.
+Generates and inspects the Ed25519 signing keypair. Privileged operations (remote shell, file transfer, dynamic configuration changes, and mesh-wide sleep and wake) are signed with the private key on the operator's agent and verified with the public key on the agent that carries them out. The agent that the CLI talks to must hold the private key even when the change targets that same agent. These commands themselves need no running agent.
 
-**What this protects:** Without signing keys, anyone who can reach an agent's HTTP API or connect to the mesh can trigger sleep/wake commands. With signing keys, only operators with the private key can issue valid commands.
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-**Quick setup:**
-```bash
-# Generate a keypair
-muti-metroo signing-key generate
+The public key is 32 bytes (64 hexadecimal characters) and goes in `management.signing_public_key` on every agent. The private key is 64 bytes (128 hexadecimal characters) and goes in `management.signing_private_key` only on the operator agents that issue privileged commands. This keypair is separate from the X25519 topology encryption keypair; see [muti-metroo management-key](management-key.md).
 
-# Add public key to ALL agents (they verify signatures)
-# Add private key ONLY to operator nodes (they sign commands)
-```
-
-## Subcommands
-
-### generate
-
-Generate a new Ed25519 signing keypair:
+## signing-key generate
 
 ```bash
-muti-metroo signing-key generate
+muti-metroo signing-key generate [flags]
 ```
 
-**Output:**
+Generates a new keypair. Without `--out`, both keys and ready-to-paste configuration snippets are printed to stdout, which leaves the private key in the terminal scrollback.
+
+With `--out <dir>`, the keys are written to `<dir>/signing-public.key` (mode `0644`) and `<dir>/signing-private.key` (mode `0600`), each as a single hex line, and only the public key is printed. The directory is created with mode `0700` if it does not exist. The command refuses to replace existing key files unless `--force` is given.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--out` | none | Directory to write the key files to. The private key is not printed. |
+| `--force` | `false` | Overwrite existing key files in the `--out` directory. |
+
+### Examples
+
+```bash
+muti-metroo signing-key generate --out ./keys
 ```
+
+```text
 === Signing Keypair Generated ===
+Public Key:   keys/signing-public.key (mode 0644)
+Private Key:  keys/signing-private.key (mode 0600)
 
-Public Key (add to ALL agent configs):
-  a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
+Public Key (also shown for convenience):
+  4efb61edf79ea6a46014e76988c88a27e32ed8eb22cf8d4b76c9fe662986cd68
 
-Private Key (add ONLY to operator configs - KEEP SECRET!):
-  e5f6a7b8c9d012345678901234567890123456789012345678901234567890efe5f6a7b8c9d012345678901234567890123456789012345678901234567890ef
-
-Configuration snippets:
-
-For ALL agents (verify signatures):
-  management:
-    signing_public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-
-For OPERATOR nodes only (sign commands):
-  management:
-    signing_public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
-    signing_private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890efe5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
+The private key is not echoed to stdout. Distribute it carefully.
 ```
 
-### public
+Without `--out`, the output has the same layout as [`management-key generate`](management-key.md#management-key-generate), with `signing_public_key` and `signing_private_key` in the configuration snippets.
 
-Derive public key from a private key:
+## signing-key public
 
 ```bash
-# Interactive (input hidden)
-muti-metroo signing-key public
-
-# With --private flag
-muti-metroo signing-key public --private "e5f6a7b8c9d0..."
+muti-metroo signing-key public [flags]
 ```
 
-:::note
-Piping via stdin (e.g., `echo "..." | muti-metroo signing-key public`) does not work -- the interactive prompt requires a terminal. Use the `--private` flag instead.
-:::
+Derives the public key from a private key, for example to recover a lost public key or to check that a public and private key belong together.
 
-**Output:**
+Without flags, the command prompts for the private key with input hidden; the prompt requires a terminal. With `--stdin`, it reads the private key from standard input, which accepts the file written by `generate --out`. Surrounding whitespace is ignored. The private key must decode to exactly 64 bytes.
+
+A hidden `--private <hex>` flag also accepts the key on the command line. It prints a warning to stderr, because the value is recorded in shell history and visible in the process list.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--stdin` | `false` | Read the private key from standard input instead of prompting. |
+
+### Examples
+
+```bash
+muti-metroo signing-key public --stdin < ./keys/signing-private.key
 ```
+
+```text
 Public Key:
-  a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd
+  4efb61edf79ea6a46014e76988c88a27e32ed8eb22cf8d4b76c9fe662986cd68
 ```
 
-## Usage Guide
+## Configuration
 
-### Initial Setup
+Every agent carries the public key:
 
-1. **Generate keypair** on a secure machine:
-   ```bash
-   muti-metroo signing-key generate
-   ```
-
-2. **Save the private key** securely (password manager, encrypted file)
-
-3. **Distribute public key** to all agents via config
-
-4. **Add private key** only to operator nodes that need to issue sleep/wake commands
-
-### Configuration
-
-**All agents** (verify signatures - cannot issue commands):
 ```yaml
 management:
-  signing_public_key: "a1b2c3d4..."
+  signing_public_key: "4efb61edf79ea6a46014e76988c88a27e32ed8eb22cf8d4b76c9fe662986cd68"
 ```
 
-**Operator nodes** (can sign and issue commands):
+Operator agents also carry the private key. Keep it out of the configuration file itself by reading it from the environment:
+
 ```yaml
 management:
-  signing_public_key: "a1b2c3d4..."
-  signing_private_key: "e5f6a7b8..."
+  signing_public_key: "4efb61edf79ea6a46014e76988c88a27e32ed8eb22cf8d4b76c9fe662986cd68"
+  signing_private_key: "${MUTI_METROO_SIGNING_PRIVATE_KEY}"
 ```
 
-### Security Model
+```bash
+export MUTI_METROO_SIGNING_PRIVATE_KEY="$(cat ./keys/signing-private.key)"
+```
 
-| Role | Has Public Key | Has Private Key | Can Issue Commands |
-|------|---------------|-----------------|-------------------|
-| Remote Agent | Yes | No | No |
-| Operator Node | Yes | Yes | Yes |
-| Agent without keys | No | No | Accepts all commands |
+The configuration validator rejects `signing_private_key` without `signing_public_key`.
 
-:::warning Backward Compatibility
-Agents without a `signing_public_key` configured will accept all sleep/wake commands, signed or unsigned. For full protection, deploy the public key to ALL agents in your mesh.
-:::
+## Agents without a signing public key
 
-### Key Differences from Management Keys
+What an agent does without `signing_public_key` depends on the operation:
 
-| Feature | Management Keys (X25519) | Signing Keys (Ed25519) |
-|---------|-------------------------|----------------------|
-| Purpose | Encrypt topology data | Sign sleep/wake commands |
-| Algorithm | X25519 (encryption) | Ed25519 (signatures) |
-| Public key size | 32 bytes (64 hex chars) | 32 bytes (64 hex chars) |
-| Private key size | 32 bytes (64 hex chars) | 64 bytes (128 hex chars) |
-| Config key | `public_key` / `private_key` | `signing_public_key` / `signing_private_key` |
+| Operation | Agent without `signing_public_key` |
+| --- | --- |
+| Shell, file transfer, dynamic configuration changes | Rejected. No operator can authorize them. |
+| Sleep and wake | Accepted unsigned, subject to the timestamp check below. |
 
-## How Signing Works
+Deploy the public key to every agent so that sleep and wake also require a signature.
 
-When an operator triggers sleep or wake:
-
-1. The command includes a timestamp (nanosecond precision)
-2. The operator's agent signs the command with the private key
-3. The signed command floods to all connected agents
-4. Each agent verifies the signature using the public key
-5. Commands with invalid signatures are rejected
-
-### Replay Protection
-
-Commands include a Unix timestamp. Agents reject commands with timestamps more than 5 minutes from the current time, preventing replay attacks.
+Signed requests carry a timestamp. Agents reject requests whose timestamp differs from their own clock by more than 5 minutes, which limits replay of captured commands, so keep agent clocks synchronized.
 
 ## Troubleshooting
 
-### Command Rejected
+When privileged operations are rejected:
 
-If sleep/wake commands are being rejected:
+- Check that the target agent's `signing_public_key` matches the public key derived from the operator's private key with `signing-key public`.
+- Check that the agent issuing the command has `signing_private_key` set.
+- Check that the clocks of both agents are within 5 minutes of each other.
+- Read the target agent's log for the verification error.
 
-- Verify all agents have the **same** `signing_public_key`
-- Verify the operator node has the matching `signing_private_key`
-- Check agent clocks are synchronized (within 5 minutes)
-- Review agent logs for signature verification errors
+## See Also
 
-### Mixed Deployment
-
-If some agents accept commands and others don't:
-
-- Agents without `signing_public_key` accept all commands
-- Deploy public key to all agents for consistent behavior
-
-## Related
-
-- [Sleep Mode](/features/sleep-mode) - Sleep mode overview
-- [Sleep Configuration](/configuration/sleep) - Configuration options
-- [Management Key](/cli/management-key) - Topology encryption keys
-- [Best Practices](/security/best-practices) - Security recommendations
+- [Management configuration](../configuration/management.md): the `management` section and the signing keys
+- [Authentication](../security/authentication.md): how signed operations are authorized across the mesh
+- [muti-metroo management-key](management-key.md): the separate keypair for topology encryption
+- [Sleep mode](../features/sleep-mode.md): mesh-wide sleep and wake, which the signing key protects
+- [Environment variables](../configuration/environment-variables.md): substitute secrets into the configuration

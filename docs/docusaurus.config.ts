@@ -66,6 +66,21 @@ const config: Config = {
     ],
   ],
 
+  plugins: [
+    [
+      "@docusaurus/plugin-client-redirects",
+      {
+        // Old URL -> new URL for pages that were merged, renamed, or moved.
+        redirects: [
+          { from: "/cli/peers", to: "/cli/peer" },
+          { from: "/cli/routes", to: "/cli/route" },
+          { from: "/deployment/pm2-apache", to: "/deployment/reverse-proxy" },
+          { from: "/api/routes", to: "/api/route-management" },
+        ],
+      },
+    ],
+  ],
+
   // Set the production url of your site here
   url: "https://mutimetroo.com",
   // Set the /<baseUrl>/ pathname under which your site is served
@@ -76,7 +91,8 @@ const config: Config = {
   organizationName: "postalsys", // GitHub organization
   projectName: "Muti-Metroo", // GitHub repo name
 
-  onBrokenLinks: "warn",
+  onBrokenLinks: "throw",
+  onBrokenAnchors: "throw",
   trailingSlash: true,
 
   // Even if you don't use internationalization, you can use this field to set

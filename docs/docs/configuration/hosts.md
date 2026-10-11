@@ -1,27 +1,28 @@
 ---
-title: Hosts
-sidebar_position: 11
+title: Mesh Hosts
+description: Configuration reference for mesh_hosts and mesh_hosts_suffixes, the per-agent registry of mesh-local host names that SOCKS clients and Mutiauk can resolve.
+sidebar_position: 9
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-wiring.png" alt="Mole configuring mesh hostnames" style={{maxWidth: '180px'}} />
 </div>
 
-# Mesh Hosts Configuration
+# Mesh Hosts
 
-Publish a registry of symbolic hostnames that resolve to in-mesh IPs (for example `target-11.mesh -> 10.8.0.11`). Each agent serves its own registry. Entries are consumed by two paths:
+The top-level `mesh_hosts` and `mesh_hosts_suffixes` keys define a registry of host names that map to addresses inside the mesh, for example `target-11.mesh` to `10.8.0.11`. Each agent keeps its own registry; it is not shared with other agents.
 
-- **The agent itself** — SOCKS5 dial and `POST /route/trace` consult the registry before falling through to system DNS, so SOCKS5 clients can address registered names even when no Mutiauk is running on the agent's host.
-- **Mutiauk** — the resolver pulls entries from `/api/dashboard` and serves them as authoritative DNS for the configured suffixes (default `.mesh`), so operators on hosts that run Mutiauk can address peers by name through any local tool.
+The registry is used in two places:
 
-The registry **does not install routes**. Names only translate to IPs - the underlying IP must already be reachable through Muti Metroo (a static `routes:` entry on Mutiauk, or an autoroute fetched from the agent).
+- **SOCKS ingress on this agent.** A registered name sent by a SOCKS client resolves to its configured address without asking the system resolver. Domain routes still take precedence; see [SOCKS hostname resolution](/configuration/socks5#hostname-resolution).
+- **Mutiauk.** Mutiauk reads the registry from the agent's `/api/dashboard` endpoint and answers DNS queries for the registered suffixes. See [Mutiauk mesh hostnames](/mutiauk#mesh-hostnames).
 
-For the runtime CLI and HTTP wrappers, see [host CLI](/cli/host) and [Hosts Management API](/api/hosts-management). The end-to-end consumer-side flow is covered in the [Mutiauk guide](/mutiauk#mesh-hostnames).
+The registry only translates names. The address must still be reachable through an exit route.
 
-## Quick Setup
+## Configuration
 
 ```yaml
-mesh_hosts_suffixes: ["mesh"]   # optional; default is ["mesh"]
+mesh_hosts_suffixes: ["mesh"]
 
 mesh_hosts:
   - name: gateway.mesh
@@ -32,102 +33,65 @@ mesh_hosts:
     comment: "edge worker"
 ```
 
-After `muti-metroo run`, the entries are immediately available via `GET /api/dashboard` and `muti-metroo host list`.
+## Keys
 
-## Configuration
+| Key                   | Type   | Default    | Description                                                                                                         |
+| --------------------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `mesh_hosts_suffixes` | list   | `["mesh"]` | DNS suffixes a host name may end with. An empty or omitted list means `["mesh"]`.                                   |
+| `mesh_hosts`          | list   | `[]`       | Host entries.                                                                                                       |
+| `mesh_hosts[].name`   | string | required   | Host name ending with `.` and one of the suffixes.                                                                  |
+| `mesh_hosts[].ipv4`   | string | `""`       | IPv4 address. At least one of `ipv4` and `ipv6` is required.                                                       |
+| `mesh_hosts[].ipv6`   | string | `""`       | IPv6 address. Set both for a dual-stack name.                                                                       |
+| `mesh_hosts[].comment`| string | `""`       | Free-text note shown by `muti-metroo host list`.                                                                    |
 
-```yaml
-mesh_hosts_suffixes: ["mesh"]   # one or more suffixes; each may be a single label (mesh) or multi-level (muti-metroo.alt)
+The singular `mesh_hosts_suffix` key from earlier releases is rejected by validation with a message to rename it to `mesh_hosts_suffixes`.
 
-mesh_hosts:
-  - name: <name>            # required, must equal or end with .<one of mesh_hosts_suffixes>
-    ipv4: <ipv4>             # at least one of ipv4 or ipv6 required
-    ipv6: <ipv6>
-    comment: <text>          # optional
-```
-
-### `mesh_hosts_suffixes`
-
-The set of DNS suffixes a host name may end with. Defaults to `["mesh"]` when omitted. A suffix can be a single label (`mesh`) or a multi-level domain (`muti-metroo.alt`, `lab.test.mesh`). Each dot-separated piece must be a valid RFC 1035 label (lowercase letters, digits, internal hyphens); the suffix itself must not have a leading or trailing dot. Duplicates are dropped; entries are lowercased on load.
-
-| Type | Default |
-|------|---------|
-| list of string | `["mesh"]` |
+## Suffixes
 
 ```yaml
-mesh_hosts_suffixes: ["mesh", "lan", "alt"]
+mesh_hosts_suffixes: ["mesh", "lab.example.com"]
 ```
 
-Mutiauk uses these suffixes to scope its resolver - on Linux with systemd-resolved, only `*.<suffix>` queries are forwarded to the in-mesh resolver, so the operator's normal upstream DNS stays untouched.
+A suffix is one DNS label (`mesh`) or several (`lab.example.com`). Each label must be a valid DNS label: letters, digits, and inner hyphens. A suffix must not start or end with a dot. Suffixes are lowercased, and duplicates are dropped.
 
-The active set can be changed at runtime via `muti-metroo host suffix add|remove|list` or `POST /hosts/suffixes/manage`. Runtime mutations are journalled and survive restart, including removal of suffixes that were originally seeded here. See [Runtime Suffix Management](#runtime-suffix-management) below.
+Mutiauk uses the suffixes to decide which queries it answers, so pick suffixes that do not collide with names your normal DNS serves.
 
-### `mesh_hosts`
+## Host names
 
-The static seed of mesh-local hostname entries. Each entry has the following fields:
+Names are lowercased when loaded and must:
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `name` | string | Yes | Hostname; must end with `.<one of mesh_hosts_suffixes>` (lowercased on load). Each label between dots must be a valid RFC 1035 label (a-z0-9, internal hyphens, 1-63 chars; 253 chars total). |
-| `ipv4` | string | One of `ipv4`/`ipv6` | IPv4 address. |
-| `ipv6` | string | One of `ipv4`/`ipv6` | IPv6 address. Set both for dual-stack. |
-| `comment` | string | No | Free-text comment, surfaced in `host list` output. |
+- end with `.` plus one of the suffixes (a name may also equal a multi-label suffix, but not a single-label one such as `mesh`),
+- consist of valid DNS labels,
+- be at most 253 characters long,
+- be unique within the file.
 
-Config entries are validated at startup; an invalid name or IP fails the agent boot with `mesh_hosts[N]: invalid host entry: ...`.
+`ipv4` must be an IPv4 address and `ipv6` an IPv6 address. An invalid entry fails validation:
 
-## Static vs Runtime Entries
-
-The store keeps two parallel sets:
-
-- **Config-seeded** (this file): immutable at runtime. They cannot be removed via `muti-metroo host remove` or the API; attempting to remove returns HTTP 403. Edit the config and restart to remove a static entry.
-- **Runtime** (added via `muti-metroo host add` or `POST /hosts/manage`): journalled to `agent.data_dir/dynamic-config.log` and replayed on restart, same mechanism used for dynamic routes / peers / forward listeners. See [Dynamic Config Persistence](/configuration/dynamic-config-persistence).
-
-Both sets are merged when a client lists hosts; the two are not flagged separately in the output - the distinction matters only when you try to remove.
-
-## Runtime Suffix Management
-
-The active TLD set can be edited without restarting the agent:
-
-```bash
-muti-metroo host suffix add alt        # widen the namespace
-muti-metroo host suffix list
-muti-metroo host suffix remove alt     # narrow it again
+```text
+mesh_hosts[0]: invalid host entry: name "gateway.lan" must equal or end with one of .mesh
 ```
 
-Removing a suffix that has any registered host (config-seeded or dynamic) returns HTTP 409 with the dependent hostnames; remove those first. Mutations land in the same journal as host add/remove events, so a runtime-added suffix and any host registered under it both replay cleanly on the next start.
+## Runtime entries
+
+Entries and suffixes can be added and removed on a running agent with [`muti-metroo host`](/cli/host) and [`muti-metroo host suffix`](/cli/host), or the `/hosts/manage` and `/hosts/suffixes/manage` HTTP endpoints. Runtime changes persist across restarts when `agent.data_dir` is set; see [Dynamic Config Persistence](/configuration/dynamic-config-persistence).
+
+- Entries from this file cannot be removed at runtime (HTTP 403).
+- A suffix from this file can be removed at runtime, and the removal persists.
+- A suffix that still has registered names cannot be removed (HTTP 409); remove the names first.
 
 ## Examples
 
-### IPv4-only registry
+### Dual-stack names under sub-labels
 
 ```yaml
-mesh_hosts_suffixes: ["mesh"]
-
-mesh_hosts:
-  - name: web-1.mesh
-    ipv4: 10.20.0.10
-  - name: web-2.mesh
-    ipv4: 10.20.0.11
-  - name: db.mesh
-    ipv4: 10.20.0.20
-    comment: "primary database"
-```
-
-### Dual-stack with sub-labels
-
-```yaml
-mesh_hosts_suffixes: ["mesh"]
-
 mesh_hosts:
   - name: gateway.eu.mesh
     ipv4: 10.50.0.1
-    ipv6: fd00:eu::1
+    ipv6: fd00:50::1
   - name: gateway.us.mesh
     ipv4: 10.51.0.1
-    ipv6: fd00:us::1
+    ipv6: fd00:51::1
 ```
-
-Sub-labels are allowed as long as each part is a valid RFC 1035 label.
 
 ### Custom suffix
 
@@ -139,32 +103,10 @@ mesh_hosts:
     ipv4: 10.10.0.1
 ```
 
-Use a custom suffix when `.mesh` collides with another local namespace. Operators consuming the registry must run Mutiauk with `dns.suffix: internal` to match.
+## See Also
 
-### Multiple namespaces
-
-```yaml
-mesh_hosts_suffixes: ["mesh", "lan", "alt"]
-
-mesh_hosts:
-  - name: gateway.mesh
-    ipv4: 10.0.0.1
-  - name: printer.lan
-    ipv4: 10.20.0.50
-  - name: console.alt
-    ipv4: 10.10.0.1
-```
-
-Each Mutiauk consumer picks one suffix to forward (`dns.suffix: lan`); start additional Mutiauk instances if you need more than one namespace served on the same host.
-
-## Verifying Reachability
-
-Verify both halves end-to-end with `mutiauk route trace <name>` from the consumer host - the trace output shows the resolution source (`(via mesh DNS)`) and the matching route. The IP a name resolves to must be reachable through Mutiauk already, either via a static `routes:` entry or via an autoroute fetched from this agent.
-
-## Related
-
-- [host CLI](/cli/host) - Runtime add / remove / list commands
-- [Hosts Management API](/api/hosts-management) - HTTP endpoint reference
-- [Mutiauk](/mutiauk#mesh-hostnames) - Consumer-side DNS resolver
-- [Dynamic Config Persistence](/configuration/dynamic-config-persistence) - Journal format and guarantees
-- [Dashboard API](/api/dashboard) - `mesh_hosts` exposure for Mutiauk's poller
+- [host CLI](/cli/host) to add, remove, and list names and suffixes at runtime
+- [Hosts Management API](/api/hosts-management) for the HTTP endpoints
+- [Mutiauk](/mutiauk#mesh-hostnames) for resolving registered names on a client host
+- [SOCKS Proxy](/configuration/socks5#hostname-resolution) for where the registry fits in SOCKS name resolution
+- [Dashboard API](/api/dashboard) for the `mesh_hosts` data Mutiauk reads

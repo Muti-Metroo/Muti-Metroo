@@ -1,5 +1,8 @@
 ---
-title: setup
+title: muti-metroo setup
+sidebar_label: setup
+sidebar_position: 4
+description: Create or edit an agent configuration with an interactive wizard, optionally embedding it in a binary and installing a service.
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -8,81 +11,65 @@ title: setup
 
 # muti-metroo setup
 
-Create a complete agent configuration through guided prompts. The wizard generates everything you need: config file, TLS certificates, and optionally installs as a system service.
+Build an agent configuration through interactive prompts. The wizard writes a config file or embeds the configuration in a binary, creates the agent identity, and on Linux, macOS, and Windows offers to install the agent as a system service. It needs an interactive terminal. For scripted builds, write the YAML yourself and use [`embed-config`](embed-config.md).
 
-**Best for:**
+Global flags (`--token`, `--yes`, `--no-color`) are described in [CLI overview](overview.md#global-flags).
 
-- First-time setup
-- Creating configs without memorizing YAML syntax
-- Single-file deployments with embedded config
+## Synopsis
 
 ```bash
-muti-metroo setup
-```
-
-## Usage
-
-```bash
-# New configuration
-muti-metroo setup
-
-# Edit embedded configuration in existing binary
-muti-metroo setup -c /path/to/embedded-binary
+muti-metroo setup [flags]
 ```
 
 ## Flags
 
-| Flag       | Short | Description                                        |
-| ---------- | ----- | -------------------------------------------------- |
-| `--config` | `-c`  | Path to config file or binary with embedded config |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-c`, `--config` | none | Path to a binary that has, or should receive, an embedded configuration. The wizard loads the binary's current embedded configuration as defaults and embeds the result back into that binary. DLL files are rejected. |
 
-:::warning Windows DLL Files
-DLL files cannot be used with `setup -c` for config embedding (UPX compression is incompatible). For DLL-based deployments, use a separate config file and specify its path when running via `rundll32.exe`.
-:::
+## Description
 
-## What It Does
+The wizard asks for the following, in order. Press Enter to accept the default shown in brackets.
 
-Guides you through 11 numbered steps:
+1. **Basic setup**: config file path, data directory, and display name. If a valid config file exists at the given path, its values become the defaults for every later question.
+2. **Agent role**: ingress, transit, and exit; several can be selected.
+3. **Inbound listener** (optional): transport, listen address, and, for HTTP/2 and WebSocket, path and plaintext mode for use behind a reverse proxy.
+4. **TLS**: self-signed certificates generated at startup, or strict verification against a CA.
+5. **Peer connections**, each with a connectivity test.
+6. **SOCKS5 proxy**, for the ingress role.
+7. **Exit routes**, for the exit role.
+8. **Monitoring and logging**: log level, HTTP API, and an optional API bearer token.
+9. **Management commands** (shell), skipped for transit-only agents.
+10. **File transfer**, skipped for transit-only agents.
+11. **Management and signing keys**.
 
-1. Basic configuration (config file, data directory, display name)
-2. Agent role selection (ingress, transit, exit - multi-select, transit is default)
-3. Network configuration (transport, listen address, reverse proxy option for HTTP/2 and WebSocket)
-4. TLS certificate setup (self-signed or strict CA verification)
-5. Peer connections (with connectivity testing)
-6. SOCKS5 configuration (if ingress role selected)
-7. Exit routes (if exit role selected)
-8. Monitoring & logging (log level, HTTP management API, API authentication)
-9. Management commands (skipped for transit-only, password optional)
-10. File transfer (skipped for transit-only, password optional)
-11. Management key encryption (topology privacy)
+The wizard then asks how to deliver the configuration:
 
-Then:
+- **Save to config file**: writes the YAML file and creates `agent_id`, `agent_key`, and `agent_key.pub` in the data directory.
+- **Embed in binary**: writes a copy of the running binary with the configuration and identity embedded, so no config file or data directory is needed, and also saves the YAML file as a backup. The new binary starts the agent when run with no arguments.
 
-- Configuration delivery (save to file or embed in binary)
-- Service installation (if root/admin, with update support for existing services)
+With `-c <binary>`, the wizard skips the config path and data directory questions and always embeds into that binary. An identity already embedded in the binary is kept.
 
-## Output
+Finally, on Linux, macOS, and Windows, the wizard offers to install or update the agent as a service. See [service](service.md) for what installation does on each platform.
 
-Generates complete `config.yaml` and optionally:
+## Examples
 
-- TLS certificates
-- Agent identity
-- Embedded binary (single-file deployment)
-- Systemd service file (Linux)
-- Windows Service registration (Windows)
-
-## Embedded Configuration
-
-The wizard can embed configuration directly into the binary for single-file deployments:
+Create a new configuration:
 
 ```bash
-# During setup, choose "Embed in binary" when prompted
 muti-metroo setup
+```
 
-# Edit existing embedded config
+Edit the configuration embedded in an existing binary:
+
+```bash
 muti-metroo setup -c /usr/local/bin/my-agent
 ```
 
-See [Embedded Configuration](/deployment/embedded-config) for details.
+## See Also
 
-See [Interactive Setup](/getting-started/interactive-setup) for detailed guide.
+- [Interactive setup](../getting-started/interactive-setup.md): walkthrough of each wizard step
+- [embed-config](embed-config.md): embed a prepared YAML file without prompts
+- [Embedded configuration](../deployment/embedded-config.md): how single-binary deployments work
+- [service](service.md): install, inspect, and remove the system service
+- [Configuration overview](../configuration/overview.md): every key the wizard can set

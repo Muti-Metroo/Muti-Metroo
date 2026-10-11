@@ -1,28 +1,16 @@
 ---
 title: Exit
-sidebar_position: 6
+description: Configuration reference for the exit section, covering CIDR routes with metric, comment, source IP, and interface, domain routes, and the exit DNS resolver.
+sidebar_position: 8
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-inspecting.png" alt="Mole configuring exit" style={{maxWidth: '180px'}} />
 </div>
 
-# Exit Configuration
+# Exit
 
-Control which networks this agent can reach. Exit nodes open real connections to destinations - define CIDR routes for IP-based access or domain routes for name-based routing.
-
-**Quick setup:**
-
-```yaml
-exit:
-  enabled: true
-  routes:
-    - "10.0.0.0/8" # Internal network access
-    - "0.0.0.0/0" # Or allow all destinations
-  dns:
-    servers:
-      - "8.8.8.8:53"
-```
+The `exit` section makes the agent an exit: it advertises the networks and domains it can reach, and opens the real TCP connections for streams that arrive for them. The advertised routes also act as the exit's allow list.
 
 ## Configuration
 
@@ -30,401 +18,151 @@ exit:
 exit:
   enabled: true
   routes:
-    - "10.0.0.0/8"
-    - "192.168.0.0/16"
-    - "0.0.0.0/0"
+    - "10.0.0.0/8"                  # Bare CIDR
+    - cidr: "192.168.0.0/16"        # Structured form
+      metric: 5
+      comment: "office LAN"
+      source_ip: "192.168.1.50"
+      interface: "ens192"
   domain_routes:
-    - "api.internal.corp"
-    - "*.example.com"
+    - "api.internal.example.com"    # Exact name
+    - "*.example.com"               # One label below example.com
   dns:
     servers:
-      - "8.8.8.8:53"
-      - "1.1.1.1:53"
+      - "10.0.0.1:53"
     timeout: 5s
 ```
 
-## Options
+## Keys
 
-| Option          | Type     | Default | Description                                                                            |
-| --------------- | -------- | ------- | -------------------------------------------------------------------------------------- |
-| `enabled`       | bool     | false   | Enable exit node                                                                       |
-| `routes`        | array    | []      | CIDR routes to advertise (bare string or `{cidr, metric, comment, source_ip}` mapping) |
-| `domain_routes` | array    | []      | Domain patterns to advertise                                                           |
-| `dns.servers`   | array    | []      | DNS servers for resolution                                                             |
-| `dns.timeout`   | duration | 5s      | DNS query timeout                                                                      |
+| Key                   | Type     | Default | Description                                                                                                                                 |
+| --------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`             | bool     | `false` | Run the exit handler that opens connections for `routes` and `domain_routes`. Set it whenever either list is non-empty.                    |
+| `routes`              | list     | `[]`    | CIDR routes. Each entry is a CIDR string or a mapping with the keys below.                                                                 |
+| `routes[].cidr`       | string   | required | IPv4 or IPv6 network in CIDR notation.                                                                                                    |
+| `routes[].metric`     | int      | `0`     | Base metric (0 to 65535). Each hop adds 1; lower wins among equally specific routes.                                                       |
+| `routes[].comment`    | string   | `""`    | Operator note. Advertised with the route and shown in `route list`, `route trace`, and the dashboard. Does not affect route selection.    |
+| `routes[].source_ip`  | string   | `""`    | Local address to bind outbound connections to. Must be the same address family as `cidr`. Not advertised.                                  |
+| `routes[].interface`  | string   | `""`    | Network interface for outbound connections. Not advertised. See [Egress interface](#egress-interface).                                    |
+| `domain_routes`       | list     | `[]`    | Domain patterns this exit resolves and connects to. See [Domain routes](#domain-routes).                                                   |
+| `dns.servers`         | list     | `[]`    | DNS servers (`host:port`) the exit uses for domain routes. Empty uses the system resolver.                                                 |
+| `dns.timeout`         | duration | `5s`    | Timeout for one name lookup.                                                                                                               |
+
+Outbound connections from the exit use a fixed 30-second connect timeout, close after [`connections.idle_threshold`](/configuration/connections) without traffic, and count toward [`limits.max_streams_total`](/configuration/limits).
 
 ## Routes
 
-Routes define which destinations this exit node can reach:
-
-```yaml
-exit:
-  routes:
-    - "10.0.0.0/8" # Private class A
-    - "172.16.0.0/12" # Private class B
-    - "192.168.0.0/16" # Private class C
-    - "0.0.0.0/0" # Default route (all IPv4 traffic)
-```
-
-### Route Types
-
-| Route            | Description                  |
-| ---------------- | ---------------------------- |
-| `10.0.0.0/8`     | Internal network             |
-| `192.168.1.0/24` | Specific subnet              |
-| `1.2.3.4/32`     | Single host                  |
-| `0.0.0.0/0`      | Default route (all IPv4)     |
-| `2001:db8::/32`  | IPv6 documentation prefix    |
-| `fd00::/8`       | IPv6 unique local addresses  |
-| `::1/128`        | IPv6 single host (localhost) |
-| `::/0`           | Default route (all IPv6)     |
-
-### IPv6 Routes
-
-Muti Metroo fully supports IPv6 routes. Use standard CIDR notation:
-
-```yaml
-exit:
-  routes:
-    # IPv4 routes
-    - "10.0.0.0/8"
-    - "0.0.0.0/0"
-    # IPv6 routes
-    - "2001:db8::/32" # Specific IPv6 prefix
-    - "fd00::/8" # Unique local addresses
-    - "::/0" # Default route (all IPv6)
-```
-
-For dual-stack environments, include both IPv4 and IPv6 default routes:
-
-```yaml
-exit:
-  routes:
-    - "0.0.0.0/0" # All IPv4 traffic
-    - "::/0" # All IPv6 traffic
-```
-
-### Route Selection
-
-When multiple exit nodes advertise overlapping routes:
-
-1. **Longest prefix wins**: `/32` beats `/24` beats `/0`
-2. **Lower metric wins**: Closer exit preferred
-
-Example:
-
-- Exit A advertises `10.0.0.0/8` (metric 1)
-- Exit B advertises `10.1.0.0/16` (metric 2)
-- Traffic to `10.1.2.3` goes to Exit B (longer prefix)
-- Traffic to `10.2.3.4` goes to Exit A
-
-### Route Comments
-
-Each route can carry an optional operator comment to record what the
-subnet is for. Both the legacy bare-string form and the structured
-mapping form are accepted in the same list:
-
-```yaml
-exit:
-  routes:
-    - "10.0.0.0/8" # legacy form, no comment
-    - cidr: "192.168.0.0/16"
-      comment: "office LAN"
-    - cidr: "0.0.0.0/0"
-      metric: 5
-      comment: "default route via this exit"
-```
-
-Comments are operator metadata: they show up in `muti-metroo route list`,
-the dashboard, and `muti-metroo route trace`, and are **propagated to peers**
-alongside the route advertisement so every agent's dashboard sees the
-same comment for a given prefix. They do not affect route selection,
-metric calculation, or LPM behaviour. Comments are capped at 255 bytes
-on the wire.
-
-The same comment field is also accepted on `POST /routes/manage` when
-adding a dynamic route, and the dedicated `set_comment` action edits
-the comment on either a config-seeded or dynamic route at runtime; see
-the [`route comment`](../cli/route.md#route-comment) CLI reference.
-`set_comment` triggers an immediate route re-advertisement so peers
-pick up the change without waiting for the periodic refresh interval.
-Runtime comment changes are journalled to `data_dir/dynamic-config.log`
-and survive agent restart, overriding the value from the config file.
-
-### Source IP Binding
-
-On a multi-homed exit, a route can pin its outbound dials to a specific
-local IP (equivalent to `curl --interface`). This is useful when
-upstream firewalls or quotas key off the source address:
-
-```yaml
-exit:
-  routes:
-    - cidr: "10.10.0.0/16"
-      source_ip: "192.168.1.50" # bind dials for this CIDR to .50
-    - cidr: "10.20.0.0/16"
-      source_ip: "192.168.1.60" # ...and these to .60
-```
-
-The address must already be bound on the exit host (an alias on an
-existing interface counts) and must match the CIDR's address family
-(v4 source for v4 CIDR, v6 for v6). On address-family mismatch the
-config fails to load. If the address is not locally bound at dial time
-the OS rejects the dial with `EADDRNOTAVAIL` and the client sees a
-normal connection-refused error.
-
-When several routes overlap (longest-prefix match), the source from the
-most specific matching route is applied. Routes without `source_ip`
-keep the default OS source-address selection.
-
-`source_ip` is a **local-only** field: unlike `comment` it is not
-propagated to other agents in route advertisements, because it is only
-meaningful on the exit host that owns the address. The same field is
-accepted on `POST /routes/manage` and as `--source-ip` on
-`muti-metroo route add` for dynamic routes; runtime values are journalled to
-`data_dir/dynamic-config.log` and restored on restart.
-
-To change the binding on an existing route (config-seeded or dynamic) without
-removing and re-adding, use the dedicated `set_source_ip` action: the CLI
-wrapper is `muti-metroo route source-ip <cidr> <ip>` (pass an empty string to
-clear). Like `set_comment`, the override is journalled and survives restart.
-
-### Egress Interface
-
-A route can also pin the egress network interface for its outbound dials.
-Set `interface:` to the NIC name:
-
-```yaml
-exit:
-  routes:
-    - cidr: "10.10.0.0/16"
-      interface: "ens192" # dial this CIDR out ens192
-```
-
-How the binding is applied depends on the source IP and the platform:
-
-- **No `source_ip`, or a `source_ip` already assigned to the interface** --
-  the exit binds the dial to an address on that interface
-  (`net.Dialer.LocalAddr`). This is portable and unprivileged: it works on
-  Linux, macOS, and Windows without root. The source _address_ is set; the
-  egress device then follows the host routing table, which is what you want on
-  a single-homed or normally-routed host.
-- **A `source_ip` that is _not_ assigned to the interface** -- e.g. a
-  floating/anycast address that lives on loopback while packets must leave via
-  `ens192`. This requires
-  `SO_BINDTODEVICE` + `IP_FREEBIND` and is therefore **Linux + root only**:
-
-  ```yaml
-  exit:
-    routes:
-      - cidr: "10.10.0.0/16"
-        source_ip: "192.0.2.10" # loopback-bound floating address
-        interface: "ens192" # force egress on ens192
-  ```
-
-  On macOS/Windows, or on Linux as a non-root user, an off-interface
-  `source_ip` paired with `interface:` is rejected with a clear error. The same
-  gate applies to `POST /routes/manage` (`action: "add"` or `"set_interface"`)
-  and to `muti-metroo route add --interface` / `muti-metroo route interface <cidr> <name>`.
-  On Linux + root the interface is always honored via `SO_BINDTODEVICE`,
-  whether or not the source is on it.
-
-Like `source_ip`, `interface` is **local-only** -- never advertised to other
-agents.
-
-## Domain Routes
-
-Domain routes allow routing based on domain names instead of IP addresses. When a SOCKS5 client requests a connection to a domain matching a domain route, the domain is passed to the exit node for DNS resolution instead of being resolved at the ingress.
-
-```yaml
-exit:
-  domain_routes:
-    - "api.internal.corp" # Exact match
-    - "*.example.com" # Wildcard match
-    - "*.prod.service.local" # Wildcard for specific subdomain
-```
-
-### Domain Pattern Types
-
-| Pattern             | Matches                              | Does NOT Match                           |
-| ------------------- | ------------------------------------ | ---------------------------------------- |
-| `api.example.com`   | `api.example.com`                    | `foo.api.example.com`                    |
-| `*.example.com`     | `foo.example.com`, `bar.example.com` | `example.com`, `a.b.example.com`         |
-| `*.api.example.com` | `foo.api.example.com`                | `api.example.com`, `a.b.api.example.com` |
-
-### Wildcard Matching
-
-Wildcards use **single-level matching** only:
-
-- `*.example.com` matches `foo.example.com` and `bar.example.com`
-- `*.example.com` does **NOT** match `a.b.example.com` (multi-level subdomain)
-- `*.example.com` does **NOT** match `example.com` (base domain)
-
-### Domain vs CIDR Priority
-
-When both domain and CIDR routes exist:
-
-1. **Domain routes are checked first** for domain-based requests
-2. If no domain route matches, DNS resolution happens at the ingress
-3. Then **CIDR routes** are used based on the resolved IP
-
-### Multiple Origins
-
-Multiple exit agents can advertise the same domain pattern. The route with the **lowest metric** (fewest hops) is selected.
-
-### Use Cases
-
-Domain routes are ideal for:
-
-- **Split-horizon DNS**: Internal domains resolved by internal DNS servers
-- **Private services**: Route `*.internal.corp` to an internal exit
-- **Geo-specific resolution**: Different DNS results based on exit location
-
-## DNS Configuration
-
-:::info DNS Resolution Behavior
-DNS resolution location depends on the route type:
-
-- **CIDR routes**: Domain names are resolved at the **ingress agent** using the system's DNS resolver. The exit node receives IP addresses.
-- **Domain routes**: Domain names are passed to the **exit node** for resolution. By default, the exit node uses the system resolver (which supports local domains like `.local`). You can optionally configure explicit DNS servers.
-  :::
-
-### Public DNS
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "8.8.8.8:53" # Google DNS (IPv4)
-      - "1.1.1.1:53" # Cloudflare DNS (IPv4)
-    timeout: 5s
-```
-
-### IPv6 DNS Servers
-
-IPv6 DNS servers are supported using bracket notation:
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "[2001:4860:4860::8888]:53" # Google DNS (IPv6)
-      - "[2606:4700:4700::1111]:53" # Cloudflare DNS (IPv6)
-    timeout: 5s
-```
-
-For dual-stack DNS resolution, include both IPv4 and IPv6 servers:
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "8.8.8.8:53" # Google DNS (IPv4)
-      - "[2001:4860:4860::8888]:53" # Google DNS (IPv6)
-    timeout: 5s
-```
-
-:::note DNS Resolution Preference
-When a domain resolves to both A (IPv4) and AAAA (IPv6) records, Muti Metroo prefers IPv4 addresses. If only AAAA records exist, IPv6 addresses are used.
-:::
-
-### Private DNS
-
-For internal domains:
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "10.0.0.1:53" # Internal DNS server (IPv4)
-    timeout: 5s
-```
-
-Or with IPv6:
-
-```yaml
-exit:
-  dns:
-    servers:
-      - "[fd00::1]:53" # Internal DNS server (IPv6)
-    timeout: 5s
-```
-
-### DNS-over-TLS (DoT)
-
-Not currently supported. Use standard DNS.
-
-### Default (System Resolver)
-
-The `dns` section is always optional. When omitted, the exit node uses the system resolver, which:
-
-- Resolves local domains (e.g., `printer.local`, `server.internal`)
-- Uses `/etc/hosts` entries
-- Respects system DNS configuration
-
 ```yaml
 exit:
   enabled: true
   routes:
     - "10.0.0.0/8"
-  domain_routes:
-    - "*.internal" # Resolved using system DNS
-  # dns section omitted - uses system resolver
+    - "0.0.0.0/0"
+    - "::/0"
 ```
 
-Configure explicit DNS servers only when you need to override system DNS (e.g., for public DNS or specific resolvers).
+Each route is advertised to the mesh. Ingress agents pick the route with the longest matching prefix, and among equally specific routes the lowest metric, which is the configured `metric` plus one per hop. See [Routing](/concepts/routing) for the full selection rules.
 
-## Access Control
+The exit only opens TCP connections to destinations inside its own routes. A route list without `0.0.0.0/0` or `::/0` therefore also restricts what clients can reach through this exit. The UDP and ICMP relays are configured separately in [`udp`](/configuration/udp) and [`icmp`](/configuration/icmp).
 
-Routes also serve as access control:
+Both entry forms can be mixed in one list. The bare form is shorthand for a mapping with only `cidr`.
+
+### Route comments
 
 ```yaml
 exit:
+  enabled: true
   routes:
-    - "10.0.0.0/8" # Only allow internal network
-    # No 0.0.0.0/0 = no internet access
+    - cidr: "192.168.0.0/16"
+      comment: "office LAN"
 ```
 
-Connections to non-matching destinations are rejected.
+Comments travel with the route advertisement, so every agent shows the same text for a prefix. Comments longer than 255 bytes are truncated in advertisements. [`muti-metroo route comment`](/cli/route) changes the comment of a configured route at runtime; the change persists across restarts when `agent.data_dir` is set and overrides this file.
+
+### Source IP binding
+
+```yaml
+exit:
+  enabled: true
+  routes:
+    - cidr: "10.10.0.0/16"
+      source_ip: "192.168.1.50"
+    - cidr: "10.20.0.0/16"
+      source_ip: "192.168.1.60"
+```
+
+On a host with several addresses, `source_ip` sets the local address for outbound connections to that route, like `curl --interface`. The address must be assigned to the exit host when connections are made; otherwise the connection fails. When routes overlap, the most specific matching route's `source_ip` applies. Routes without it use the operating system's normal source selection.
+
+A `source_ip` whose address family differs from `cidr` fails validation.
+
+### Egress interface
+
+```yaml
+exit:
+  enabled: true
+  routes:
+    - cidr: "10.10.0.0/16"
+      interface: "ens192"
+```
+
+`interface` selects the network interface for outbound connections to that route:
+
+- Without `source_ip`, or with a `source_ip` assigned to that interface, the exit binds to an address of the interface. This works on Linux, macOS, and Windows without extra privileges.
+- With a `source_ip` that is not assigned to the interface (for example an address on loopback that must leave through `ens192`), the exit binds to the device itself. This requires Linux and root. On other platforms, or on Linux without root, such a route fails validation.
+
+`muti-metroo route source-ip` and `muti-metroo route interface` change both settings at runtime; see [route CLI](/cli/route).
+
+## Domain routes
+
+```yaml
+exit:
+  enabled: true
+  domain_routes:
+    - "api.internal.example.com"
+    - "*.prod.example.com"
+```
+
+A domain route sends matching host names to this exit unresolved; the exit resolves them with its own DNS settings. Use domain routes for names that only resolve inside the exit's network. Host names that match no domain route are resolved by the ingress agent and routed by CIDR.
+
+| Pattern            | Matches                               | Does not match                          |
+| ------------------ | ------------------------------------- | --------------------------------------- |
+| `api.example.com`  | `api.example.com`                     | `v2.api.example.com`                    |
+| `*.example.com`    | `www.example.com`, `api.example.com`  | `example.com`, `a.b.example.com`        |
+
+A wildcard matches exactly one label. To cover a name and its subdomains, list each level. Patterns may contain letters, digits, hyphens, and dots, must contain at least one dot after any `*.` prefix, and cannot start or end with a dot. Matching is case-insensitive. When several exits advertise the same pattern, the lowest metric wins.
+
+## DNS
+
+```yaml
+exit:
+  dns:
+    servers:
+      - "10.0.0.1:53"
+      - "[fd00::1]:53"
+    timeout: 5s
+```
+
+`dns` applies to names the exit resolves for domain routes. With an empty `servers` list, the exit uses the host's system resolver, which includes `/etc/hosts` and local names such as `.local`. With servers configured, queries go over UDP to the first server that accepts a connection. Each server needs an explicit port.
+
+When a name has both IPv4 and IPv6 addresses, the exit connects to the IPv4 address. Resolved addresses are cached for 5 minutes.
+
+## Runtime management
+
+CIDR routes can be added and removed on a running agent with [`muti-metroo route`](/cli/route) or the `/routes/manage` HTTP endpoint, and persist across restarts when `agent.data_dir` is set. A route listed in this file cannot be removed at runtime, and adding a runtime route with the same CIDR is rejected. Domain routes are only configured here.
 
 ## Examples
 
-### Internet Gateway (IPv4)
-
-Allow all IPv4 traffic:
+### Internet exit
 
 ```yaml
 exit:
   enabled: true
   routes:
-    - "0.0.0.0/0" # All IPv4 traffic
-  dns:
-    servers:
-      - "8.8.8.8:53"
-      - "1.1.1.1:53"
-    timeout: 5s
+    - "0.0.0.0/0"
+    - "::/0"
 ```
 
-### Internet Gateway (Dual-Stack)
-
-Allow both IPv4 and IPv6 traffic:
-
-```yaml
-exit:
-  enabled: true
-  routes:
-    - "0.0.0.0/0" # All IPv4 traffic
-    - "::/0" # All IPv6 traffic
-  dns:
-    servers:
-      - "8.8.8.8:53" # Google DNS (IPv4)
-      - "[2001:4860:4860::8888]:53" # Google DNS (IPv6)
-    timeout: 5s
-```
-
-### Private Network Only
-
-Internal resources only:
+### Internal networks with internal DNS
 
 ```yaml
 exit:
@@ -432,175 +170,37 @@ exit:
   routes:
     - "10.0.0.0/8"
     - "192.168.0.0/16"
-  dns:
-    servers:
-      - "10.0.0.1:53" # Internal DNS
-    timeout: 5s
-```
-
-### Specific Service Access
-
-Only database and API servers:
-
-```yaml
-exit:
-  enabled: true
-  routes:
-    - "10.0.1.10/32" # Database server
-    - "10.0.1.20/32" # API server
+  domain_routes:
+    - "*.corp.example.com"
   dns:
     servers:
       - "10.0.0.1:53"
-    timeout: 5s
 ```
 
-### Split Horizon
-
-Different exits for different networks:
-
-**Exit A (internal network):**
+### Two exits with overlapping routes
 
 ```yaml
+# Exit A
 exit:
   enabled: true
   routes:
     - "10.0.0.0/8"
-  dns:
-    servers:
-      - "10.0.0.1:53"
 ```
 
-**Exit B (internet):**
-
 ```yaml
+# Exit B
 exit:
   enabled: true
   routes:
     - "0.0.0.0/0"
-  dns:
-    servers:
-      - "8.8.8.8:53"
 ```
 
-Traffic is routed:
+Traffic to `10.1.2.3` uses exit A (longer prefix); everything else uses exit B.
 
-- `10.x.x.x` → Exit A (longer prefix)
-- Everything else → Exit B (default route)
+## See Also
 
-### Domain-Based Routing
-
-Route specific domains to an internal exit node:
-
-```yaml
-exit:
-  enabled: true
-  routes:
-    - "10.0.0.0/8"
-  domain_routes:
-    - "api.internal.corp" # Exact match for API server
-    - "*.internal.corp" # All *.internal.corp subdomains
-    - "*.prod.mycompany.local" # Production services
-  dns:
-    servers:
-      - "10.0.0.1:53" # Internal DNS server
-    timeout: 5s
-```
-
-Traffic is routed:
-
-- `api.internal.corp` → This exit (exact domain match)
-- `foo.internal.corp` → This exit (wildcard match)
-- `bar.prod.mycompany.local` → This exit (wildcard match)
-- Domain not matching any pattern → DNS resolved at ingress, then CIDR routing
-
-## Route Advertisement
-
-Routes are advertised to the mesh:
-
-- **Automatically**: Every `routing.advertise_interval` (default 2m)
-- **Manually**: Via HTTP API
-
-### Trigger Immediate Advertisement
-
-```bash
-curl -X POST http://localhost:8080/routes/advertise
-```
-
-Use after:
-
-- Configuration changes
-- Network changes
-- Agent restart
-
-### Routing Configuration
-
-```yaml
-routing:
-  advertise_interval: 2m # How often to re-advertise
-  route_ttl: 5m # Route expiration time
-  max_hops: 16 # Maximum path length
-```
-
-## Troubleshooting
-
-### No Route Found
-
-```
-Error: no route to 1.2.3.4
-```
-
-- Check exit is enabled
-- Verify routes include destination
-- Check exit agent is connected to mesh
-
-### DNS Resolution Failed
-
-```
-Error: DNS lookup failed for example.com
-```
-
-DNS resolution location depends on route type:
-
-**For CIDR routes** (domain resolved at ingress):
-
-- Check DNS configuration on the ingress agent's host system
-- Verify the ingress host can resolve domains: `dig example.com`
-- Check `/etc/resolv.conf` on the ingress host
-
-**For domain routes** (domain resolved at exit):
-
-- Check `exit.dns.servers` configuration on the exit agent
-- Verify the exit host can reach the DNS servers
-- Test DNS resolution from the exit host: `dig @10.0.0.1 example.com`
-
-### Connection Refused
-
-```
-Error: connection refused to 10.0.0.5:22
-```
-
-- Verify destination is reachable from exit agent
-- Check firewall rules on exit host
-- Test directly: `nc -zv 10.0.0.5 22`
-
-### Access Denied
-
-```
-Error: destination not in allowed routes
-```
-
-- Add appropriate route to `exit.routes`
-- Use more permissive CIDR (e.g., `/8` instead of `/24`)
-
-## Security Considerations
-
-1. **Principle of least privilege**: Only advertise necessary routes
-2. **Avoid `0.0.0.0/0`** unless you need full internet access
-3. **Use internal DNS** for private networks
-4. **Consider network segmentation**: Different exits for different trust levels
-
-## Related
-
-- [Features: Exit Routing](/features/exit-routing) - Detailed usage
-- [Concepts: Routing](/concepts/routing) - How routing works
-- [Security: Access Control](/security/access-control) - Security best practices
+- [Exit Routing usage](/features/exit-routing) for end-to-end examples and troubleshooting
+- [Routing concepts](/concepts/routing) for route selection and propagation
+- [route CLI](/cli/route) to add, remove, comment, and bind routes at runtime
+- [Access Control](/security/access-control) for restricting what an exit can reach
+- [Routing](/configuration/routing) for advertisement interval and route expiry

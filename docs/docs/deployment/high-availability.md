@@ -1,6 +1,7 @@
 ---
 title: High Availability
-sidebar_position: 7
+description: Build redundant paths, exits, and ingress points into a Muti Metroo mesh, and understand how and how fast traffic moves when an agent fails.
+sidebar_position: 8
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
@@ -9,362 +10,208 @@ sidebar_position: 7
 
 # High Availability
 
-Stay connected when servers fail. With redundant paths, traffic automatically reroutes around problems - no manual intervention, no downtime.
+A mesh survives the loss of an agent when another path or another exit can carry the same traffic. This page describes how route selection reacts to failures, then shows the common redundancy patterns.
 
-**What happens when something fails:**
+## How failover works
 
-| If This Fails... | Traffic Automatically... |
-|------------------|--------------------------|
-| Transit agent | Reroutes through backup transit |
-| Exit agent | Switches to another exit advertising the same routes |
-| Network link | Uses alternate path if available |
-| Primary datacenter | Fails over to secondary region |
+Every exit agent advertises its routes periodically (`routing.advertise_interval`, default 2 minutes), and the advertisement floods through the mesh. Each agent keeps, for every route and every exit that advertises it, one path: the one with the lowest metric. Metric is the exit's configured route metric plus one per hop. When two paths have the same metric, the agent keeps the path whose advertisement arrived first.
 
-**How it works:**
-- Multiple routes to the same destination are learned
-- Routes expire when the path goes down (configurable TTL)
-- Traffic switches to the remaining routes
-- When the failed component recovers, traffic returns
+When an agent looks up a destination, it picks the most specific matching route, then the route with the lowest metric. Between routes with the same prefix and metric from different exits, no particular exit is guaranteed; give them different metrics to control which one is used.
 
-## Pattern 1: Redundant Transit
+When something fails:
 
-Multiple transit paths between ingress and exit.
+| Failure | What the agents do | Recovery time |
+|---------|--------------------|---------------|
+| A directly connected peer goes away | Routes learned through that peer are removed as soon as the connection is detected as closed. A path through another peer is learned from the exit's next advertisement. | Disconnect detection (up to `connections.timeout`, default 90 seconds) plus up to one `advertise_interval` |
+| An agent further away goes away | Its neighbors remove their routes, but agents beyond them are not told. They keep the stale route until it expires. | Up to `routing.route_ttl` (default 5 minutes) |
+| An exit goes away while another exit advertises the same CIDR | Once the stale route is removed or expires, the other exit's route is used. | As above, depending on whether the exit was a direct peer |
+| The failed agent comes back | It reconnects with exponential backoff and advertises again. A path with a lower metric replaces the current one when its advertisement arrives. | Reconnect delay plus up to one `advertise_interval` |
 
-### Architecture
+Streams that were running over the failed path are closed. Clients reconnect and their new connections use the new path.
+
+:::warning
+While an ingress agent has no route for a destination, it does not reject the connection. It connects to the destination directly from its own host. During a failover gap, SOCKS clients may therefore reach destinations from the ingress host's network instead of the exit's network, or fail if the ingress host cannot reach them.
+:::
+
+### Faster failover
+
+Shorter intervals make agents notice failures and learn new paths sooner, at the cost of more control traffic:
+
+```yaml
+routing:
+  advertise_interval: 30s
+  route_ttl: 90s
+
+connections:
+  idle_threshold: 30s
+  timeout: 45s
+```
+
+Keep `route_ttl` at least two or three times `advertise_interval`, so one lost advertisement does not expire a working route. After a failure, trigger an advertisement on the exit to spread the alternative path immediately:
+
+```bash
+curl -X POST http://localhost:8080/routes/advertise
+```
+
+See [Configuration - Routing](/configuration/routing) for the routing keys.
+
+## Pattern 1: Redundant transit
+
+The ingress agent peers with two transit agents, and both peer with the exit.
 
 ```mermaid
 flowchart LR
-    subgraph Ingress
-        I[Ingress Agent]
-    end
-
-    subgraph Transit
-        TP[Transit Primary]
-        TB[Transit Backup]
-    end
-
-    subgraph Exit
-        E[Exit Agent]
-    end
-
-    I --> TP
-    I --> TB
-    TP --> E
-    TB --> E
+    I[Ingress] --> T1[Transit 1]
+    I --> T2[Transit 2]
+    T1 --> E[Exit]
+    T2 --> E
 ```
 
-### Configuration
-
-**Ingress Agent:**
-
 ```yaml
-agent:
-  display_name: "Ingress"
-
+# Ingress agent
 peers:
-  # Primary transit
-  - id: "${PRIMARY_TRANSIT_ID}"
+  - id: "a1b2c3d4e5f60718293a4b5c6d7e8f90"
     transport: quic
-    address: "transit-primary.example.com:4433"
-    tls:
-      ca: "./certs/ca.crt"
-
-  # Backup transit
-  - id: "${BACKUP_TRANSIT_ID}"
+    address: "transit1.example.com:4433"
+  - id: "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
     transport: quic
-    address: "transit-backup.example.com:4433"
-    tls:
-      ca: "./certs/ca.crt"
+    address: "transit2.example.com:4433"
 
 socks5:
   enabled: true
   address: "127.0.0.1:1080"
 ```
 
-Both transits connect to the exit, which advertises routes. The ingress learns routes via both paths and prefers the one with lower hop count.
+Both paths have the same hop count, so the ingress uses whichever path delivered the exit's advertisement first. If that transit fails, the ingress drops the route and learns the path through the other transit on the next advertisement. There is no preferred transit; to prefer one, make the other path longer.
 
-### Failover Behavior
+## Pattern 2: Multiple exits
 
-1. Primary transit fails
-2. Routes via primary expire (TTL, default 5m)
-3. Only backup route remains
-4. Traffic flows through backup
-5. Primary recovers - routes re-advertise
-6. Traffic returns to primary (lower metric)
-
-### Faster Failover
-
-Reduce route TTL for faster detection:
-
-```yaml
-routing:
-  route_ttl: 1m              # 1 minute TTL
-  advertise_interval: 30s    # Advertise every 30s
-```
-
-## Pattern 2: Multiple Exits
-
-Multiple exit points for the same routes.
-
-### Architecture
+Two exits advertise the same CIDR.
 
 ```mermaid
 flowchart LR
-    I[Ingress Agent]
-
-    subgraph DC East
-        EA["Exit A<br/>10.0.0.0/8"]
-    end
-
-    subgraph DC West
-        EB["Exit B<br/>10.0.0.0/8"]
-    end
-
-    I --> EA
-    I --> EB
+    I[Ingress] --> EA["Exit A<br/>10.0.0.0/8"]
+    I --> EB["Exit B<br/>10.0.0.0/8"]
 ```
 
-### Configuration
-
-**Exit A:**
+Set a higher metric on the backup exit's route so the primary is always preferred while it is reachable:
 
 ```yaml
-agent:
-  display_name: "Exit A (DC East)"
-
+# Exit A (primary)
 exit:
   enabled: true
   routes:
     - "10.0.0.0/8"
-  dns:
-    servers:
-      - "10.0.0.1:53"
 ```
 
-**Exit B:**
-
 ```yaml
-agent:
-  display_name: "Exit B (DC West)"
-
+# Exit B (backup)
 exit:
   enabled: true
   routes:
-    - "10.0.0.0/8"
-  dns:
-    servers:
-      - "10.0.0.1:53"
+    - cidr: "10.0.0.0/8"
+      metric: 10
 ```
 
-The ingress learns the same route from both exits and uses the one with lower metric.
+Without a metric difference, the ingress picks the exit with fewer hops, and between exits at the same distance it may use either. Routes added at runtime with [`muti-metroo route add --metric`](/cli/route) accept a metric too.
 
-## Pattern 3: Geographic Redundancy
+Both exits must be able to reach the destination network, and exit-side DNS (`exit.dns`, used for domain routes) should resolve the same names on both.
 
-Agents in multiple regions for disaster recovery.
+## Pattern 3: Redundant ingress
 
-### Architecture
+Clients reach two ingress agents through DNS or a TCP load balancer. SOCKS connections are independent, so any ingress can serve any connection.
 
 ```mermaid
 flowchart TB
-    subgraph Region A
-        A1["Agent A1<br/>(Primary)"]
-        EA[Exit A]
-        EA2[Exit A']
-        A1 --> EA
-        A1 --> EA2
-    end
-
-    subgraph Region B
-        B1["Agent B1<br/>(Backup)"]
-        EB[Exit B]
-        EB2[Exit B']
-        B1 --> EB
-        B1 --> EB2
-    end
-
-    A1 <--> B1
-```
-
-### Cross-Region Peering
-
-```yaml
-# Agent A1 (Region A)
-agent:
-  display_name: "Region A Primary"
-
-peers:
-  # Local exit
-  - id: "${EXIT_A_ID}"
-    transport: quic
-    address: "exit-a.region-a.internal:4433"
-
-  # Cross-region peer
-  - id: "${AGENT_B1_ID}"
-    transport: quic
-    address: "agent-b1.region-b.example.com:4433"
-```
-
-## Pattern 4: Active-Active Ingress
-
-Multiple ingress points behind a load balancer.
-
-### Architecture
-
-```mermaid
-flowchart TB
-    LB["Load Balancer<br/>(DNS/L4)"]
-
-    subgraph Ingress Layer
-        I1[Ingress Agent 1]
-        I2[Ingress Agent 2]
-    end
-
-    E[Exit Agent]
-
-    LB --> I1
-    LB --> I2
-    I1 --> E
+    LB["DNS or TCP load balancer"] --> I1[Ingress 1]
+    LB --> I2[Ingress 2]
+    I1 --> E[Exit]
     I2 --> E
 ```
 
-### DNS Round-Robin
+DNS round robin:
 
+```text
+proxy.example.com.  300  IN  A  192.0.2.10
+proxy.example.com.  300  IN  A  192.0.2.11
 ```
-proxy.example.com.  300  IN  A  192.168.1.10  # Ingress 1
-proxy.example.com.  300  IN  A  192.168.1.11  # Ingress 2
-```
 
-### L4 Load Balancer
+HAProxy in TCP mode:
 
-HAProxy example:
-
-```
-frontend socks5
+```text
+frontend socks
     bind *:1080
     mode tcp
-    default_backend socks5_backends
+    default_backend socks_ingress
 
-backend socks5_backends
+backend socks_ingress
     mode tcp
     balance roundrobin
-    server ingress1 192.168.1.10:1080 check
-    server ingress2 192.168.1.11:1080 check
+    server ingress1 192.0.2.10:1080 check
+    server ingress2 192.0.2.11:1080 check
 ```
 
-## Monitoring for HA
+If SOCKS authentication is enabled, configure the same users on every ingress.
 
-### Health Checks
+## Pattern 4: Redundant sites
 
-```bash
-# Check each agent
-curl http://ingress1:8080/health
-curl http://ingress2:8080/health
-curl http://exit:8080/health
+Combine the patterns across regions: each region has its own ingress, transit, and exits, and the regions peer with each other. Routes from the other region carry more hops, so local exits win while they are reachable and the other region's exits take over when they are not.
 
-# Check peer connectivity
-curl http://ingress1:8080/healthz | jq '.peer_count'
-
-# Check routes
-curl http://ingress1:8080/healthz | jq '.route_count'
+```mermaid
+flowchart TB
+    subgraph RA[Region A]
+        A1[Agent A1] --> EA[Exit A]
+    end
+    subgraph RB[Region B]
+        B1[Agent B1] --> EB[Exit B]
+    end
+    A1 <--> B1
 ```
 
-### Key Indicators
+## Monitoring
 
-Monitor these for HA:
-
-| Indicator | Check Method | Alert Condition |
-|-----------|--------------|-----------------|
-| Peer count | `curl /healthz \| jq '.peer_count'` | < expected count |
-| Route count | `curl /healthz \| jq '.route_count'` | < expected count |
-| Health status | `curl /health` | Not "OK" |
-
-### External Monitoring
-
-Use external monitoring tools to check agent health:
+Check each agent's health endpoint and alert when peer or route counts drop below what the topology needs:
 
 ```bash
-#!/bin/bash
-# ha-check.sh - Run via cron or monitoring system
-AGENTS=("ingress1:8080" "ingress2:8080" "exit:8080")
+curl -s http://localhost:8080/healthz | jq '{peers: .peer_count, routes: .route_count}'
+```
 
-for agent in "${AGENTS[@]}"; do
-    if ! curl -sf "http://$agent/health" > /dev/null; then
-        echo "ALERT: Agent $agent is not healthy"
-        # Send alert to your monitoring system
-    fi
+```json
+{
+  "peers": 2,
+  "routes": 3
+}
+```
+
+```bash
+#!/bin/sh
+# Alert when an agent's API does not answer.
+for agent in ingress1.example.com:8080 ingress2.example.com:8080; do
+  curl -sf "http://$agent/health" > /dev/null || echo "ALERT: $agent is not healthy"
 done
 ```
 
-## Reconnection Tuning
+The HTTP API listens on the address in `http.address`; expose it only on networks your monitoring system uses. [`muti-metroo mesh-test`](/cli/mesh-test) checks reachability of every agent in the mesh from one place.
 
-Configure aggressive reconnection for faster recovery:
+## Test failover
 
-```yaml
-connections:
-  reconnect:
-    initial_delay: 500ms      # Start fast
-    max_delay: 30s            # Cap at 30s
-    multiplier: 1.5           # Slower backoff
-    jitter: 0.3               # 30% jitter
-    max_retries: 0            # Never give up
-```
-
-## Best Practices
-
-1. **Minimum two paths**: Always have redundant routes
-2. **Geographic diversity**: Spread agents across regions
-3. **Independent failure domains**: Different networks, power, etc.
-4. **Monitor everything**: Alerts before users notice
-5. **Test failover**: Regularly test by killing components
-6. **Document topology**: Know what depends on what
-
-## Testing Failover
-
-### Manual Testing
+Fail one component at a time and observe the routes on the ingress:
 
 ```bash
-# Kill a transit agent
-docker stop transit-primary
-
-# Verify traffic still flows
-curl -x socks5://localhost:1080 https://example.com
-
-# Check routes updated
-curl http://localhost:8080/healthz | jq '.route_count'
-
-# Bring transit back
-docker start transit-primary
-
-# Verify primary route restored
-sleep 120  # Wait for advertisement
-curl http://localhost:8080/healthz | jq '.route_count'
+muti-metroo route status
+muti-metroo route trace 10.0.0.5
 ```
 
-### Chaos Testing
-
-Test resilience with controlled failures:
+Then stop a transit or exit agent, wait for the recovery time from the table above, and run the same commands again. Confirm that a SOCKS request still succeeds:
 
 ```bash
-# Simulate network delay (Linux with tc)
-docker exec agent1 tc qdisc add dev eth0 root netem delay 100ms
-
-# Kill a random agent container
-docker kill $(docker ps -q --filter "name=agent" | shuf -n 1)
-
-# Verify mesh recovers
-sleep 30
-curl http://localhost:8080/healthz | jq '{peers: .peer_count, routes: .route_count}'
+curl -x socks5h://localhost:1080 http://10.0.0.5/
 ```
-
-For development, the codebase includes an internal chaos testing package (`internal/chaos`) for automated fault injection.
 
 ## See Also
 
-- [API - Health](/api/health) - Health check endpoints
-- [API - Routes](/api/routes) - Route advertisement API
-- [Docker Deployment](/deployment/docker) - Container-based HA testing
-
-## Next Steps
-
-- [Troubleshooting](/troubleshooting/connectivity) - Debug connectivity
-- [Deployment Scenarios](/deployment/scenarios) - More deployment patterns
+- [Routing](/concepts/routing) - Route advertisement and selection
+- [Configuration - Routing](/configuration/routing) - `advertise_interval`, `route_ttl`, and `max_hops`
+- [Configuration - Exit](/configuration/exit) - Route metrics on exit agents
+- [API - Health](/api/health) - `/health` and `/healthz` responses
+- [Deployment Scenarios](/deployment/scenarios) - Complete example topologies

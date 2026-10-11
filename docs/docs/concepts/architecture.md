@@ -1,5 +1,6 @@
 ---
 title: Architecture
+description: How Muti Metroo agents connect into a mesh, how traffic and routes flow between them, and how connection direction relates to traffic direction.
 sidebar_position: 1
 ---
 
@@ -7,211 +8,103 @@ sidebar_position: 1
   <img src="/img/mole-thinking.png" alt="Mole thinking about architecture" style={{maxWidth: '180px'}} />
 </div>
 
-# Architecture Overview
+# Architecture
 
-Muti Metroo lets you deploy tunneling agents anywhere - cloud servers, office networks, laptops behind firewalls - and connect them in any topology you choose. Once connected, routes propagate automatically through the mesh. No central coordinator, no root privileges required.
+A Muti Metroo mesh is a set of agents connected to each other by peer connections. Each agent is the same single binary running in userspace, without root privileges, kernel modules, or a TUN device. There is no central coordinator: once agents are connected, they exchange route advertisements and relay traffic for each other.
 
-**What the architecture enables:**
-- Deploy agents on any machine without admin access
-- Mix different transports (QUIC, HTTP/2, WebSocket) in the same mesh
-- Routes propagate automatically once peers are connected
-- Connections recover from failures without intervention
+## Building blocks
 
-## Design Principles
+| Term | Meaning |
+| ---- | ------- |
+| **Agent** | One running `muti-metroo` process with its own 128-bit agent ID, stored in its data directory. |
+| **Listener** | A transport endpoint (QUIC, HTTP/2, or WebSocket) on which an agent accepts peer connections. Configured under `listeners`. |
+| **Peer** | An outbound connection that an agent dials to another agent's listener. Configured under `peers`. |
+| **Peer connection** | The TLS-protected transport link between two agents, regardless of which side dialed. |
+| **Stream** | One client connection (for example a TCP connection made through the SOCKS proxy) carried across the mesh from ingress to exit. Many streams share each peer connection. See [Streams](/concepts/streams). |
+| **Route** | An advertisement that an agent can reach a CIDR range, a domain pattern, or a port forward key. See [Routing](/concepts/routing). |
+| **Role** | What an agent does with traffic: ingress, transit, or exit. See [Agent Roles](/concepts/agent-roles). |
 
-| Principle | What It Means For You |
-|-----------|----------------------|
-| **Userspace Operation** | Drop the binary anywhere and run it - no root, no kernel modules |
-| **Transport Agnostic** | Use QUIC for speed, WebSocket to punch through firewalls - your choice per connection |
-| **Multi-Hop Routing** | Traffic finds its way through the mesh - you don't manually configure paths |
-| **Resilient Connections** | Agents reconnect automatically when links go down |
-| **Resource Efficient** | Run on small VMs or containers with predictable memory usage |
+## What runs inside an agent
 
-## High-Level Architecture
+Which services an agent runs depends on its configuration:
 
-```mermaid
-flowchart TB
-    subgraph Agent[Muti Metroo Agent]
-        subgraph Services[Services Layer]
-            SOCKS5[SOCKS5 Server<br/>Ingress]
-            Exit[Exit Handler<br/>Exit]
-            HTTP[HTTP Server<br/>API/UI]
-        end
+| Service | Enabled by | Purpose |
+| ------- | ---------- | ------- |
+| SOCKS proxy | `socks5.enabled` | Accepts SOCKS4, SOCKS4a, and SOCKS5 clients and sends their connections into the mesh (ingress). |
+| Exit handler | `exit.enabled` | Advertises CIDR and domain routes and opens the real connections to destinations (exit). |
+| Port forwarding | `forward.listeners`, `forward.endpoints` | Exposes a service reachable from one agent on a local port of another. |
+| HTTP API | `http.enabled` | Health checks, dashboard and topology data, and the API that the CLI management commands use. |
+| Transport listeners | `listeners` | Accept inbound peer connections. |
+| Peer connections | `peers` | Dial other agents and reconnect when the link drops. |
 
-        subgraph Core[Agent Core]
-            Stream[Stream Manager]
-            Route[Route Manager]
-            Peer[Peer Manager]
-        end
+Every agent relays traffic and route advertisements for its peers, whatever else it is configured to do.
 
-        subgraph Protocol[Protocol Layer]
-            Encoder[Message Encoder]
-            Flood[Flood Routing]
-            Handshake[Handshake Handler]
-            Keepalive[Keepalive Handler]
-        end
+## Connection model
 
-        subgraph Transport[Transport Layer]
-            QUIC[QUIC]
-            H2[HTTP/2]
-            WS[WebSocket]
-        end
+Two things are easy to conflate: the direction in which a peer connection is established, and the direction in which traffic flows. They are independent.
 
-        SOCKS5 --> Core
-        Exit --> Core
-        HTTP --> Core
-        Core --> Protocol
-        Protocol --> Transport
-    end
-```
+### Peer connections and streams
 
-## Core Components
-
-### Agent Core
-
-The central orchestrator that:
-
-- Initializes and coordinates all subsystems
-- Dispatches incoming frames to appropriate handlers
-- Manages agent lifecycle (startup, shutdown, signals)
-- Maintains agent identity
-
-### Stream Manager
-
-Handles virtual streams:
-
-- Creates and tracks virtual streams between ingress and exit agents
-- Manages stream multiplexing over peer connections
-- Enforces resource limits (max streams, buffer sizes)
-- Handles stream lifecycle (open, data transfer, close)
-
-### Route Manager
-
-Manages the routing table:
-
-- Stores routes with longest-prefix match lookup
-- Tracks route metrics and next-hop peers
-- Handles route expiration (TTL)
-- Provides subscription API for route changes
-
-### Peer Manager
-
-Manages peer connections:
-
-- Initiates outbound connections (dialer)
-- Accepts inbound connections (listener)
-- Handles handshake and authentication
-- Manages keepalives and timeouts
-- Implements reconnection with backoff
-
-### Protocol Layer
-
-Handles communication between agents:
-
-- **Message Processing**: Encodes and decodes messages between peers
-- **Flood Routing**: Propagates route advertisements with loop prevention
-- **Handshake**: Establishes peer connections with identity verification
-- **Keepalive**: Monitors connection health and detects failures
-
-### Transport Layer
-
-Pluggable transport implementations:
-
-- **QUIC**: UDP-based, best performance, built-in TLS
-- **HTTP/2**: TCP-based, firewall-friendly, TLS required
-- **WebSocket**: Maximum compatibility, works through HTTP proxies
-
-## Connection Model
-
-Understanding the difference between transport connections and virtual streams is key to designing flexible mesh topologies.
-
-### Transport Connections vs. Virtual Streams
-
-**Transport connections** are the underlying network pipes between agents. When Agent B has Agent A configured as a `peer`, Agent B **dials** Agent A (who must have a `listener`):
+A **peer connection** is created when one agent dials another. If Agent B lists Agent A under `peers`, Agent B dials Agent A, and Agent A must have a matching entry under `listeners`:
 
 ```mermaid
 flowchart LR
-    B["Agent B<br/>(dialer)"] -->|Transport Connection| A["Agent A<br/>(listener)"]
+    B["Agent B<br/>(dialer)"] -->|Peer connection| A["Agent A<br/>(listener)"]
 ```
 
-**Virtual streams** are logical TCP tunnels created on top of transport connections. They represent actual data flows through the mesh.
+**Streams** are the individual client connections carried over peer connections. Once two agents are connected, either agent can open streams through the other, whichever side dialed.
 
-**Key insight**: The transport connection direction does NOT determine virtual stream direction. Once two agents are connected, **either agent can initiate virtual streams to the other**.
+### Bidirectional routing
 
-### Bidirectional Routing
-
-Consider this topology where Agent B dials Agent A:
+In this topology Agent B dials Agent A:
 
 ```mermaid
 flowchart RL
     subgraph B[Agent B]
-        B_SOCKS[SOCKS5 Ingress]
+        B_SOCKS[SOCKS Ingress]
         B_Exit[Exit: 192.168.0.0/16]
     end
     subgraph A[Agent A]
-        A_SOCKS[SOCKS5 Ingress]
+        A_SOCKS[SOCKS Ingress]
         A_Exit[Exit: 10.0.0.0/8]
     end
-    B -->|Transport Connection| A
+    B -->|Peer connection| A
 ```
 
-Even though B dialed A, virtual streams can flow **both directions**:
+Traffic flows in both directions over that single connection:
 
-- A SOCKS5 client on Agent A can tunnel to `192.168.0.0/16` via Agent B's exit
-- A SOCKS5 client on Agent B can tunnel to `10.0.0.0/8` via Agent A's exit
+- A SOCKS client of Agent A can reach `192.168.0.0/16` through Agent B's exit.
+- A SOCKS client of Agent B can reach `10.0.0.0/8` through Agent A's exit.
 
-The same capabilities exist if the connection is reversed (A dials B instead).
+Reversing the connection (Agent A dials Agent B) gives the same result.
 
-### Practical Implications
+### Practical implications
 
-1. **Connection direction is a deployment choice**: Choose based on network constraints (firewalls, NAT), not routing needs
-2. **Firewall-friendly topologies**: Place agents behind NAT/firewalls as dialers (`peers`), and public agents as listeners
-3. **Role flexibility**: An agent can simultaneously be a listener, an ingress, AND an exit
-4. **Routes propagate both ways**: Route advertisements flow through all peer connections regardless of who initiated the connection
+- **Choose connection direction by network constraints, not by traffic direction.** An agent behind NAT or a firewall that blocks inbound connections can dial out to a publicly reachable agent and still serve as an exit.
+- **An agent can have both listeners and peers.** It can accept connections from some agents and dial others.
+- **Route advertisements travel over every peer connection** regardless of which side dialed.
 
-:::tip Design Principle
-Think of transport connections as bidirectional pipes. Once connected, it doesn't matter which end opened the connection - data and routes flow freely in both directions.
-:::
+## Data flow
 
-## Data Flow
-
-### Client Request Flow
+When a client connects through the SOCKS proxy of an ingress agent:
 
 ```mermaid
 flowchart LR
-    subgraph Step1[1. Client Request]
-        Client[Client<br/>Browser]
-    end
-
-    subgraph Step2[2. Ingress Agent]
-        SOCKS5[SOCKS5 Server]
-        RouteTable[Route Table]
-        StreamMgr[Stream Manager]
-        PeerMgr[Peer Manager]
-    end
-
-    subgraph Step3[3. Transit]
-        Transit[Transit Agent]
-    end
-
-    subgraph Step4[4. Exit]
-        Exit[Exit Agent]
-    end
-
-    subgraph Step5[5. Destination]
-        Server[External Server]
-    end
-
-    Client -->|CONNECT| SOCKS5
-    SOCKS5 -->|Lookup| RouteTable
-    RouteTable -->|Open| StreamMgr
-    StreamMgr -->|Forward| PeerMgr
-    PeerMgr -->|Relay| Transit
-    Transit -->|Relay| Exit
-    Exit -->|TCP| Server
+    Client[Client] -->|SOCKS CONNECT| Ingress[Ingress agent]
+    Ingress -->|Route lookup,<br/>open stream| Transit[Transit agent]
+    Transit -->|Relay| Exit[Exit agent]
+    Exit -->|TCP| Server[Destination]
 ```
 
-### Route Advertisement Flow
+1. The ingress agent receives the SOCKS request and looks up a route for the destination (domain routes first, then CIDR routes).
+2. It opens a stream along the path to the exit agent that advertised the matching route.
+3. Transit agents relay the stream without being able to decrypt it.
+4. The exit agent checks the destination against its own routes and opens the real connection.
+5. Data flows in both directions until either side closes the connection.
+
+## Route advertisement flow
+
+Exit agents advertise their routes to their peers, and each agent passes the advertisement on to its other peers. Each agent stores the route with a metric one higher than the agent it learned it from:
 
 ```mermaid
 sequenceDiagram
@@ -219,48 +112,34 @@ sequenceDiagram
     participant Transit as Transit Agent
     participant Ingress as Ingress Agent
 
-    Exit->>Transit: Route advertisement (metric=0)
-    Note over Transit: Store route (metric=1)<br/>Forward original advertisement
-    Transit->>Ingress: Route advertisement (metric=0)
-    Note over Ingress: Store route (metric=1)<br/>Route now known
+    Exit->>Transit: Route advertisement
+    Note over Transit: Stores route, 1 hop away
+    Transit->>Ingress: Forwards advertisement
+    Note over Ingress: Stores route, 2 hops away
 ```
 
-## Memory Model
+See [Routing](/concepts/routing) for route selection and expiry.
 
-Each stream consumes a configurable buffer (default 256 KB) at each hop:
+## Security model
 
-```mermaid
-flowchart LR
-    Client[Client] <--> A[Agent A<br/>256 KB Buffer]
-    A <--> B[Agent B<br/>256 KB Buffer]
-    B <--> C[Agent C<br/>256 KB Buffer]
-    C <--> Server[Server]
-```
+| Layer | Protection |
+| ----- | ---------- |
+| Peer connections | TLS 1.3 on every transport. Certificates are self-signed and generated at startup unless you configure a CA; CA verification and mutual TLS are optional. |
+| Peer identity | A peer entry's `id` can pin the expected agent ID of the remote agent; `id: "auto"` accepts any agent. |
+| Stream payload | End-to-end encryption between ingress and exit with X25519 key exchange and ChaCha20-Poly1305. Transit agents cannot read the payload. |
+| SOCKS clients | Optional username/password authentication. |
+| HTTP API | Optional bearer token (`http.token_hash`). |
+| Privileged operations | Shell, file transfer, sleep/wake, and dynamic configuration changes require requests signed with the management signing key. |
+| Topology | Optional management key that encrypts node information, so only operators with the private key can read the mesh layout. |
 
-Total memory per stream = buffer_size x number_of_hops
-
-## Security Model
-
-- **Transport Security**: TLS 1.3 for all peer connections
-- **Mutual Authentication**: Optional mTLS with client certificates
-- **Certificate Pinning**: Validate expected peer Agent IDs
-- **Authentication**: SOCKS5 username/password; management signing key (Ed25519) for shell, file transfer, and privileged operations
+A WebSocket listener with `plaintext: true` has no TLS of its own and relies on a reverse proxy in front of it to terminate TLS.
 
 See [Security Overview](/security/overview) for details.
 
-## Performance Characteristics
+## See Also
 
-| Aspect | Characteristic |
-|--------|----------------|
-| **Latency** | +1-5ms per hop (LAN), +50-200ms per hop (WAN) |
-| **Throughput** | Limited by slowest link in the chain |
-| **Memory** | 256KB buffer per stream per hop |
-| **Connections** | Up to 1000 streams per peer (configurable) |
-
-See [Streams](/concepts/streams) for configurable limits.
-
-## Next Steps
-
-- [Agent Roles](/concepts/agent-roles) - Understand ingress, transit, and exit roles
-- [Transports](/concepts/transports) - Compare QUIC, HTTP/2, and WebSocket
-- [Routing](/concepts/routing) - How routes propagate and are selected
+- [Agent Roles](/concepts/agent-roles): what ingress, transit, and exit agents do and how to combine them
+- [Transports](/concepts/transports): choosing between QUIC, HTTP/2, and WebSocket for each link
+- [Routing](/concepts/routing): how routes propagate, expire, and are selected
+- [Your First Mesh](/getting-started/first-mesh): connect two agents and send traffic through them
+- [Security Overview](/security/overview): TLS, end-to-end encryption, and authentication in detail

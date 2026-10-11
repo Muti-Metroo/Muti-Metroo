@@ -1,78 +1,54 @@
 ---
 title: System Service
-sidebar_position: 4
+description: Install Muti Metroo as a systemd, launchd, or Windows service so the agent starts at boot and is supervised by the operating system.
+sidebar_position: 2
 ---
 
 <div style={{textAlign: 'center', marginBottom: '2rem'}}>
   <img src="/img/mole-climbing.png" alt="Mole installing service" style={{maxWidth: '180px'}} />
 </div>
 
-# System Service Installation
+# System Service
 
-Install once, run forever. The agent starts automatically when the system boots and restarts if it crashes - no manual intervention needed.
+`muti-metroo service install` registers the agent with the operating system's service manager so it starts at boot and is restarted by the service manager where the platform supports it. The same command also installs user-level services that need no root or Administrator rights.
 
-**What you get:**
-- Automatic start on boot - agent runs without logging in
-- Crash recovery - system restarts the agent if it dies
-- Managed lifecycle - start, stop, and check status with standard commands
-- Security hardening - runs as a dedicated user with limited privileges
+| Platform | System service (root / Administrator) | User service (no elevation) |
+|----------|---------------------------------------|-----------------------------|
+| Linux | systemd unit | systemd `--user` unit, or cron `@reboot` + `nohup` |
+| macOS | launchd daemon | Not supported |
+| Windows | Windows Service | Registry Run key + `rundll32.exe` (requires the DLL) |
+
+For the full flag reference, see [CLI - service](/cli/service).
+
+## Before you install
+
+- Use absolute paths in the config file for `agent.data_dir`, certificates, and keys. The service manager starts the agent with the config file's directory as the working directory, so relative paths resolve against that directory.
+- On Linux, create the data directory before installing. The generated unit lists it in `ReadWritePaths`, and systemd refuses to start a unit whose `ReadWritePaths` entry does not exist.
+- Validate the config with `muti-metroo config validate <file>` before installing. A service that fails validation exits immediately and is restarted in a loop.
 
 ## Linux (systemd)
 
-### Installation
+### Install
 
 ```bash
-# Install as service (requires root) - auto-starts immediately
+sudo mkdir -p /etc/muti-metroo /var/lib/muti-metroo
+sudo cp config.yaml /etc/muti-metroo/
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
 ```
 
-This copies the binary to `/usr/local/bin/muti-metroo`, creates a systemd unit file at `/etc/systemd/system/muti-metroo.service`, enables boot startup, and starts the service immediately.
+The command:
 
-:::info Binary Deployment
-By default, `service install` copies the binary to a standard system location (`/usr/local/bin` on Linux/macOS, `C:\Program Files\<name>` on Windows). The service definition references the installed copy. Use `--deploy=false` to skip this and reference the binary at its current path.
-:::
+1. Copies the running binary to `/usr/local/bin/muti-metroo` (`/usr/local/bin/<name>` with `-n <name>`). Pass `--deploy=false` to keep the binary at its current path instead.
+2. Writes `/etc/systemd/system/muti-metroo.service`.
+3. Runs `systemctl daemon-reload`, `systemctl enable`, and `systemctl start`.
 
-### Service Management
+No separate `systemctl enable` or `systemctl start` step is needed.
 
-```bash
-# Check status
-sudo systemctl status muti-metroo
+### Generated unit file
 
-# View logs
-sudo journalctl -u muti-metroo -f
-
-# Restart (after config changes)
-sudo systemctl restart muti-metroo
-
-# Stop
-sudo systemctl stop muti-metroo
-```
-
-:::tip No Manual Start Needed
-The `service install` command automatically enables and starts the service. You don't need to run `systemctl enable` or `systemctl start` manually.
-:::
-
-### Uninstall
-
-```bash
-# Stop and disable
-sudo systemctl stop muti-metroo
-sudo systemctl disable muti-metroo
-
-# Uninstall service
-sudo muti-metroo service uninstall
-
-# Clean up files (optional)
-sudo rm -rf /etc/muti-metroo
-sudo rm -rf /var/lib/muti-metroo
-```
-
-### Systemd Unit File
-
-The installer creates:
+For a config at `/etc/muti-metroo/config.yaml` with `data_dir: "/var/lib/muti-metroo"`, the installer writes:
 
 ```ini
-# /etc/systemd/system/muti-metroo.service
 [Unit]
 Description=Userspace mesh networking agent for virtual TCP tunnels
 After=network-online.target
@@ -102,322 +78,91 @@ SyslogIdentifier=muti-metroo
 WantedBy=multi-user.target
 ```
 
-:::note
-The `ReadWritePaths` directive includes both the config directory and the data directory specified in your config file. This allows the service to write to the data directory while maintaining strict filesystem protection.
-:::
+What this means in practice:
 
-### Custom Installation
+- **The agent runs as root.** The unit has no `User=` line. To run as an unprivileged account, add `User=` and `Group=` with `sudo systemctl edit muti-metroo` and give that account ownership of the data directory.
+- **Most of the filesystem is read-only.** `ProtectSystem=strict` makes everything except the config directory and the data directory read-only, `ProtectHome=read-only` covers `/home`, and `PrivateTmp=true` gives the agent its own `/tmp`. [File transfer](/features/file-transfer) uploads and [shell](/features/shell) commands that write elsewhere fail with a read-only filesystem error. Add more paths with a `ReadWritePaths=` override in `systemctl edit`.
+- **Restart on failure only.** A crash or non-zero exit is restarted after 5 seconds. A clean exit, such as one requested with [`muti-metroo stop`](/cli/stop), is not.
 
-For manual setup:
+### Manage the service
 
 ```bash
-# Create user
-sudo useradd -r -s /sbin/nologin muti-metroo
-
-# Create directories
-sudo mkdir -p /etc/muti-metroo
-sudo mkdir -p /var/lib/muti-metroo
-sudo chown muti-metroo:muti-metroo /var/lib/muti-metroo
-
-# Copy binary
-sudo cp muti-metroo /usr/local/bin/
-
-# Copy config
-sudo cp ./config.yaml /etc/muti-metroo/
-sudo chown root:muti-metroo /etc/muti-metroo/config.yaml
-sudo chmod 640 /etc/muti-metroo/config.yaml
-
-# Copy certificates
-sudo cp -r ./certs /etc/muti-metroo/
-sudo chown -R root:muti-metroo /etc/muti-metroo/certs
-sudo chmod 750 /etc/muti-metroo/certs
-sudo chmod 640 /etc/muti-metroo/certs/*
-
-# Create unit file
-sudo nano /etc/systemd/system/muti-metroo.service
-# (paste unit file content)
-
-# Reload and start
-sudo systemctl daemon-reload
-sudo systemctl enable --now muti-metroo
-```
-
-### Configuration for Service
-
-```yaml
-# /etc/muti-metroo/config.yaml
-agent:
-  id: "auto"
-  display_name: "${HOSTNAME}"
-  data_dir: "/var/lib/muti-metroo"
-  log_level: "info"
-  log_format: "json"
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
-    tls:
-      cert: "/etc/muti-metroo/certs/agent.crt"
-      key: "/etc/muti-metroo/certs/agent.key"
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
-
-http:
-  enabled: true
-  address: "127.0.0.1:8080"
-```
-
-## Windows Service
-
-### Installation
-
-Run as Administrator:
-
-```powershell
-# Install service
-muti-metroo.exe service install -c C:\ProgramData\muti-metroo\config.yaml
-```
-
-:::tip Non-Admin Alternative
-Windows Service installation requires Administrator privileges. If you don't have admin access, use [DLL Mode](/deployment/dll-mode) with the Registry Run key instead - it provides similar background execution and starts automatically at user login without requiring elevation.
-:::
-
-### Service Management
-
-```powershell
-# Start
-sc start muti-metroo
-
-# Stop
-sc stop muti-metroo
-
-# Status
-sc query muti-metroo
-
-# Configure automatic start
-sc config muti-metroo start= auto
-```
-
-Or use Services GUI:
-1. Open `services.msc`
-2. Find "Muti Metroo"
-3. Right-click for Start/Stop/Properties
-
-### Uninstall
-
-Run as Administrator:
-
-```powershell
-# Stop service
-sc stop muti-metroo
-
-# Uninstall
-muti-metroo.exe service uninstall
-```
-
-### Windows Paths
-
-```
-C:\ProgramData\muti-metroo\
-  config.yaml           # Configuration
-  data\                 # Agent data
-    agent_id            # Agent identity
-  certs\                # Certificates
-    agent.crt
-    agent.key
-    ca.crt
-C:\Program Files\muti-metroo\
-  muti-metroo.exe       # Binary
-```
-
-### Configuration for Windows
-
-```yaml
-# C:\ProgramData\muti-metroo\config.yaml
-agent:
-  id: "auto"
-  data_dir: "C:\\ProgramData\\muti-metroo\\data"
-  log_level: "info"
-  log_format: "json"
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
-    tls:
-      cert: "C:\\ProgramData\\muti-metroo\\certs\\agent.crt"
-      key: "C:\\ProgramData\\muti-metroo\\certs\\agent.key"
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
-
-http:
-  enabled: true
-  address: "127.0.0.1:8080"
-```
-
-## Windows User Service (Registry Run)
-
-For users without Administrator access, install as a user service using the Registry Run key and the DLL.
-
-### Requirements
-
-- `muti-metroo.exe` - CLI for installation and management
-- `muti-metroo.dll` - DLL for background execution via rundll32
-- `config.yaml` - Configuration file
-
-### Installation
-
-```powershell
-# Install as user service (no admin required)
-muti-metroo service install --user --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-
-# Install with custom service name
-muti-metroo service install --user -n "My Tunnel" --dll C:\path\to\muti-metroo.dll -c C:\path\to\config.yaml
-```
-
-**Flags:**
-- `--user`: Install as user service (required for Registry Run mode)
-- `--dll <path>`: Path to muti-metroo.dll (required)
-- `-c, --config <path>`: Path to config file (required)
-- `-n, --name <name>`: Custom service name (default: muti-metroo). The name is converted to PascalCase for the Registry value (e.g., "My Tunnel" becomes "MyTunnel").
-
-This creates a Registry Run entry at `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that:
-- Starts immediately after installation (no reboot required)
-- Runs automatically at each user logon
-- Uses `rundll32.exe` to execute the DLL
-- Runs with current user privileges
-- No console window (background execution)
-
-### Service Management
-
-```powershell
-# Check status (shows DLL and config paths)
+sudo systemctl status muti-metroo
+sudo journalctl -u muti-metroo -f
+sudo systemctl restart muti-metroo
+sudo systemctl stop muti-metroo
 muti-metroo service status
-
-# View registry entry (default name)
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v Muti Metroo
-
-# View registry entry (custom name, e.g., -n "My Tunnel" becomes "MyTunnel")
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MyTunnel
-
-# Stop manually (if needed)
-taskkill /F /IM rundll32.exe
 ```
 
-:::tip Registry Value Names
-The `-n` flag sets the service name, which is converted to PascalCase for the registry value:
-- `muti-metroo` (default) becomes `Muti Metroo`
-- `my-tunnel` becomes `MyTunnel`
-- `My Tunnel` becomes `MyTunnel`
-:::
+Restart the service after editing the config file. Runtime changes made with the dynamic management commands (`route add`, `peer add`, and similar) are persisted in the data directory and survive a restart.
 
-:::note
-The service starts automatically after installation and at each user logon. To restart the service, uninstall and reinstall it, or log out and log back in.
-:::
+### Upgrade
+
+Replace the installed binary while the service is stopped:
+
+```bash
+sudo systemctl stop muti-metroo
+sudo install -m 755 ./muti-metroo-linux-amd64 /usr/local/bin/muti-metroo
+sudo systemctl start muti-metroo
+```
 
 ### Uninstall
 
-```powershell
-# Uninstall (no admin required)
+```bash
+sudo muti-metroo service uninstall
+```
+
+The command stops and disables the unit, removes the unit file, and reloads systemd. It prompts for confirmation; pass `-f` to skip the prompt. The binary in `/usr/local/bin`, the config file, and the data directory are left in place.
+
+## Linux user service
+
+Install without root by adding `--user`:
+
+```bash
+muti-metroo service install --user -c ~/muti-metroo/config.yaml
+```
+
+The installer picks a backend automatically. Force one with `--user-method systemd` or `--user-method cron`.
+
+| Backend | Selected when | What is created | Logs |
+|---------|---------------|-----------------|------|
+| `systemd` | `systemctl` and `loginctl` are installed and a user systemd instance is reachable | `~/.config/systemd/user/<name>.service`, enabled and started | `journalctl --user -u muti-metroo -f` |
+| `cron` | systemd `--user` is not available and `crontab` is installed | A wrapper script `~/.<name>/<name>.sh`, a PID file, and an `@reboot` crontab entry | `~/.<name>/<name>.log` |
+
+User services differ from the system service:
+
+- The binary is not copied. The service runs the binary from the path it was installed from, so do not move or delete it.
+- The systemd user unit has no `ProtectSystem` or `ProtectHome` restrictions and is wanted by `default.target`.
+- A systemd user unit stops when the user logs out unless lingering is enabled. The installer tries `loginctl enable-linger`; if that is not permitted, it prints the command to run as root:
+
+  ```bash
+  sudo loginctl enable-linger "$USER"
+  ```
+
+- The cron backend starts the agent once at boot and does not restart it if it exits.
+
+Check and remove a user service with the same commands, without `sudo`:
+
+```bash
+muti-metroo service status
 muti-metroo service uninstall
 ```
 
-## Windows: Quick Background Start (--detach)
-
-If you only need the agent to keep running after closing a terminal or disconnecting an SSH session — without installing a service — use the `--detach` flag:
-
-```cmd
-muti-metroo.exe run --detach -c config.yaml
-```
-
-Muti Metroo re-spawns itself outside the session's Job Object, prints the PID, and exits immediately. No admin rights, no DLL, no Task Scheduler required. This works even on machines where those tools are restricted.
-
-```cmd
-# Verify it's running
-tasklist | findstr muti-metroo
-
-# Stop it
-taskkill /im muti-metroo.exe /f
-```
-
-The trade-off: the agent does not survive a reboot. For persistence across reboots, use Windows Service or Registry Run.
-
-### Comparison: Windows Service vs Registry Run vs --detach
-
-| Feature | Windows Service | Registry Run | --detach |
-|---------|----------------|--------------|----------|
-| Requires admin | Yes | No | No |
-| Requires DLL | No | Yes | No |
-| Requires Task Scheduler | No | Yes (for start) | No |
-| Auto-restart on crash | Yes | No | No |
-| Survives reboot | Yes | Yes (at logon) | No |
-| Start timing | At boot (before login) | At user logon | On demand |
-| Console window | No | No | No |
-| Runs as | SYSTEM/service account | Current user | Current user |
-| Process name | `muti-metroo.exe` | `rundll32.exe` | `muti-metroo.exe` |
-
-**Choose Windows Service when:**
-- You have Administrator access
-- Agent must start before any user logs in
-- You need automatic crash recovery
-
-**Choose Registry Run when:**
-- You don't have Administrator access
-- Persistence across reboots is required
-
-**Choose --detach when:**
-- You don't have Administrator access
-- Task Scheduler or DLL are unavailable (e.g., locked-down machine)
-- Reboots are rare and you can restart manually when needed
-
 ## macOS (launchd)
 
-### Installation
+### Install
 
 ```bash
-# Install as service (requires root)
+sudo mkdir -p /etc/muti-metroo /var/lib/muti-metroo
+sudo cp config.yaml /etc/muti-metroo/
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
 ```
 
-This creates a launchd plist at `/Library/LaunchDaemons/com.muti-metroo.plist`.
+The command copies the binary to `/usr/local/bin/muti-metroo`, writes `/Library/LaunchDaemons/com.muti-metroo.plist`, and loads it with `launchctl load -w`. The daemon starts immediately and at every boot.
 
-### Service Management
-
-```bash
-# Check status
-muti-metroo service status
-
-# Stop service
-sudo launchctl stop com.muti-metroo
-
-# Start service
-sudo launchctl start com.muti-metroo
-
-# View logs (in the config file's directory)
-tail -f /etc/muti-metroo/muti-metroo.log
-tail -f /etc/muti-metroo/muti-metroo.err.log
-```
-
-### Uninstall
-
-```bash
-# Uninstall service
-sudo muti-metroo service uninstall
-
-# Clean up files (optional)
-sudo rm -rf /etc/muti-metroo
-sudo rm -rf /var/lib/muti-metroo
-```
-
-### Launchd Plist
-
-The installer creates:
+### Generated plist
 
 ```xml
-<!-- /Library/LaunchDaemons/com.muti-metroo.plist -->
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -460,138 +205,170 @@ The installer creates:
 </plist>
 ```
 
-:::note
-Log files are created in the config file's directory (WorkingDirectory). The `KeepAlive` with `SuccessfulExit=false` ensures the service restarts only if it exits with an error, not on clean shutdown.
-:::
+The daemon runs as root. `KeepAlive` with `SuccessfulExit` set to `false` restarts the agent only after a non-zero exit. Log files are written to the config file's directory.
 
-### Custom Installation
-
-For manual setup:
+### Manage the service
 
 ```bash
-# Copy binary
-sudo cp muti-metroo /usr/local/bin/
-
-# Create directories
-sudo mkdir -p /etc/muti-metroo
-sudo mkdir -p /var/lib/muti-metroo
-
-# Copy config and certs
-sudo cp ./config.yaml /etc/muti-metroo/
-sudo cp -r ./certs /etc/muti-metroo/
-
-# Create plist manually (use template above)
-sudo nano /Library/LaunchDaemons/com.muti-metroo.plist
-
-# Load and start
-sudo launchctl load -w /Library/LaunchDaemons/com.muti-metroo.plist
+muti-metroo service status
+sudo launchctl list com.muti-metroo
+sudo launchctl stop com.muti-metroo
+sudo launchctl start com.muti-metroo
+tail -f /etc/muti-metroo/muti-metroo.err.log
 ```
 
-### Configuration for macOS
+The agent writes its log lines to stderr, so most output goes to `muti-metroo.err.log`.
+
+### Uninstall
+
+```bash
+sudo muti-metroo service uninstall
+```
+
+This unloads the daemon and removes the plist. The binary, config, and data directory are left in place.
+
+## Windows Service
+
+### Install
+
+Run from an elevated (Administrator) prompt:
+
+```powershell
+muti-metroo.exe service install -c C:\ProgramData\muti-metroo\config.yaml
+```
+
+The command copies the binary to `C:\Program Files\muti-metroo\muti-metroo.exe`, registers a service named `muti-metroo` with the display name "Muti Metroo Mesh Agent", sets it to start automatically at boot, and starts it. The service runs as `LocalSystem`.
+
+Use Windows paths with escaped backslashes or forward slashes in the config file:
 
 ```yaml
-# /etc/muti-metroo/config.yaml
 agent:
-  id: "auto"
-  display_name: "${HOSTNAME}"
-  data_dir: "/var/lib/muti-metroo"
-  log_level: "info"
-  log_format: "json"
-
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4433"
-    tls:
-      cert: "/etc/muti-metroo/certs/agent.crt"
-      key: "/etc/muti-metroo/certs/agent.key"
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
-
-http:
-  enabled: true
-  address: "127.0.0.1:8080"
+  data_dir: "C:/ProgramData/muti-metroo/data"
 ```
 
-## Security Considerations
+### Manage the service
 
-### File Permissions
-
-```bash
-# Linux
-sudo chmod 700 /var/lib/muti-metroo
-sudo chmod 640 /etc/muti-metroo/config.yaml
-sudo chmod 600 /etc/muti-metroo/certs/*.key
-sudo chmod 644 /etc/muti-metroo/certs/*.crt
+```powershell
+muti-metroo.exe service status
+sc.exe query muti-metroo
+sc.exe stop muti-metroo
+sc.exe start muti-metroo
 ```
 
-### Network Ports
+The service is also listed in `services.msc` as "Muti Metroo Mesh Agent".
 
-If using ports below 1024, either:
+The installer does not configure recovery actions, so Windows does not restart the agent after a crash. To enable restarts:
 
-1. Run as root (not recommended)
-2. Use capabilities:
-   ```bash
-   sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/muti-metroo
-   ```
-3. Use ports above 1024
+```powershell
+sc.exe failure muti-metroo reset= 86400 actions= restart/5000/restart/5000/restart/5000
+```
 
-### Firewall Rules
+The agent's log output is not captured when it runs as a Windows Service. To diagnose startup problems, stop the service and run the same command in a console:
+
+```powershell
+& "C:\Program Files\muti-metroo\muti-metroo.exe" run -c C:\ProgramData\muti-metroo\config.yaml
+```
+
+### Uninstall
+
+```powershell
+muti-metroo.exe service uninstall
+```
+
+## Windows user service (Registry Run)
+
+Without Administrator rights, install a per-user service that starts the [DLL](/deployment/dll-mode) through `rundll32.exe` at logon:
+
+```powershell
+muti-metroo.exe service install --user --dll C:\Users\alice\muti-metroo\muti-metroo.dll -c C:\Users\alice\muti-metroo\config.yaml
+```
+
+| Flag | Description |
+|------|-------------|
+| `--user` | Install a user service instead of a Windows Service. |
+| `--dll` | Path to the DLL that matches the host architecture. Required. |
+| `-c`, `--config` | Path to the config file. Required. |
+| `-n`, `--name` | Service name. Default `muti-metroo`. |
+
+The command:
+
+- Writes a value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `rundll32.exe <dll>,Run <config>` at each logon. The value name is the service name in PascalCase: `muti-metroo` becomes `MutiMetroo`, `my-tunnel` becomes `MyTunnel`.
+- Saves the DLL and config paths in `%USERPROFILE%\.<name>\service.info`.
+- Starts the agent immediately through a temporary scheduled task. If Task Scheduler is unavailable, the agent starts at the next logon.
+
+The Run key stores the paths unquoted, so keep the DLL and config paths free of spaces.
+
+```powershell
+muti-metroo.exe service status
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MutiMetroo
+muti-metroo.exe service uninstall
+```
+
+`service uninstall` removes the Run value and stops the running `rundll32.exe` process that loaded the DLL.
+
+## Windows: background start without a service
+
+`run --detach` (short `-D`) re-launches the agent as a detached background process and exits. The agent keeps running after the console closes or an SSH session disconnects, but does not survive a reboot. It needs no Administrator rights, no DLL, and no Task Scheduler.
+
+```powershell
+muti-metroo.exe run --detach -c C:\Users\alice\muti-metroo\config.yaml
+```
+
+```text
+Detached agent started (PID 4312)
+```
+
+The detached process runs with the user profile directory as its working directory, so pass an absolute config path and use absolute paths inside the config. `--detach` is supported on Windows only; on Linux and macOS use a service, `nohup`, or `setsid`.
+
+Stop the agent with [`muti-metroo stop`](/cli/stop) or `taskkill /IM muti-metroo.exe /F`.
+
+### Choosing a Windows method
+
+| | Windows Service | Registry Run | `run --detach` |
+|---|---|---|---|
+| Requires Administrator | Yes | No | No |
+| Requires the DLL | No | Yes | No |
+| Starts | At boot | At user logon | When run |
+| Restarted after a crash | Only with `sc.exe failure` | No | No |
+| Runs as | `LocalSystem` | Current user | Current user |
+| Process name | `muti-metroo.exe` | `rundll32.exe` | `muti-metroo.exe` |
+
+## Ports and firewalls
+
+Binding a listener to a port below 1024 requires root on Linux and macOS. The system service runs as root, so this works there. For a user service or a manual run on Linux, grant the capability to the binary instead:
 
 ```bash
-# Linux (firewalld)
+sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/muti-metroo
+```
+
+Open the listener ports in the host firewall. QUIC uses UDP; HTTP/2 and WebSocket use TCP. Keep the SOCKS and HTTP API ports closed to the outside unless clients need them.
+
+```bash
+# firewalld
 sudo firewall-cmd --permanent --add-port=4433/udp
-sudo firewall-cmd --permanent --add-port=1080/tcp
-sudo firewall-cmd --permanent --add-port=8080/tcp
 sudo firewall-cmd --reload
 
-# Linux (ufw)
+# ufw
 sudo ufw allow 4433/udp
-sudo ufw allow 1080/tcp
-sudo ufw allow 8080/tcp
 ```
 
 ## Troubleshooting
 
-### Service Won't Start
+**The unit fails with `status=226/NAMESPACE`.** A path in `ReadWritePaths` does not exist. Create the data directory, or fix `agent.data_dir`, then run `sudo systemctl restart muti-metroo`.
+
+**The service starts and stops in a loop.** Read the last log lines and run the same command manually to see the error:
 
 ```bash
-# Check systemd logs
 sudo journalctl -u muti-metroo -n 50
-
-# Check service status
-sudo systemctl status muti-metroo
-
-# Test config manually
-sudo -u muti-metroo /usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
+sudo /usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
 ```
 
-### Permission Denied
-
-```bash
-# Check file ownership
-ls -la /etc/muti-metroo/
-ls -la /var/lib/muti-metroo/
-
-# Fix permissions
-sudo chown -R muti-metroo:muti-metroo /var/lib/muti-metroo
-```
-
-### Port Already in Use
-
-```bash
-# Find what's using the port
-sudo lsof -i :4433
-sudo netstat -tlnp | grep 4433
-```
+**`service install` fails with "already installed".** Remove the existing service first with `service uninstall`, or install a second instance under a different name with `-n`.
 
 ## See Also
 
-- [CLI - Service](/cli/service) - Service management commands
-- [CLI - Run](/cli/run) - Run agent manually
-
-## Next Steps
-
-- [High Availability](/deployment/high-availability) - Redundancy setup
-- [Troubleshooting](/troubleshooting/common-issues) - Common issues
+- [CLI - service](/cli/service) - Flags for `service install`, `status`, and `uninstall`
+- [PM2 Process Manager](/deployment/pm2) - Supervise the agent with PM2 instead of the OS service manager
+- [Embedded Configuration](/deployment/embedded-config) - Install a single binary that carries its own config
+- [DLL Mode](/deployment/dll-mode) - Run the agent through `rundll32.exe` on Windows
+- [Common Issues](/troubleshooting/common-issues) - Startup errors and their fixes

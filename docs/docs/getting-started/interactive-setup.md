@@ -1,5 +1,6 @@
 ---
 title: Interactive Setup
+description: Walk through the muti-metroo setup wizard step by step, from roles and transports to keys, config delivery, and service installation.
 sidebar_position: 2
 ---
 
@@ -7,184 +8,215 @@ sidebar_position: 2
   <img src="/img/mole-idea.png" alt="Mole with bright idea" style={{maxWidth: '180px'}} />
 </div>
 
-# Interactive Setup Wizard
+# Interactive Setup
 
-Get a working tunnel in under 5 minutes. The wizard asks you a few questions and generates everything you need - certificates, configuration, and agent identity.
+`muti-metroo setup` asks a series of questions and produces a ready-to-run agent: a configuration file (or a binary with the configuration embedded), the agent identity in the data directory, and optionally a system or user service. This page walks through every prompt. For the command synopsis and flags, see [`setup`](/cli/setup).
 
-By the end, you will have a SOCKS5 proxy ready to tunnel traffic through your mesh.
-
-## Running the Wizard
+## Running the wizard
 
 ```bash
 muti-metroo setup
 ```
 
-:::tip Quick Path - 4 Essential Steps
-For a basic working setup, most steps can use defaults. Focus on these:
+Every prompt shows its default in square brackets. Press Enter to accept it. Menus take the number of an option, and the role menu takes a comma-separated list such as `1,3`.
 
-1. **Basic Setup** - accept defaults or set data directory
-2. **Agent Role** - select Ingress + Exit for a standalone proxy
-3. **Inbound Listener** - accept inbound connections, then accept defaults (QUIC on :4433)
-4. **SOCKS5 Proxy** - accept defaults (localhost:1080)
+To edit the configuration embedded in an existing binary, pass the binary with `-c`. See [Editing embedded configuration](#editing-embedded-configuration).
 
-Press Enter to accept defaults on all other steps.
+:::tip Minimal path to a standalone proxy
+For a single agent that is both SOCKS5 entry point and exit, select roles `1,3` (Ingress and Exit), and accept the defaults everywhere else. At the HTTP API authentication prompt, either set a token or confirm that you want to continue without one.
 :::
 
-## What the Wizard Configures
+## Wizard steps
 
-The wizard has 11 numbered steps, followed by configuration delivery and optional service installation. Many steps are optional or have sensible defaults.
+The wizard runs the steps below in order. Steps that do not apply to the selected roles are skipped.
 
-### 1. Basic Setup
+### Step 1: Basic Setup
 
-- **Config file path**: Where to save the configuration (default: `./config.yaml`)
-- **Data directory**: Where agent state is stored (default: `./data`)
-- **Display name**: Human-readable name for the agent (optional)
+| Prompt             | Default         | Notes                                                                                         |
+| ------------------ | --------------- | --------------------------------------------------------------------------------------------- |
+| `Config File Path` | `./config.yaml` | Must end in `.yaml` or `.yml`, and its parent directory must exist.                           |
+| `Data Directory`   | `./data`        | Holds the agent identity and E2E encryption keys.                                             |
+| `Display Name`     | empty           | Human-readable name shown in the dashboard and CLI. Press Enter to show the Agent ID instead. |
 
-### 2. Agent Role
+If a valid Muti Metroo configuration already exists at the config path, the wizard prints `[INFO] Found existing configuration, using values as defaults.` and every later prompt starts from the existing values. See [Re-running the wizard](#re-running-the-wizard). If a file exists there but does not parse as a configuration, the wizard asks `Overwrite it?` (default No) and cancels if you decline.
 
-Choose what this agent will do:
+### Step 2: Agent Role
 
-| Role        | What It Does                                                   |
-| ----------- | -------------------------------------------------------------- |
-| **Ingress** | Accept your SOCKS5 connections (curl, SSH, browser)            |
-| **Transit** | Relay traffic to other agents in the mesh                      |
-| **Exit**    | Open connections to destinations (internet, internal networks) |
+Select one or more roles:
 
-Most setups need at least one ingress (where you connect) and one exit (where traffic goes). A single agent can do all three.
+| Option      | Effect on the generated config                                              |
+| ----------- | --------------------------------------------------------------------------- |
+| **Ingress** | Enables the SOCKS5 proxy (Step 6).                                          |
+| **Transit** | No extra settings. Every agent relays traffic for its peers.                |
+| **Exit**    | Enables exit routing (Step 7).                                              |
 
-### 3. Inbound Listener (Optional)
+The default is Transit. An agent with only the Transit role skips Steps 6, 7, 9, and 10. See [Agent Roles](/concepts/agent-roles).
 
-- **Accept inbound peer connections?**: Answer No for SOCKS5-only clients, laptops behind NAT, or any agent that only dials out to other peers. Declining skips the transport and address prompts below and emits `listeners: []`. Outbound peer dials are still configured in the next step; per-peer transport then defaults to QUIC.
+### Step 3: Inbound Listener (optional)
 
-When accepting inbound connections:
+`Accept inbound peer connections?` defaults to No. Answer No for SOCKS5-only clients, laptops behind NAT, or any agent that only dials out. The generated config then has no `listeners` section, and outbound peers are still configured in Step 5.
 
-- **Transport type**: QUIC (recommended), HTTP/2, or WebSocket
-- **Listen address**: IP and port to listen on
-- **HTTP path**: Path for HTTP/2 and WebSocket transports (default: `/mesh`)
-- **Reverse proxy**: For HTTP/2 and WebSocket, option to accept plain connections when TLS is terminated by a reverse proxy (e.g., Nginx, Caddy, Cloudflare)
+When you answer Yes:
 
-### 4. TLS Configuration (Optional)
+| Prompt                                       | Default        | Notes                                                                                   |
+| -------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `Transport Protocol`                         | QUIC           | QUIC, HTTP/2, or WebSocket. See [Transports](/concepts/transports).                     |
+| `Listen Address`                             | `0.0.0.0:4433` | `host:port` to bind.                                                                    |
+| `HTTP Path`                                  | `/mesh`        | HTTP/2 and WebSocket only. Must start with `/`.                                         |
+| `Is TLS terminated by a reverse proxy?`      | No             | HTTP/2 and WebSocket only. Yes sets `plaintext: true` on the listener.                  |
+| `Advertise this listener so other agents...` | No             | Yes asks for a public `host:port` and adds an `advertise` block to the listener.        |
 
-All traffic is end-to-end encrypted (X25519 + ChaCha20-Poly1305). Transport TLS adds certificate-based peer verification on top of E2E encryption.
+The advertised address must be reachable by other agents: loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::`) are rejected. See [Listeners](/configuration/listeners).
 
-- **Self-signed certificates (default)**: Auto-generate at startup - no configuration needed
-- **Strict TLS with CA verification (advanced)**: For PKI-based certificate verification (includes mTLS option)
+### Step 4: TLS Configuration
 
-### 5. Peer Connections
+All peer traffic is end-to-end encrypted regardless of this choice. Transport TLS adds certificate-based peer verification on top.
 
-Optionally connect to existing mesh agents:
+| Option                                        | Effect                                                                                       |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Self-signed certificates** (default)        | No `tls` section is written. The agent generates a self-signed certificate at startup.       |
+| **Strict TLS with CA verification**           | Writes CA, certificate, and key PEM inline under `tls` and sets `strict: true`.              |
 
-- Enter peer address (host:port)
-- Pin to specific agent ID (confirmation prompt; defaults to `auto` if declined)
-- Transport defaults to listener's transport with option to change
-- Enable strict TLS verification (requires CA-signed certs; disabled by default)
-- HTTP path prompt for HTTP/2 and WebSocket peers
-- Connectivity test with options: "Continue anyway", "Retry the connection test", "Re-enter peer configuration", "Skip this peer"
+Strict TLS offers two sub-options:
 
-### 6. SOCKS5 Configuration (Ingress Role)
+- **Paste CA certificate, agent certificate, and key**: paste each PEM block, ending each with an empty line. The private key must be an EC key.
+- **Generate from CA private key**: paste an ECDSA P-256 CA private key. The wizard asks for `Validity period (days)` (default `365`) and `Agent Common Name` (default `muti-metroo`), derives the CA certificate, and issues an agent certificate valid for the common name, `localhost`, `127.0.0.1`, and `::1`.
 
-If ingress role is selected:
+When the existing config already carries TLS material, a third option, `Keep existing TLS configuration`, is offered and selected by default. See [TLS Certificates](/configuration/tls-certificates).
 
-- **Listen address**: Where to accept SOCKS5 connections
-- **Authentication**: Enable/disable, add username and password
+### Step 5: Peer Connections
 
-### 7. Exit Configuration (Exit Role)
+`Add peer connections?` defaults to No. For each peer:
 
-If exit role is selected:
+| Prompt                                  | Default                        | Notes                                                                                     |
+| --------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------- |
+| `Peer Address (host:port)`              | none                           | Required.                                                                                 |
+| `Pin to specific agent ID?`             | No                             | Yes asks for the peer's Agent ID. No writes `id: auto`, which accepts any agent ID.       |
+| `Use same transport as listener (...)?` | Yes                            | Shown when a listener was configured. Without a listener, a transport menu is shown (default QUIC). |
+| `Enable strict TLS verification?`       | No                             | Yes sets `tls.strict: true` for this peer. Requires a CA.                                 |
+| `HTTP Path`                             | `/mesh`                        | HTTP/2 and WebSocket peers only.                                                          |
 
-- **CIDR routes**: Networks to advertise (e.g., `0.0.0.0/0`, `::/0`). If no routes entered, defaults to all traffic (`0.0.0.0/0` and `::/0`)
-- **Domain routes**: Domain patterns for domain-based routing (optional)
+The wizard then probes the peer for up to 10 seconds. On success it prints the remote agent's name and ID and the round-trip time, and adds the peer. On failure it offers:
 
-### 8. Monitoring & Logging
+1. `Continue anyway (I'll set up the listener later)`: keep the peer (default).
+2. `Retry the connection test`
+3. `Re-enter peer configuration`
+4. `Skip this peer`
 
-- **Log level**: Debug, Info (default), Warning, or Error
-- **HTTP management API**: Enable health checks, dashboard, and CLI remote commands
-- **HTTP API authentication**: Optional bearer token to protect non-health endpoints
+See [Peers](/configuration/peers).
 
-### 9. Management Commands
+### Step 6: SOCKS5 Proxy
 
-Skipped for transit-only agents.
+Shown when the Ingress role is selected.
 
-- **Enable management commands**: Allow remote command execution (disabled by default)
-- **Command whitelist**: "Allow all commands" (default), "Custom whitelist", or "No commands (lockdown)"
+| Prompt                   | Default          | Notes                                                                                                   |
+| ------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `Listen Address`         | `127.0.0.1:1080` | `host:port` for the SOCKS listener.                                                                     |
+| `Enable authentication?` | No               | Yes asks for one username and a password (at least 8 characters). The password is stored in plaintext, as SOCKS5 requires. |
 
-Management commands are authorized by the mesh management signing key (configured in the Management Key step), not a per-feature password.
+See [SOCKS5](/configuration/socks5).
 
-### 10. File Transfer
+### Step 7: Exit Node Configuration
 
-Skipped for transit-only agents.
+Shown when the Exit role is selected.
 
-- **Enable file transfer**: Allow file upload/download (disabled by default)
-- **Max file size**: Limit in MB (default: 500 MB, 0 = unlimited)
-- **Path restrictions**: Allow all paths or restrict to specific directories
+- **Routes**: enter one CIDR per line and an empty line to finish. If you enter none, the wizard writes `0.0.0.0/0` and `::/0`.
+- **Domain routes**: enter one domain pattern per line (for example `api.internal.example.com` or `*.example.com`), and an empty line to finish. Optional.
 
-File transfer is authorized by the mesh management signing key (configured in the Management Key step), not a per-feature password.
+The generated `exit` section also sets `dns.servers` to `8.8.8.8:53` and `1.1.1.1:53` with a `5s` timeout. Edit or remove `dns.servers` afterwards to use the system resolver instead. See [Exit](/configuration/exit).
 
-### 11. Management & Signing Keys
+### Step 8: Monitoring & Logging
 
-This step configures two independent keypairs that control mesh management:
+| Prompt                              | Default | Notes                                                                                  |
+| ----------------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `Log Level`                         | Info    | Debug, Info, Warning, or Error.                                                        |
+| `Enable HTTP management API?`       | Yes     | Writes an `http` section listening on `:8080`.                                         |
+| `Enable HTTP API authentication?`   | No      | Yes asks for a bearer token (at least 8 characters) and stores its bcrypt hash in `http.token_hash`. |
 
-- **Management key (X25519)**: encrypts topology data so only operators can view the network structure.
-- **Signing key (Ed25519)**: authorizes shell, file transfer, sleep/wake, and dynamic config changes. An agent without the signing public key cannot accept these privileged operations.
+If you decline authentication, the wizard warns that the dashboard and topology endpoints on `:8080` are readable by anyone who can reach the host, and asks `Continue without HTTP API authentication?` (default No). Answering No stops the wizard without writing anything, so answer Yes here if you plan to protect the API another way. See [HTTP](/configuration/http).
 
-Options:
+### Step 9: Management Commands
 
-- **Generate new keypairs**: Create both keypairs at once. You are then asked whether this is an operator/management node. Operator nodes keep the private and public hex of both keys; field agents keep only the two public keys.
-- **Enter existing keys** (default): Paste both private keys (operator/management node) or both public keys (field agent).
-- **Skip**: No encryption or signing keys.
+Skipped for transit-only agents. `Enable management commands?` defaults to No. When enabled, choose a whitelist mode:
 
-The public keys go into every agent config; the private keys belong only in operator configs.
+- `Allow all commands`: writes `whitelist: ["*"]`.
+- `Custom whitelist`: enter command names one per line. At least one is required.
+- `No commands (lockdown - configure later via config file)`: writes an empty whitelist.
+
+Remote command execution is authorized by the signing key from Step 11, not by a per-feature password. See [Shell](/configuration/shell).
+
+### Step 10: File Transfer
+
+Skipped for transit-only agents. `Enable file transfer?` defaults to No. When enabled:
+
+- `Max File Size (MB, 0 = unlimited)`: default `500`.
+- `Path Access`: `Allow all paths (no restrictions)` writes `allowed_paths: ["*"]`; `Restrict to specific directories` asks for one path per line.
+
+File transfer is authorized by the signing key from Step 11. See [File Transfer](/configuration/file-transfer).
+
+### Step 11: Management & Signing Keys
+
+This step configures two independent keypairs:
+
+- **Management key (X25519)**: encrypts topology data so only operators can view the mesh structure.
+- **Signing key (Ed25519)**: authorizes shell, file transfer, sleep/wake, and dynamic configuration changes. An agent without the signing public key rejects these operations.
+
+| Option                              | Behavior                                                                                                                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Generate new keypairs`             | Generates both keypairs and asks `Is this an operator/management node?` (default No). An operator node keeps all four keys in its config; a field agent keeps only the two public keys. The public keys are printed so you can copy them into other agents. |
+| `Enter existing keys` (default)     | Asks `Which keys do you have?`: both private keys (operator node, public keys are derived), both public keys (field agent), or `I don't have keys yet (generate new)`.                                                                      |
+| `Skip`                              | Writes no `management` section.                                                                                                                                                                                                           |
+
+Private keys belong only in operator configs. When the existing config already has keys, the wizard first asks `Keep existing keys?` (default Yes). See [Management](/configuration/management).
 
 ### Configuration Delivery
 
-Choose how to deploy the configuration:
+| Option                                       | Result                                                                                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Save to config file (traditional)` (default) | Writes the config file from Step 1 with mode `0600`.                                                                        |
+| `Embed in binary (single-file deployment)`   | Asks for `Output binary path` (default: the system temp directory plus the service name) and writes a copy of the running binary with the config embedded. |
 
-| Option              | Description                                 |
-| ------------------- | ------------------------------------------- |
-| **Save to file**    | Traditional `config.yaml` file (default)    |
-| **Embed in binary** | Single-file deployment with config baked in |
+Both options then ask for `Service name` (default `muti-metroo`; letters, digits, hyphens, and underscores only). The name is used for service installation and, when embedding, for the default output file name.
 
-For both options, you specify a **service name** used when installing as a system service (default: `muti-metroo`). The service name must contain only alphanumeric characters, hyphens, and underscores.
+When embedding, the agent ID and private key are placed in the embedded config and `data_dir` is removed, so the binary needs no data directory. A copy of the config is also saved to the config file path. See [Embedded Configuration](/deployment/embedded-config).
 
-When embedding:
+### Service installation
 
-- **Output path**: Where to save the embedded binary
+After the summary, the wizard offers to install the agent as a service. If a service with the chosen name is already installed, it offers `Update binary and restart service?` instead.
 
-:::note
-When editing a target binary (`setup -c /path/to/binary`), the delivery step is skipped -- config is always embedded back into the target binary.
-:::
+| Platform and privileges    | What the wizard offers                                                                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux as root              | systemd service, with the binary copied to `/usr/local/bin/<service-name>`.                                                                                |
+| Linux as a regular user    | User service with automatic backend detection, `systemd --user`, or cron `@reboot` with nohup; or the command for a system-level install.                  |
+| macOS as root              | launchd service, with the binary copied to `/usr/local/bin/<service-name>`.                                                                                |
+| macOS as a regular user    | Prints the `sudo muti-metroo service install` command to run later.                                                                                        |
+| Windows as Administrator   | Windows Service, with the binary copied to `%ProgramFiles%\<service-name>\<service-name>.exe`.                                                             |
+| Windows as a regular user  | User service through a Registry Run key that starts `muti-metroo.dll` at logon, or the command for a Windows Service install.                              |
 
-### Service Installation (Optional)
-
-If a service with the same name is already installed, the wizard offers to update the binary and restart the service.
-
-For fresh installations:
-
-- **Linux (root)**: systemd service
-- **Linux (non-root)**: User service via cron `@reboot` + nohup
-- **macOS**: launchd service (requires root)
-- **Windows (Administrator)**: Windows Service
-- **Windows (non-admin)**: User service via Registry Run key
-
-For Windows without Administrator access, use the CLI after the wizard:
+The service reads the config file at the path chosen in Step 1, so pick a permanent location such as `/etc/muti-metroo/config.yaml` when you intend to install a service. For a Windows user service set up later from the command line:
 
 ```powershell
-muti-metroo service install --user --dll path\to\muti-metroo.dll -c path\to\config.yaml
+muti-metroo service install --user --dll C:\Users\operator\muti-metroo\muti-metroo.dll -c C:\Users\operator\muti-metroo\config.yaml
 ```
 
-This uses the Registry Run key for automatic startup at user logon. See [DLL Mode](/deployment/dll-mode) for details.
+See [System Service](/deployment/system-service) and [DLL Mode](/deployment/dll-mode).
 
-## Example Wizard Session
+## Example session
 
-```
+The session below configures an Ingress and Exit agent with a QUIC listener, one outbound peer that is not reachable yet, and two exit routes. Typed answers follow the prompts; empty answers accept the default.
+
+```text
 $ muti-metroo setup
 
 ================================================================================
-                        Muti Metroo Setup Wizard
+                            Muti Metroo Setup Wizard
 ================================================================================
-                    Userspace Mesh Networking Agent
+                        Userspace Mesh Networking Agent
 
-Tip: You can re-run this wizard on an existing config to modify settings.
+This wizard will help you configure Muti Metroo.
+Press Enter to accept default values shown in [brackets].
+Tip: point it at an existing config to edit it; current values become the defaults.
+
 
 --------------------------------------------------------------------------------
 Step 1/11: Basic Setup
@@ -193,13 +225,15 @@ Configure the essential paths for your agent.
 
 Config File Path [./config.yaml]:
 Data Directory [./data]:
-Display Name (press Enter to use Agent ID) []: My Gateway Agent
+  Data directory stores agent identity and encryption keys.
+Display Name (press Enter to use Agent ID): gateway-1
 
 --------------------------------------------------------------------------------
 Step 2/11: Agent Role
 --------------------------------------------------------------------------------
 Select the roles this agent will perform.
 You can select multiple roles.
+
 
   1. [ ] Ingress (SOCKS5 proxy entry point)
   2. [x] Transit (relay traffic between peers)
@@ -217,14 +251,13 @@ in the next step regardless.
 
 Accept inbound peer connections? [y/N]: y
 
-Transport Protocol:
-
 > 1. QUIC - Best performance, requires UDP port access
   2. HTTP/2 - Works through firewalls that only allow TCP/443
   3. WebSocket - Works through HTTP proxies and CDNs
 
-Select [1]:
+Transport Protocol [1]:
 Listen Address [0.0.0.0:4433]:
+Advertise this listener so other agents can discover and dial it? [y/N]:
 
 --------------------------------------------------------------------------------
 Step 4/11: TLS Configuration
@@ -232,11 +265,11 @@ Step 4/11: TLS Configuration
 All traffic is end-to-end encrypted (X25519 + ChaCha20-Poly1305).
 Transport TLS adds certificate-based peer verification on top of E2E encryption.
 
+
 > 1. Self-signed certificates (Recommended)
   2. Strict TLS with CA verification (Advanced)
 
 Certificate Setup [1]:
-
 [OK] TLS certificates will be auto-generated at startup.
     E2E encryption provides security - TLS verification is optional.
 
@@ -250,18 +283,22 @@ Add peer connections? [y/N]: y
 --------------------------------------------------------------------------------
 Peer #1
 --------------------------------------------------------------------------------
-
-Peer Address (host:port) []: 192.168.1.50:4433
+Peer Address (host:port): 192.0.2.10:4433
 Pin to specific agent ID? [y/N]: n
-Use same transport as listener (QUIC)? [Y/n]: y
-Enable strict TLS verification? (requires CA-signed certs) [y/N]: n
+Use same transport as listener (QUIC)? [Y/n]:
+Enable strict TLS verification? (requires CA-signed certs) [y/N]:
 
 [INFO] Testing connectivity to peer...
-[INFO] Remote agent: Transit Node (abc123def456)
-[INFO] Round-trip time: 5ms
-[OK] Connected successfully!
+[WARNING] Could not connect: Connection timed out - firewall may be blocking
+[INFO] The listener may not be running yet, or a firewall may be blocking.
 
-Add another peer? [y/N]: n
+> 1. Continue anyway (I'll set up the listener later)
+  2. Retry the connection test
+  3. Re-enter peer configuration
+  4. Skip this peer
+
+What would you like to do? [1]:
+Add another peer? [y/N]:
 
 --------------------------------------------------------------------------------
 Step 6/11: SOCKS5 Proxy
@@ -269,7 +306,7 @@ Step 6/11: SOCKS5 Proxy
 Configure the SOCKS5 ingress proxy.
 
 Listen Address [127.0.0.1:1080]:
-Enable authentication? [y/N]: n
+Enable authentication? [y/N]:
 
 --------------------------------------------------------------------------------
 Step 7/11: Exit Node Configuration
@@ -277,25 +314,23 @@ Step 7/11: Exit Node Configuration
 Configure this agent as an exit node.
 It will allow traffic to specified networks.
 
-Allowed Routes (CIDR) - one CIDR per line (e.g., 0.0.0.0/0 for all traffic):
-Enter routes, one per line. Enter empty line to finish.
-Route (or empty to finish) []: 10.0.0.0/8
-Route (or empty to finish) []: 192.168.0.0/16
-Route (or empty to finish) []:
+Allowed Routes (CIDR):
+  Default: 0.0.0.0/0 and ::/0 (enter empty line to keep defaults)
 
---------------------------------------------------------------------------------
-Domain Routes (Optional)
---------------------------------------------------------------------------------
-Route traffic by domain name.
-Examples: api.internal.corp, *.example.com
+Route (or empty to finish): 10.0.0.0/8
+Route (or empty to finish): 192.168.0.0/16
+Route (or empty to finish):
 
-Enter domain patterns, one per line. Enter empty line to finish.
-Domain (or empty to finish) []:
+Route traffic by domain name. Examples: api.internal.corp, *.example.com
+Use *.domain.tld for single-level wildcards.
+
+Domain (or empty to finish):
 
 --------------------------------------------------------------------------------
 Step 8/11: Monitoring & Logging
 --------------------------------------------------------------------------------
 Configure monitoring, logging, and the HTTP management API.
+
 
   1. Debug (verbose)
 > 2. Info (recommended)
@@ -303,15 +338,21 @@ Configure monitoring, logging, and the HTTP management API.
   4. Error (quiet)
 
 Log Level [2]:
-Enable HTTP management API? (health checks, dashboard, CLI remote commands) [Y/n]: y
-Enable HTTP API authentication? [y/N]: n
+Enable HTTP management API? (health checks, dashboard, CLI remote commands) [Y/n]:
+Enable HTTP API authentication? [y/N]:
+
+  WARNING: HTTP API will bind on :8080 without a bearer token.
+  Topology and dashboard endpoints will be readable by anyone who can
+  reach this host on that address. Mutation endpoints remain protected by
+  the management signing key.
+Continue without HTTP API authentication? [y/N]: y
 
 --------------------------------------------------------------------------------
 Step 9/11: Management Commands
 --------------------------------------------------------------------------------
-Shell allows executing commands remotely on this agent.
+Management commands allow executing commands remotely on this agent.
 
-Enable management commands? [y/N]: n
+Enable management commands? [y/N]:
 
 --------------------------------------------------------------------------------
 Step 10/11: File Transfer
@@ -319,7 +360,7 @@ Step 10/11: File Transfer
 File transfer allows uploading and downloading files to/from this agent.
 Files are streamed directly through the mesh network.
 
-Enable file transfer? [y/N]: n
+Enable file transfer? [y/N]:
 
 --------------------------------------------------------------------------------
 Step 11/11: Management & Signing Keys
@@ -330,6 +371,7 @@ Two independent keypairs control mesh management.
     dynamic config changes. Agents without the signing public key cannot
     accept these privileged operations.
 Recommended for any non-trivial deployment.
+
 
   1. Generate new keypairs
 > 2. Enter existing keys
@@ -342,6 +384,7 @@ Configuration Delivery
 --------------------------------------------------------------------------------
 Choose how to deploy the configuration.
 
+
 > 1. Save to config file (traditional)
   2. Embed in binary (single-file deployment)
 
@@ -349,13 +392,15 @@ Delivery method [1]:
 
 Service name [muti-metroo]:
 
+[OK] Generated new E2E encryption keypair
+
 --------------------------------------------------------------------------------
 [OK] Setup Complete!
 --------------------------------------------------------------------------------
 
-  Display Name:    My Gateway Agent
-  Agent ID:        abc123def456789012345678901234567
-  E2E Public Key:  0123456789abcdef0123456789abcdef...
+  Display Name:    gateway-1
+  Agent ID:        fe981f063416aeb04e0156857e9a5f6f
+  E2E Public Key:  8b7e7240b01e001808659c9be485ae07a44addbc81cccb7f76c1cc573df16517
   Config file:     ./config.yaml
   Data dir:        ./data
 
@@ -368,111 +413,110 @@ Service name [muti-metroo]:
     muti-metroo run -c ./config.yaml
 ```
 
-## After the Wizard
+The service installation prompts for the current platform follow the summary.
 
-Once the wizard completes:
+The session writes this `config.yaml`:
 
-1. **Configuration saved**: Your `config.yaml` is ready
-2. **Agent initialized**: Identity stored in data directory
-3. **TLS certificates**: Auto-generated at startup (or embedded in config if using strict mode)
+```yaml
+# Muti Metroo Configuration
+# Generated by setup wizard
 
-### Start the Agent
+agent:
+    display_name: gateway-1
+    data_dir: ./data
+listeners:
+    - transport: quic
+      address: 0.0.0.0:4433
+peers:
+    - id: auto
+      transport: quic
+      address: 192.0.2.10:4433
+socks5:
+    enabled: true
+    address: 127.0.0.1:1080
+    max_connections: 1000
+exit:
+    enabled: true
+    routes:
+        - 10.0.0.0/8
+        - 192.168.0.0/16
+    dns:
+        servers:
+            - 8.8.8.8:53
+            - 1.1.1.1:53
+        timeout: 5s
+http:
+    enabled: true
+    address: :8080
+```
 
-If you did not start it during the wizard:
+## After the wizard
+
+With file delivery, the wizard has written:
+
+- The config file, readable only by its owner (mode `0600`).
+- `agent_id`, `agent_key`, and `agent_key.pub` in the data directory. Running [`init`](/cli/init) separately is not needed.
+
+No certificate files are written. With self-signed TLS the agent generates its certificate at startup; with strict TLS the PEM blocks are inline in the config.
+
+Start the agent, unless the wizard installed and started a service:
 
 ```bash
 muti-metroo run -c ./config.yaml
 ```
 
-### Verify Operation
+Check that it is up and that the SOCKS proxy reaches a host inside one of the exit routes:
 
 ```bash
-# Check health
 curl http://localhost:8080/health
-
-# Query dashboard API
-curl http://localhost:8080/api/dashboard | jq
-
-# Test SOCKS5 (if exit is enabled)
-curl -x socks5://localhost:1080 https://example.com
+muti-metroo status
+curl -x socks5h://localhost:1080 http://192.168.1.10/
 ```
 
-## Service Installation
+`/health` returns `OK` once the agent is running.
 
-When running the wizard with elevated privileges, you can install as a system service:
+## Re-running the wizard
 
-### Linux (as root)
+Run `muti-metroo setup` again and enter the path of the existing config at the first prompt. The wizard loads it and uses its values as defaults. In addition:
+
+- Existing peers are listed, and `Keep these existing peer connections?` defaults to Yes.
+- Existing TLS material, SOCKS5 credentials, the HTTP API token hash, and management keys each get a "keep existing" prompt that defaults to Yes.
+- Exit routes and domain routes are kept when you enter none.
+- Sections the wizard does not ask about, such as `forward`, `routing`, `limits`, `udp`, `icmp`, `sleep`, mesh hosts, and any listeners after the first, are carried over unchanged.
+
+The file is then rewritten in the wizard's format, so comments in a hand-edited config are not preserved.
+
+## Editing embedded configuration
+
+To change the configuration embedded in a deployed binary, pass the binary to `-c`:
 
 ```bash
-sudo muti-metroo setup
-# At the end, choose to install as service
-```
-
-The wizard will:
-
-1. Create `/etc/muti-metroo/config.yaml`
-2. Create systemd unit file
-3. Enable and start the service
-
-### Windows (as Administrator)
-
-```powershell
-# Run as Administrator
-.\muti-metroo.exe setup
-```
-
-The wizard will:
-
-1. Create configuration in `C:\ProgramData\muti-metroo\`
-2. Register Windows Service
-3. Start the service
-
-## Re-running the Wizard
-
-You can run the wizard again to modify configuration:
-
-```bash
-muti-metroo setup
-
-# Existing config detected
-Use existing configuration as base? [y]: y
-```
-
-The wizard will load existing values as defaults.
-
-## Editing Embedded Configuration
-
-To edit the configuration embedded in an existing binary:
-
-```bash
-# Edit embedded config in a deployed binary
 muti-metroo setup -c /usr/local/bin/my-agent
 ```
 
-The wizard will:
+In this mode the wizard:
 
-1. Detect the embedded configuration
-2. Load existing values as defaults
-3. Guide you through changes
-4. Write updated configuration back to the binary
+1. Loads the embedded configuration as defaults.
+2. Asks only for the display name in Step 1, since there is no config file or data directory.
+3. Keeps the agent identity from the embedded config, or generates a new one in memory if none is present.
+4. Writes the new configuration back into the same binary and skips the delivery step. The service name is taken from the binary's file name.
+5. Offers to restart the service if one with that name is installed.
 
-This is useful for updating deployed agents without redeploying:
+To update an installed service manually:
 
 ```bash
-# Stop the service
 sudo systemctl stop my-agent
-
-# Edit the embedded config
-muti-metroo setup -c /usr/local/bin/my-agent
-
-# Restart the service
+sudo muti-metroo setup -c /usr/local/bin/my-agent
 sudo systemctl start my-agent
 ```
 
-See [Embedded Configuration](/deployment/embedded-config) for more details.
+Windows DLL files cannot be passed to `setup -c`. Use a separate config file with the DLL instead.
 
-## Next Steps
+## See Also
 
-- [Your First Mesh](/getting-started/first-mesh) - Connect multiple agents
-- [Configuration Reference](/configuration/overview) - All options explained
-- [Deployment](/deployment/scenarios) - Production deployment patterns
+- [`setup`](/cli/setup): command synopsis and flags.
+- [Quick Start](/getting-started/quick-start): write a configuration by hand instead of using the wizard.
+- [Your First Mesh](/getting-started/first-mesh): connect a second agent to the one you configured.
+- [Configuration Overview](/configuration/overview): every section the wizard writes, with all keys and defaults.
+- [Embedded Configuration](/deployment/embedded-config): single-file deployments built from the delivery step.
+- [System Service](/deployment/system-service): manage the service the wizard installs.

@@ -1,131 +1,53 @@
 # Muti Metroo Documentation
 
-This directory contains the Docusaurus documentation site for Muti Metroo.
+The Docusaurus site published at https://mutimetroo.com. Pages live in
+`docs/`, the sidebar in `sidebars.ts`, and the site configuration in
+`docusaurus.config.ts`.
 
-## Getting Started
+## Writing
 
-### Install Dependencies
+Read [STYLE.md](STYLE.md) before editing a page. The site follows the MDN
+editorial model: every claim is verified against the source, reference
+material comes before narrative, one canonical page per concept, and every
+page ends with a See Also section.
+
+Screenshots are generated, never hand-made. See
+[scripts/README.md](scripts/README.md) for the capture rig.
+
+## Local development
 
 ```bash
 npm install
+npm start          # dev server at http://localhost:3000 with live reload
+npm run build      # production build into build/
+npm run serve      # serve the production build
 ```
 
-### Local Development
+`npm run build` must finish without broken link or anchor warnings.
 
-```bash
-npm start
-```
+## Structure
 
-This starts a local development server at `http://localhost:3000` with live reload.
+| Directory          | Contents                                                  |
+| ------------------ | --------------------------------------------------------- |
+| `getting-started/` | Installation, quick start, setup wizard, first mesh        |
+| `concepts/`        | Architecture, agent roles, transports, routing, streams    |
+| `features/`        | Task-oriented usage guides                                 |
+| `configuration/`   | One reference page per configuration section               |
+| `deployment/`      | Service managers, containers, DLL mode, proxies, HA        |
+| `security/`        | Encryption, TLS, authentication, access control            |
+| `cli/`             | One reference page per top-level command                   |
+| `api/`             | HTTP API reference, one page per endpoint group            |
+| `troubleshooting/` | Common issues, connectivity, performance, FAQ              |
 
-### Build
+Pages for the companion tools (`mutiauk.mdx`, `muti-metroo-manager.mdx`) and
+the download page sit at the top level.
 
-```bash
-npm run build
-```
-
-Builds the static site to the `build` directory.
-
-### Serve Built Site
-
-```bash
-npm run serve
-```
-
-Serves the built site locally for testing.
-
-## Documentation Structure
-
-```
-docs/
-├── intro.md                    # Introduction and overview
-├── getting-started.md          # Getting started guide
-├── installation.md             # Installation instructions
-├── quick-start.md              # Quick start manual setup
-├── interactive-setup.md        # Interactive wizard guide
-├── configuration.md            # Configuration reference
-├── architecture/               # Architecture documentation
-│   ├── overview.md
-│   ├── agent-roles.md
-│   ├── data-flow.md
-│   └── packages.md
-├── features/                   # Feature documentation
-│   ├── socks5.md
-│   ├── exit-routing.md
-│   ├── file-transfer.md
-│   └── rpc.md
-├── cli/                        # CLI reference
-│   ├── overview.md
-│   ├── run.md
-│   ├── init.md
-│   ├── setup.md
-│   ├── cert.md
-│   ├── rpc.md
-│   ├── file-transfer.md
-│   └── service.md
-├── api/                        # HTTP API reference
-│   ├── overview.md
-│   ├── health.md
-│   ├── metrics.md
-│   ├── agents.md
-│   ├── routes.md
-│   ├── rpc.md
-│   ├── file-transfer.md
-│   └── dashboard.md
-├── protocol/                   # Protocol documentation
-│   ├── overview.md
-│   ├── frames.md
-│   ├── limits.md
-│   └── routing.md
-└── development/                # Development guides
-    ├── building.md
-    ├── testing.md
-    └── docker.md
-```
-
-## Configuration
-
-The site is configured to be deployed via static hosting.
-
-Key configuration files:
-
-- `docusaurus.config.ts` - Site configuration
-- `sidebars.ts` - Sidebar navigation structure
-- `src/css/custom.css` - Custom styling
+When a page is renamed, merged, or removed, add a redirect in
+`docusaurus.config.ts` (`@docusaurus/plugin-client-redirects`).
 
 ## Deployment
 
-The site can be deployed to:
-
-- Static hosting (Netlify, Vercel, etc.)
-- Static hosting
-- Self-hosted web server
-
-Build the static site and deploy the `build` directory:
-
-```bash
-npm run build
-# Deploy contents of build/ directory
-```
-
-## Search
-
-The site is configured to use Algolia DocSearch. Update the Algolia credentials in `docusaurus.config.ts`:
-
-```typescript
-algolia: {
-  appId: 'YOUR_APP_ID',
-  apiKey: 'YOUR_SEARCH_API_KEY',
-  indexName: 'muti-metroo',
-}
-```
-
-Or use the built-in search by installing the plugin:
-
-```bash
-npm install @docusaurus/theme-search-algolia
-```
-
-## License
-
-Documentation is part of the Muti Metroo project. All rights reserved.
+Every push to `master` that touches `docs/` builds the site and deploys it
+to GitHub Pages (`.github/workflows/docs.yml`). The custom domain comes from
+`static/CNAME`. Search is provided by `@easyops-cn/docusaurus-search-local`
+and needs no external service.

@@ -1,5 +1,6 @@
 ---
 title: Your First Mesh
+description: Connect an ingress agent to an exit agent so SOCKS5 traffic leaves the mesh from a remote host, then add a transit agent between them.
 sidebar_position: 5
 ---
 
@@ -7,327 +8,290 @@ sidebar_position: 5
   <img src="/img/mole-wiring.png" alt="Mole wiring connections" style={{maxWidth: '180px'}} />
 </div>
 
-# Your First Mesh Network
+# Your First Mesh
 
-This guide shows you how to tunnel traffic through a remote network. You will connect two agents so that traffic entering one exits from the other - reaching destinations that would otherwise be inaccessible.
+This guide connects two agents so that traffic entering one leaves the mesh from the other:
 
-**What you will build:**
-- An ingress agent that accepts your SOCKS5 connections
-- An exit agent on a remote network that opens connections to destinations
-- A secure tunnel between them that traverses any network path
+- **Agent A** (ingress) runs where your applications are. It accepts SOCKS5 connections.
+- **Agent B** (exit) runs on the remote network. It opens connections to destinations.
 
-## The Setup
-
-Here is what you are building:
+A later section adds a third agent as a transit relay between them.
 
 <div className="tunnel-diagram">
 
 ```mermaid
 flowchart LR
-    C["Client<br/>(Browser)"]
+    C["Client<br/>(curl, SSH, browser)"]
     A["Agent A<br/>(Ingress)"]
     B["Agent B<br/>(Exit)"]
-    I((Internet))
+    I((Destinations))
 
     C -->|"SOCKS5<br/>localhost:1080"| A
-    A -->|"QUIC/TLS<br/>192.168.1.20:4433"| B
+    A -->|"QUIC<br/>192.168.1.20:4433"| B
     B -->|TCP| I
 ```
 
 </div>
 
-- **Agent A** (your machine): Where you connect with curl, SSH, or browser
-- **Agent B** (remote network): Opens connections to destinations you want to reach
-
 ## Prerequisites
 
-- Muti Metroo [installed](/getting-started/installation)
-- Two machines or terminals (can use same machine with different ports)
-- Network connectivity between agents
+- `muti-metroo` [installed](/getting-started/installation) on both hosts.
+- Agent A can reach Agent B on UDP port 4433. Only the dialing side needs to reach the listening side; Agent B never connects to Agent A.
 
-:::info Automatic TLS
-No certificate setup required. Agents auto-generate TLS certificates and E2E encryption secures all traffic. For strict verification, see [TLS/mTLS](/security/tls-mtls).
-:::
+You can also run both agents on one machine. Give each agent its own data directory, and use different ports for the listener and HTTP API.
 
-## Step 1: Initialize Agent Identities
+The examples use `192.168.1.20` as Agent B's address. Replace it with the real address of your exit host.
 
-### Agent A
+## Step 1: Initialize Agent B
 
-```bash
-muti-metroo init -d ./data-a
-# Note the Agent ID: aaaa1111....
-```
-
-### Agent B
+On Agent B's host:
 
 ```bash
 muti-metroo init -d ./data-b
-# Note the Agent ID: bbbb2222....
 ```
 
-## Step 2: Configure Agent B (Exit Node)
+```text
+Agent initialized in ./data-b
+Agent ID: a139b7e2819a0ce019552100203b1656
+```
+
+Note the agent ID. Agent A uses it to make sure it is talking to the right peer.
+
+## Step 2: Configure and start Agent B (exit)
 
 Create `config-b.yaml`:
 
 ```yaml
 agent:
-  id: "auto"
   display_name: "Agent B (Exit)"
   data_dir: "./data-b"
-  log_level: "info"
 
-# Listen for peer connections
+# Accept peer connections from other agents
 listeners:
   - transport: quic
     address: "0.0.0.0:4433"
 
-# Exit node - open connections to internet
+# Open connections to any IPv4 destination
 exit:
   enabled: true
   routes:
-    - "0.0.0.0/0"              # Default route - all traffic
+    - "0.0.0.0/0"
 
-# HTTP API
 http:
   enabled: true
-  address: ":8081"             # Different port if on same machine
+  address: "127.0.0.1:8081"
 ```
 
-Start Agent B:
+Start it:
 
 ```bash
 muti-metroo run -c ./config-b.yaml
 ```
 
-Note the Agent ID from the output (e.g., `bbbb2222333344445555666677778888`).
+## Step 3: Configure and start Agent A (ingress)
 
-## Step 3: Configure Agent A (Ingress Node)
-
-Create `config-a.yaml` with Agent B's ID:
+On Agent A's host, create `config-a.yaml`. Put Agent B's ID in `peers[].id`:
 
 ```yaml
 agent:
-  id: "auto"
   display_name: "Agent A (Ingress)"
   data_dir: "./data-a"
-  log_level: "info"
 
-# Listen for peer connections (optional, for other agents)
-listeners:
-  - transport: quic
-    address: "0.0.0.0:4434"    # Different port if on same machine
-
-# Connect to Agent B
+# Dial Agent B
 peers:
-  - id: "bbbb2222333344445555666677778888"  # Agent B's ID
+  - id: "a139b7e2819a0ce019552100203b1656"
     transport: quic
-    address: "192.168.1.20:4433"            # Agent B's address
+    address: "192.168.1.20:4433"
 
-# SOCKS5 proxy for client connections
+# Accept SOCKS5 connections from local applications
 socks5:
   enabled: true
   address: "127.0.0.1:1080"
 
-# HTTP API
 http:
   enabled: true
-  address: ":8080"
+  address: "127.0.0.1:8080"
 ```
 
-Start Agent A:
+Agent A has no `listeners` section because it only dials out. Add one if other agents need to connect to it.
+
+Start it:
 
 ```bash
 muti-metroo run -c ./config-a.yaml
 ```
 
-## Step 4: Verify Connection
+Agent A creates its identity on first start, and logs the connection:
 
-### Check Agent A's Peers
-
-```bash
-curl http://localhost:8080/healthz
+```text
+level=INFO msg="connected to peer" peer_id=a139b7e2 address=192.168.1.20:4433 transport=quic
 ```
 
-Expected output:
+Agent B logs the accepted connection:
+
+```text
+level=INFO msg="peer connected" peer_id=bc0e9d4a remote_addr=192.168.1.10:57050
+```
+
+## Step 4: Check the connection
+
+On Agent A's host, list the connected peers:
+
+```bash
+muti-metroo peer status
+```
+
+```text
+Connected Peers
+===============
+ID           NAME                 STATE          ROLE       RTT
+--           ----                 -----          ----       ---
+a139b7e2     Agent B (Exit)       CONNECTED      dialer     -
+
+Total: 1 peer(s)
+```
+
+Agent A has learned Agent B's exit route. The dashboard API shows the route and the path to its origin:
+
+```bash
+curl -s http://localhost:8080/api/dashboard | jq '.routes'
+```
 
 ```json
-{
-  "status": "healthy",
-  "running": true,
-  "peer_count": 1,
-  "stream_count": 0,
-  "route_count": 1,
-  "socks5_running": true,
-  "exit_handler_running": false
-}
+[
+  {
+    "network": "0.0.0.0/0",
+    "route_type": "cidr",
+    "origin": "Agent B (Exit)",
+    "origin_id": "a139b7e2",
+    "hop_count": 1,
+    "path_display": [
+      "Agent A (Ingress)",
+      "Agent B (Exit)"
+    ],
+    "path_ids": [
+      "bc0e9d4a",
+      "a139b7e2"
+    ],
+    "tcp": true,
+    "udp": true
+  }
+]
 ```
 
-### Check Logs
+## Step 5: Send traffic through the mesh
 
-Agent A should show:
-
-```
-INFO  Connected to peer peer_id=bbbb2222... addr=192.168.1.20:4433
-INFO  Route added cidr=0.0.0.0/0 next_hop=bbbb2222... metric=1
-```
-
-Agent B should show:
-
-```
-INFO  Accepted peer connection peer_id=aaaa1111... addr=192.168.1.10:xxxxx
-```
-
-## Step 5: Test the Mesh
-
-Now test that traffic flows through the mesh:
+On Agent A's host:
 
 ```bash
-# From Agent A's machine
-curl -x socks5://localhost:1080 https://example.com
+curl -x socks5h://localhost:1080 https://example.com
 ```
 
-You should see the webpage content. In the logs:
-
-**Agent A:**
-```
-INFO  SOCKS5 connect request dest=example.com:443
-INFO  Stream opened stream_id=1 dest=example.com:443
-```
-
-**Agent B:**
-```
-INFO  Stream open request stream_id=1 dest=example.com:443
-INFO  Exit connection established dest=93.184.216.34:443
-```
-
-## Step 6: Test More Applications
-
-### SSH Through the Mesh
+The page comes back through the mesh. The connection to `example.com` is opened by Agent B, so the destination sees Agent B's address. Other SOCKS5 clients work the same way:
 
 ```bash
-ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@remote-server
+ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@server.example.com
 ```
 
-### Browser Proxy
+To use the mesh from a browser, set its SOCKS5 proxy to `localhost:1080` and enable DNS through the proxy.
 
-Configure your browser to use `localhost:1080` as SOCKS5 proxy.
+## How the traffic flows
 
-### curl with Verbose Output
+When you run `curl -x socks5h://localhost:1080 https://example.com`:
 
-```bash
-curl -v -x socks5://localhost:1080 https://httpbin.org/ip
-```
+1. curl connects to Agent A's SOCKS5 proxy and asks for `example.com:443`.
+2. Agent A resolves `example.com` and looks up the address in its route table. The only match is `0.0.0.0/0`, advertised by Agent B.
+3. Agent A opens an end-to-end encrypted stream to Agent B.
+4. Agent B opens a TCP connection to the destination and relays data in both directions.
 
-## How It Works
+Because Agent A resolves the name for CIDR routes, it must be able to resolve the hostnames you use. To resolve names at the exit instead, use [domain routes](/features/exit-routing).
 
-When you run `curl -x socks5://localhost:1080 https://example.com`:
+## Add a transit agent
 
-1. Your request goes to Agent A's SOCKS5 proxy
-2. Agent A finds that Agent B advertises a route to the destination
-3. Agent A tunnels the connection through to Agent B
-4. Agent B opens the real TCP connection to example.com
-5. Data flows back through the tunnel to your curl command
-
-The key insight: Agent B can reach destinations that Agent A cannot. Your traffic exits from Agent B's network.
-
-## Querying the Dashboard API
-
-Check the mesh topology via the dashboard API:
-
-```bash
-# Agent A topology
-curl http://localhost:8080/api/topology | jq
-
-# Agent B dashboard overview
-curl http://localhost:8081/api/dashboard | jq
-```
-
-The topology endpoint returns all agents and their connections.
-
-## Adding a Third Agent (Transit)
-
-To add a transit node between A and B:
+A transit agent relays traffic between other agents. It needs no SOCKS5 or exit configuration. This section puts Agent C between A and B.
 
 ```mermaid
 flowchart LR
-    A[Agent A] <--> C["Agent C<br/>(Transit)"] <--> B[Agent B]
+    A[Agent A<br/>Ingress] --> C["Agent C<br/>(Transit)"] --> B[Agent B<br/>Exit]
 ```
 
-Agent C configuration:
+On Agent C's host (`192.168.1.30` in this example), initialize it and note its ID:
+
+```bash
+muti-metroo init -d ./data-c
+```
+
+```text
+Agent initialized in ./data-c
+Agent ID: c90ff182452eb355e857ae7ab93ab563
+```
+
+Create `config-c.yaml`. Agent C listens for Agent A and dials Agent B:
 
 ```yaml
 agent:
-  id: "auto"
   display_name: "Agent C (Transit)"
   data_dir: "./data-c"
-  log_level: "info"
 
 listeners:
   - transport: quic
-    address: "0.0.0.0:4435"
+    address: "0.0.0.0:4433"
 
-# Connect to Agent B
 peers:
-  - id: "bbbb2222..."
+  - id: "a139b7e2819a0ce019552100203b1656"
     transport: quic
     address: "192.168.1.20:4433"
 
-# No socks5 or exit - pure transit
 http:
   enabled: true
-  address: ":8082"
+  address: "127.0.0.1:8082"
 ```
 
-Update Agent A to connect to Agent C instead of Agent B:
+Change the `peers` section of `config-a.yaml` to dial Agent C instead of Agent B:
 
 ```yaml
 peers:
-  - id: "cccc3333..."     # Agent C's ID
+  - id: "c90ff182452eb355e857ae7ab93ab563"
     transport: quic
-    address: "192.168.1.30:4435"
+    address: "192.168.1.30:4433"
 ```
 
-Routes will propagate: Agent A learns about Agent B's 0.0.0.0/0 route through Agent C.
+Start Agent C, then restart Agent A. Agent B's route now reaches Agent A through Agent C, and `hop_count` becomes `2`:
+
+```bash
+curl -s http://localhost:8080/api/dashboard | jq '.routes[0].path_display'
+```
+
+```json
+[
+  "Agent A (Ingress)",
+  "Agent C (Transit)",
+  "Agent B (Exit)"
+]
+```
+
+Traffic is still encrypted end to end between A and B. Agent C forwards it without being able to read it.
 
 ## Troubleshooting
 
-### No Route to Host
+### Agent A never connects
 
-```
-Error: no route to 93.184.216.34
-```
+- Check that Agent B's log shows `listener started` with the expected address.
+- QUIC uses UDP. Check that firewalls between the hosts allow UDP to port 4433, or switch both sides to `h2` or `ws`, which use TCP. See [Transports](/concepts/transports).
+- If `peers[].id` does not match the ID Agent B presents, the handshake fails. Use `id: "auto"` to accept any ID while testing.
 
-- Check Agent B is running and has exit enabled
-- Verify connection between agents
-- Check routes: `curl http://localhost:8080/healthz`
+### Traffic does not go through Agent B
 
-### Connection Refused
+- If `muti-metroo peer status` shows no peers, fix the connection first.
+- If the dashboard shows no route that covers the destination, check that Agent B has `exit.enabled: true` and a matching route. `muti-metroo route trace <ip>` explains which route the agent would pick.
 
-```
-Error: connection refused
-```
+See [Connectivity](/troubleshooting/connectivity) for more.
 
-- Verify Agent B is listening on correct address
-- Check firewall rules
-- Verify TLS certificates
+## See Also
 
-### Certificate Error (strict TLS only)
-
-If you enabled [strict TLS verification](/security/tls-mtls):
-
-```
-Error: certificate verify failed
-```
-
-- Ensure both agents use certs signed by same CA
-- Check certificate expiration
-- Verify peer ID matches certificate
-
-See [Troubleshooting Guide](/troubleshooting/common-issues) for more help.
-
-## Next Steps
-
-- [Core Concepts](/concepts/architecture) - Understand the architecture
-- [Configuration Reference](/configuration/overview) - All configuration options
-- [Deployment Scenarios](/deployment/scenarios) - Real-world deployment patterns
-- [Security Best Practices](/security/best-practices) - Production hardening
+- [Architecture](/concepts/architecture): agent roles, routing, and encryption in depth
+- [Peers](/configuration/peers): peer connection options, including TLS and HTTP proxies
+- [Listeners](/configuration/listeners): QUIC, HTTP/2, and WebSocket listener options
+- [Exit Routing](/features/exit-routing): CIDR and domain routes
+- [Deployment Scenarios](/deployment/scenarios): topologies for real deployments
+- [Best Practices](/security/best-practices): hardening a mesh for production

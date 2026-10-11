@@ -1,229 +1,156 @@
-# Forward Management API
-
-HTTP endpoints for managing dynamic forward listeners (ingress) and endpoints (exit) at runtime.
-
-## Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/forward/manage` | POST | Manage forward listeners on local agent |
-| `/agents/{agent-id}/forward/manage` | POST | Manage forward listeners on remote agent |
-| `/forward/endpoints/manage` | POST | Manage forward endpoints on local agent |
-| `/agents/{agent-id}/forward/endpoints/manage` | POST | Manage forward endpoints on remote agent |
-
-These endpoints require `http.remote_api: true` in configuration.
-
+---
+title: Forward Management Endpoints
+description: Add, remove, and list port forward listeners and endpoints at runtime on local and remote agents.
+sidebar_position: 6
 ---
 
-## POST /forward/manage
+# Forward Management Endpoints
 
-Manage forward listeners on the local agent.
+These endpoints change [port forwarding](/features/port-forwarding) at runtime. Forward listeners accept TCP connections on the ingress side; forward endpoints map a routing key to a `host:port` target on the exit side. A connection flows when a listener and an endpoint share the same key. The endpoints belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /forward/manage` | Forward listeners on the local agent |
+| `POST /agents/{id}/forward/manage` | Forward listeners on a remote agent |
+| `POST /forward/endpoints/manage` | Forward endpoints on the local agent |
+| `POST /agents/{id}/forward/endpoints/manage` | Forward endpoints on a remote agent |
+
+`add` and `remove` are mutations: the agent serving the request must have `management.signing_private_key`, otherwise it returns `403`. Mutations are written to the [dynamic configuration journal](/configuration/dynamic-config-persistence) when `agent.data_dir` is set and are replayed on restart. Listeners and endpoints from the `forward` configuration section cannot be removed or replaced.
+
+## `POST /forward/manage`
 
 ### Request
 
-Add a listener:
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `key` | string | `add`, `remove` | Routing key |
+| `address` | string | `add` | Listen address, for example `127.0.0.1:9090` or `:9090` |
+| `max_connections` | integer | `add` | Concurrent connection limit; `0` (default) means unlimited |
+
+Adding a key that already exists as a dynamic listener stops the old listener and starts the new one.
 
 ```bash
 curl -X POST http://localhost:8080/forward/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "key": "web-server", "address": ":9090"}'
+  -d '{"action": "add", "key": "ssh", "address": "127.0.0.1:2222", "max_connections": 10}'
 ```
 
-Add a listener with connection limit:
+```json
+{
+  "status": "ok",
+  "message": "forward listener \"ssh\" added on 127.0.0.1:2222"
+}
+```
 
 ```bash
 curl -X POST http://localhost:8080/forward/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "key": "web-server", "address": ":9090", "max_connections": 100}'
+  -d '{"action": "remove", "key": "ssh"}'
 ```
 
-Remove a listener:
-
-```bash
-curl -X POST http://localhost:8080/forward/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "remove", "key": "web-server"}'
+```json
+{
+  "status": "ok",
+  "message": "forward listener \"ssh\" removed"
+}
 ```
 
-List all listeners:
+### `list`
+
+Returns listeners from the configuration and those added at runtime. The `listeners` field is omitted when there are none.
 
 ```bash
 curl -X POST http://localhost:8080/forward/manage \
   -H "Content-Type: application/json" \
   -d '{"action": "list"}'
 ```
-
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | Action to perform: `add`, `remove`, or `list` |
-| `key` | string | For add/remove | Routing key for the forward listener |
-| `address` | string | For add | Listen address (e.g., `:9090`, `0.0.0.0:8080`) |
-| `max_connections` | integer | No | Maximum concurrent connections (default: 0 = unlimited) |
-
-### Response
-
-**Add Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "forward listener \"web-server\" added on [::]:9090"
-}
-```
-
-**Remove Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "forward listener \"web-server\" removed"
-}
-```
-
-**List Success (200)**:
 
 ```json
 {
   "status": "ok",
   "listeners": [
     {
-      "key": "web-server",
-      "address": "[::]:9090",
+      "key": "web",
+      "address": "127.0.0.1:9090",
       "max_connections": 0,
       "dynamic": false
     },
     {
-      "key": "api-server",
-      "address": "[::]:8081",
-      "max_connections": 100,
+      "key": "ssh",
+      "address": "127.0.0.1:2222",
+      "max_connections": 10,
       "dynamic": true
     }
   ]
 }
 ```
 
-**Bad Request (400)**:
+| Field | Description |
+| ----- | ----------- |
+| `key` | Routing key |
+| `address` | Bound listen address |
+| `max_connections` | Connection limit; `0` is unlimited |
+| `dynamic` | `true` for listeners added at runtime |
 
-```json
-{
-  "error": "key is required"
-}
-```
+### Errors
 
-```json
-{
-  "error": "listener \"web-server\" is a config listener and cannot be removed"
-}
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"key is required"}` | Missing `key` |
+| 400 | `{"error":"address is required"}` | `add` without `address` |
+| 400 | `{"error":"listener \"web\" is a config listener and cannot be removed"}` | `remove` of a configured listener |
+| 400 | `{"error":"listener \"web\" is a config listener and cannot be replaced"}` | `add` of a configured key |
+| 400 | `{"error":"listener \"zzz\" not found"}` | `remove` of an unknown key |
+| 400 | `{"error":"failed to start listener: ..."}` | The address could not be bound |
+| 400 | `{"error":"unknown action \"bogus\" (expected add, remove, or list)"}` | Invalid `action` |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key |
+| 403 | `forward management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 405 | `method not allowed` | Method other than `POST` |
 
-```json
-{
-  "error": "listener \"web-server\" not found"
-}
-```
-
-**Forbidden (403)**:
-
-```
-forward management restricted: management key decryption unavailable
-```
-
-### Behavior
-
-When a listener is added:
-1. The key and address are validated
-2. If the key belongs to a config listener, the request is rejected
-3. If a dynamic listener with the same key exists, it is stopped and replaced
-4. The new listener is started on the specified address
-5. Node info is immediately re-advertised to peers
-
-When a listener is removed:
-1. The key must belong to a dynamic listener (not from config)
-2. The listener is stopped and removed
-3. Node info is immediately re-advertised to peers
-
-When listing:
-- Both config and dynamic listeners are returned
-- The `dynamic` field distinguishes runtime listeners from config-file listeners
-
-Dynamic listeners:
-- Are ephemeral (lost on agent restart)
-- Can be replaced by adding the same key again
-- Config-file listeners are protected from modification
-
----
-
-## POST /agents/\{agent-id\}/forward/manage
-
-Manage forward listeners on a remote agent.
+## `POST /forward/endpoints/manage`
 
 ### Request
 
-```bash
-curl -X POST http://localhost:8080/agents/abc123def456/forward/manage \
-  -H "Content-Type: application/json" \
-  -d '{"action": "add", "key": "web-server", "address": ":9090"}'
-```
+| Field | Type | Used by | Description |
+| ----- | ---- | ------- | ----------- |
+| `action` | string | all | `add`, `remove`, or `list` |
+| `key` | string | `add`, `remove` | Routing key |
+| `target` | string | `add` | Destination in `host:port` form |
 
-### Request Body
-
-Same as `/forward/manage`.
-
-### Response
-
-Same response formats as `/forward/manage`.
-
-The request is forwarded to the target agent via the mesh control channel. The response reflects the result from the remote agent.
-
----
-
-## Error Responses
-
-All endpoints may return:
-
-| Status | Description |
-|--------|-------------|
-| 400 | Invalid request body or parameters |
-| 403 | Management key required but unavailable |
-| 404 | Endpoint disabled (remote_api not enabled) or agent not found |
-| 405 | Method not allowed (must be POST) |
-| 503 | Forward management not configured |
-
-:::note Management Key Protection
-Forward listener management endpoints follow the same management key restrictions as route management. Agents with only `management.public_key` (field agents) cannot manage listeners. Agents with both keys (operator nodes) can manage listeners freely.
-:::
-
-:::warning Persistence
-Dynamic listeners and endpoints survive agent restarts when `agent.data_dir` is configured; without it they are ephemeral. For always-on entries, add them to the `forward.listeners` / `forward.endpoints` sections in the configuration file.
-:::
-
----
-
-## POST /forward/endpoints/manage
-
-Manage forward endpoints (exit-side routing key -> target mappings) on the local agent.
-
-### Request
-
-Add an endpoint:
+Adding a key that already exists as a dynamic endpoint replaces its target. New and removed endpoints are advertised to peers immediately.
 
 ```bash
 curl -X POST http://localhost:8080/forward/endpoints/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "key": "web-server", "target": "127.0.0.1:3000"}'
+  -d '{"action": "add", "key": "ssh", "target": "127.0.0.1:22"}'
 ```
 
-Remove an endpoint:
+```json
+{
+  "status": "ok",
+  "message": "forward endpoint \"ssh\" added -> 127.0.0.1:22"
+}
+```
+
+The `>` escape in `message` is the `>` character.
 
 ```bash
 curl -X POST http://localhost:8080/forward/endpoints/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "remove", "key": "web-server"}'
+  -d '{"action": "remove", "key": "ssh"}'
 ```
 
-List all endpoints:
+```json
+{
+  "status": "ok",
+  "message": "forward endpoint \"ssh\" removed"
+}
+```
+
+### `list`
+
+The `endpoints` field is omitted when there are none.
 
 ```bash
 curl -X POST http://localhost:8080/forward/endpoints/manage \
@@ -231,98 +158,70 @@ curl -X POST http://localhost:8080/forward/endpoints/manage \
   -d '{"action": "list"}'
 ```
 
-### Request Body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | Yes | Action to perform: `add`, `remove`, or `list` |
-| `key` | string | For add/remove | Routing key registered on the agent |
-| `target` | string | For add | Destination in `host:port` format |
-
-### Response
-
-**Add Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "forward endpoint \"web-server\" added -> 127.0.0.1:3000"
-}
-```
-
-**Remove Success (200)**:
-
-```json
-{
-  "status": "ok",
-  "message": "forward endpoint \"web-server\" removed"
-}
-```
-
-**List Success (200)**:
-
 ```json
 {
   "status": "ok",
   "endpoints": [
     {
-      "key": "web-server",
+      "key": "web",
       "target": "127.0.0.1:3000",
       "dynamic": false
     },
     {
-      "key": "api-server",
-      "target": "127.0.0.1:4000",
+      "key": "ssh",
+      "target": "127.0.0.1:22",
       "dynamic": true
     }
   ]
 }
 ```
 
-**Bad Request (400)**:
+### Errors
 
-```json
-{
-  "error": "target is required"
-}
-```
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"key is required"}` | Missing `key` |
+| 400 | `{"error":"target is required"}` | `add` without `target` |
+| 400 | `{"error":"invalid target \"...\": ..."}` | `target` is not `host:port` |
+| 400 | `{"error":"endpoint \"web\" is a config endpoint and cannot be replaced"}` | `add` of a configured key |
+| 400 | `{"error":"endpoint \"web\" is a config endpoint and cannot be removed"}` | `remove` of a configured key |
+| 400 | `{"error":"endpoint \"zzz\" not found"}` | `remove` of an unknown key |
+| 400 | `{"error":"endpoint \"ssh\" is held by an expose session ...; disconnect it first"}` | The key is registered by an active SOCKS expose session |
+| 403 | `management signing private key not configured on this agent` | Mutation without a signing private key |
+| 403 | `forward endpoint management restricted: management key decryption unavailable` | `management.public_key` is set without `management.private_key` |
+| 405 | `method not allowed` | Method other than `POST` |
 
-```json
-{
-  "error": "endpoint \"web-server\" is a config endpoint and cannot be replaced"
-}
-```
+## `POST /agents/{id}/forward/manage`
 
-```json
-{
-  "error": "endpoint \"web-server\" not found"
-}
-```
-
-### Behavior
-
-When an endpoint is added:
-1. `key` and `target` are validated (`host:port` format)
-2. If the key belongs to a config endpoint, the request is rejected
-3. If a dynamic endpoint with the same key exists, its target is replaced
-4. The routing key is registered with the forward handler and a local forward route is added
-5. Route advertisement is triggered so peer listeners can reach the new target
-
-When an endpoint is removed:
-1. The key must belong to a dynamic endpoint (not from config)
-2. The routing key is unregistered from the handler and the local forward route is withdrawn
-3. A per-route `RouteWithdraw` is flooded to all connected peers immediately so the withdrawn key is pruned from peer routing tables without waiting for `route_ttl`
-
-When listing, both config and dynamic endpoints are returned; the `dynamic` field distinguishes them.
-
----
-
-## POST /agents/\{agent-id\}/forward/endpoints/manage
-
-Manage forward endpoints on a remote agent. Request and response shapes are identical to `/forward/endpoints/manage`; the payload is delivered to the target agent via the mesh control channel and the result is returned synchronously.
+Manages forward listeners on a remote agent. The request body and responses are the same as for [`POST /forward/manage`](#post-forwardmanage).
 
 ```bash
-curl -X POST http://localhost:8080/agents/abc123def456/forward/endpoints/manage \
+curl -X POST http://localhost:8080/agents/93cdf211bb05aa48900a61ab6699fbdd/forward/manage \
   -H "Content-Type: application/json" \
-  -d '{"action": "add", "key": "web-server", "target": "127.0.0.1:3000"}'
+  -d '{"action": "add", "key": "ssh", "address": "127.0.0.1:2222"}'
 ```
+
+## `POST /agents/{id}/forward/endpoints/manage`
+
+Manages forward endpoints on a remote agent. The request body and responses are the same as for [`POST /forward/endpoints/manage`](#post-forwardendpointsmanage).
+
+```bash
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/forward/endpoints/manage \
+  -H "Content-Type: application/json" \
+  -d '{"action": "add", "key": "ssh", "target": "127.0.0.1:22"}'
+```
+
+For both remote endpoints the local agent signs `add` and `remove` and forwards the request over the mesh; the target verifies the signature with its `management.signing_public_key`. Additional errors:
+
+| Status | Body | Cause |
+| ------ | ---- | ----- |
+| 400 | `{"error":"management signing public key not configured on this agent"}` | The target has no signing public key |
+| 400 | `invalid agent ID format` | `{id}` is not a full agent ID |
+| 502 | `failed to send request: <reason>` | The target is unknown, unreachable, or did not answer within 30 seconds |
+
+## See Also
+
+- [CLI - forward](/cli/forward) - The `forward` commands that call these endpoints
+- [Port Forwarding](/features/port-forwarding) - How listeners and endpoints work together
+- [Forward Configuration](/configuration/forward) - Static listeners and endpoints
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart

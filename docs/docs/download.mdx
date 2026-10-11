@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Download
-description: Download Muti Metroo binaries for your platform
+description: Download Muti Metroo binaries for Linux, macOS, and Windows, verify their checksums, and get the PDF user manual and companion tools.
 ---
 
 import Tabs from '@theme/Tabs';
@@ -64,20 +64,20 @@ return null;
 
 <OSDetector />
 
-Download the latest Muti Metroo binary for your platform. All binaries are self-contained and require no additional dependencies.
+Download the latest Muti Metroo binary for your platform. Each binary is self-contained and needs no other files.
 
 :::info Terms of Service
 By downloading these binaries, you agree to the [Terms of Service](/terms-of-service). The source code is available under the [MIT License](https://github.com/postalsys/Muti-Metroo/blob/master/LICENSE).
 :::
 
-:::tip Build from Source
-Binaries are provided for convenience; building from source is recommended for review and customization. See the [source repository](https://github.com/postalsys/Muti-Metroo) for build instructions.
+:::tip Build from source
+To review or modify the code, build the binary yourself. See [Build from source](/getting-started/installation#build-from-source).
 :::
 
 <Tabs groupId="os">
   <TabItem value="macos" label="macOS" default>
 
-### Apple Silicon (M-series)
+### Apple Silicon
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-arm64" primary>
@@ -95,22 +95,21 @@ Binaries are provided for convenience; building from source is recommended for r
 
 ### Installation
 
+This example installs the Apple Silicon binary. For Intel Macs, use `muti-metroo-darwin-amd64`.
+
 ```bash
-# Download for your architecture (example: Apple Silicon)
-curl -L -o muti-metroo https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-arm64
-
-# Make executable and install
-chmod +x muti-metroo
-sudo mv muti-metroo /usr/local/bin/
-
-# Verify installation
+curl -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-arm64
+chmod +x muti-metroo-darwin-arm64
+sudo mv muti-metroo-darwin-arm64 /usr/local/bin/muti-metroo
 muti-metroo --version
 ```
 
-:::note Gatekeeper Warning
-On first run, macOS may show a security warning because the binary is not signed with a Developer ID certificate. To allow it:
-1. Right-click the binary and select "Open", or
-2. Go to System Preferences > Security & Privacy and click "Allow Anyway"
+:::note Gatekeeper
+The macOS binaries are not signed with an Apple Developer ID. A file downloaded with `curl` runs directly. A file downloaded with a web browser is quarantined, and macOS refuses to run it. Remove the quarantine attribute before running it:
+
+```bash
+xattr -d com.apple.quarantine /usr/local/bin/muti-metroo
+```
 :::
 
   </TabItem>
@@ -134,15 +133,12 @@ On first run, macOS may show a security warning because the binary is not signed
 
 ### Installation
 
+This example installs the x86_64 binary. For ARM64, use `muti-metroo-linux-arm64`.
+
 ```bash
-# Download for your architecture (example: amd64)
-curl -L -o muti-metroo https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
-
-# Make executable and install
-chmod +x muti-metroo
-sudo mv muti-metroo /usr/local/bin/
-
-# Verify installation
+curl -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
+chmod +x muti-metroo-linux-amd64
+sudo mv muti-metroo-linux-amd64 /usr/local/bin/muti-metroo
 muti-metroo --version
 ```
 
@@ -171,34 +167,38 @@ muti-metroo --version
   </DownloadButton>
 </DownloadButtonGroup>
 
-:::tip DLL Mode
-The DLL variant runs via `rundll32.exe` without a console window. Use `.exe` for normal operation; use `.dll` for background execution scenarios. The ARM64 DLL is a native PE image and works with the standard `rundll32.exe` in `System32` -- no emulation layer required. See [DLL Mode](/deployment/dll-mode) for details.
+:::tip DLL mode
+The DLL runs the agent through `rundll32.exe` without a console window. Use the `.exe` for normal operation and the `.dll` for background execution. The ARM64 DLL is a native ARM64 image and runs with the standard `rundll32.exe` in `System32`. See [DLL Mode](/deployment/dll-mode).
 :::
 
 ### Installation
 
+This example installs the x86_64 executable. For ARM64, use `muti-metroo-windows-arm64.exe`. Run PowerShell as Administrator.
+
 ```powershell
-# Download for your architecture (example: amd64)
-curl.exe -L -o muti-metroo.exe https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-amd64.exe
+curl.exe -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-amd64.exe
 
-# Move to Program Files (run as Administrator)
-mkdir "C:\Program Files\muti-metroo" -ErrorAction SilentlyContinue
-move muti-metroo.exe "C:\Program Files\muti-metroo\"
+# Install into Program Files
+New-Item -ItemType Directory -Force "C:\Program Files\muti-metroo"
+Move-Item muti-metroo-windows-amd64.exe "C:\Program Files\muti-metroo\muti-metroo.exe"
 
-# Add to PATH (run as Administrator, or add manually via System Properties)
+# Add the directory to the system PATH
 $path = [Environment]::GetEnvironmentVariable("Path", "Machine")
 [Environment]::SetEnvironmentVariable("Path", "$path;C:\Program Files\muti-metroo", "Machine")
+```
 
-# Verify installation (restart terminal first)
+Open a new terminal so the PATH change takes effect, then check the installation:
+
+```powershell
 muti-metroo.exe --version
 ```
 
   </TabItem>
 </Tabs>
 
-## Verify Your Download
+## Verify your download
 
-Verify your download with SHA256 checksums:
+Each release publishes SHA-256 checksums for all assets in `checksums.txt`. Check the downloaded file before you rename or move it, because the checksum file lists the original asset names.
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/checksums.txt">Download Checksums</DownloadButton>
@@ -207,36 +207,37 @@ Verify your download with SHA256 checksums:
 <Tabs groupId="verify-os">
   <TabItem value="unix" label="Linux / macOS" default>
 
-```bash
-# Download checksums
-curl -L -o checksums.txt https://github.com/postalsys/Muti-Metroo/releases/latest/download/checksums.txt
+Run this in the directory that holds the downloaded asset:
 
-# Verify (example for linux-amd64)
+```bash
+curl -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/checksums.txt
 sha256sum -c checksums.txt --ignore-missing
 ```
+
+```text
+muti-metroo-linux-amd64: OK
+```
+
+On macOS versions without `sha256sum`, use `shasum -a 256 -c checksums.txt --ignore-missing`.
 
   </TabItem>
   <TabItem value="windows" label="Windows">
 
 ```powershell
-# Get the expected hash from checksums.txt (example: .exe)
-$expected = (Get-Content checksums.txt | Select-String "muti-metroo-windows-amd64.exe").ToString().Split()[0]
-
-# Calculate actual hash
-$actual = (Get-FileHash muti-metroo-windows-amd64.exe -Algorithm SHA256).Hash.ToLower()
-
-# Compare
+$file = "muti-metroo-windows-amd64.exe"
+$expected = (Select-String -Path checksums.txt -Pattern " $file$").Line.Split()[0]
+$actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
 if ($expected -eq $actual) { "OK" } else { "MISMATCH" }
-
-# For DLL verification, use muti-metroo-windows-amd64.dll or muti-metroo-windows-arm64.dll instead
 ```
+
+Set `$file` to the name of the asset you downloaded, for example `muti-metroo-windows-arm64.dll`.
 
   </TabItem>
 </Tabs>
 
-## User Manual (PDF)
+## User manual (PDF)
 
-A comprehensive PDF manual is available for offline use and printing:
+The user manual collects installation, configuration, features, and deployment in one PDF for offline reading and printing.
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-user-manual.pdf" primary>
@@ -244,24 +245,22 @@ A comprehensive PDF manual is available for offline use and printing:
   </DownloadButton>
 </DownloadButtonGroup>
 
-The user manual covers installation, configuration, features, and deployment in a single document.
-
 ## Mutiauk
 
-A Linux-only TUN interface tool that transparently routes Layer 3 traffic through Muti Metroo's SOCKS5 proxy. Requires root. See the full [Mutiauk guide](/mutiauk) for details.
+Mutiauk creates a TUN interface and forwards IP traffic through Muti Metroo's SOCKS5 proxy, so applications need no proxy settings. It requires root or Administrator. Release binaries are published for Linux; see the [Mutiauk guide](/mutiauk) for details.
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64" primary>
-    x86_64 (amd64)
+    Linux x86_64 (amd64)
   </DownloadButton>
   <DownloadButton href="https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-arm64">
-    ARM64
+    Linux ARM64
   </DownloadButton>
 </DownloadButtonGroup>
 
 ## Muti Metroo Manager
 
-A web dashboard for managing and monitoring your Muti Metroo mesh network. See the full [Muti Metroo Manager guide](/muti-metroo-manager) for details.
+A web dashboard that connects to an agent's HTTP API to show the mesh topology and run management actions. See the [Muti Metroo Manager guide](/muti-metroo-manager) for details.
 
 <Tabs groupId="manager-os">
   <TabItem value="macos" label="macOS" default>
@@ -302,11 +301,14 @@ A web dashboard for managing and monitoring your Muti Metroo mesh network. See t
   </TabItem>
 </Tabs>
 
-## Previous Versions
+## Previous versions
 
-Previous releases are available on the [Releases page](https://github.com/postalsys/Muti-Metroo/releases).
+Earlier releases are on the [GitHub Releases page](https://github.com/postalsys/Muti-Metroo/releases).
 
-## Next Steps
+## See Also
 
-After installation, follow the [Quick Start Guide](/getting-started/quick-start) to set up your first Muti Metroo agent.
-
+- [Installation](/getting-started/installation): build from source and install as a system service
+- [Quick Start](/getting-started/quick-start): run a first agent with a minimal config
+- [Interactive Setup](/getting-started/interactive-setup): generate a config with the setup wizard
+- [DLL Mode](/deployment/dll-mode): run the Windows DLL in the background
+- [Suite Overview](/suite-overview): how the agent, Mutiauk, and Manager fit together

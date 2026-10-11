@@ -1,5 +1,6 @@
 ---
 title: Installation
+description: Install the Muti Metroo binary on Linux, macOS, or Windows, build it from source, and run it as a system service.
 sidebar_position: 3
 ---
 
@@ -9,134 +10,92 @@ sidebar_position: 3
 
 # Installation
 
-Muti Metroo is a single binary with no dependencies. Download it, make it executable, and you are ready to tunnel traffic through any network.
+Muti Metroo is a single binary with no runtime dependencies. It runs as an unprivileged user; root or Administrator is only needed to install it as a system service.
 
-## Download Binary
+## Supported platforms
 
-Download the pre-built binary for your platform - no compilation or package manager required.
+Each release publishes these binaries:
 
-**[Download Muti Metroo](/download)**
+| Platform | Architecture | Asset |
+| --- | --- | --- |
+| Linux | x86_64 | `muti-metroo-linux-amd64` |
+| Linux | ARM64 | `muti-metroo-linux-arm64` |
+| macOS | Apple Silicon | `muti-metroo-darwin-arm64` |
+| macOS | Intel | `muti-metroo-darwin-amd64` |
+| Windows | x86_64 | `muti-metroo-windows-amd64.exe`, `muti-metroo-windows-amd64.dll` |
+| Windows | ARM64 | `muti-metroo-windows-arm64.exe`, `muti-metroo-windows-arm64.dll` |
 
-Pre-built binaries are available for:
+The Windows DLL runs the agent through `rundll32.exe` without a console window. See [DLL Mode](/deployment/dll-mode).
 
-- **macOS**: Apple Silicon (arm64) and Intel (amd64) - both installer packages and standalone binaries
-- **Linux**: x86_64 (amd64) and ARM64 (aarch64)
-- **Windows**: x86_64 (amd64) and ARM64
+## Install a release binary
 
-### Quick Install (Linux/macOS)
+The [Download](/download) page has download buttons and per-platform instructions. On Linux and macOS, the steps are:
 
 ```bash
-# Download for your platform (example: Linux amd64)
-curl -L -o muti-metroo https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
-
-# Make executable and install
-chmod +x muti-metroo
-sudo mv muti-metroo /usr/local/bin/
-
-# Verify installation
+curl -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
+chmod +x muti-metroo-linux-amd64
+sudo mv muti-metroo-linux-amd64 /usr/local/bin/muti-metroo
 muti-metroo --version
 ```
 
-See the [Download page](/download) for platform-specific instructions.
+Replace `linux-amd64` with the asset for your platform from the table above. To check the download against the published SHA-256 checksums before installing it, see [Verify your download](/download#verify-your-download).
 
-## Docker Deployment
+## Build from source
 
-For containerized deployments, see [Docker Deployment](/deployment/docker) for Docker Compose setup and configuration examples.
-
-## System Service Installation
-
-Install Muti Metroo as a system service for automatic startup.
-
-### Linux (systemd)
+Building requires Go 1.26 or later.
 
 ```bash
-# Install as service (requires root) - auto-starts immediately
+git clone https://github.com/postalsys/Muti-Metroo.git
+cd Muti-Metroo
+make build
+./build/muti-metroo --version
+```
+
+## Run with Docker
+
+The repository includes a `Dockerfile` and a Compose file. See [Docker Deployment](/deployment/docker).
+
+## Install as a system service
+
+`muti-metroo service install` registers the agent with the platform's service manager, then enables and starts it. It needs a config file:
+
+```bash
 sudo muti-metroo service install -c /etc/muti-metroo/config.yaml
-
-# Check status
-sudo systemctl status muti-metroo
-
-# View logs
-sudo journalctl -u muti-metroo -f
-
-# Restart (after config changes)
-sudo systemctl restart muti-metroo
 ```
 
-### Windows
+| Platform | Service manager | Privileges |
+| --- | --- | --- |
+| Linux | systemd | root |
+| Linux (`--user`) | systemd user unit, or cron `@reboot` when systemd is unavailable | none |
+| macOS | launchd | root |
+| Windows | Windows Service | Administrator |
+| Windows (`--user`) | Registry Run key with the DLL | none |
 
-```powershell
-# Install as Windows Service (requires Administrator) - auto-starts immediately
-muti-metroo.exe service install -c C:\ProgramData\muti-metroo\config.yaml
+By default, `service install` copies the binary to a standard system location such as `/usr/local/bin`; pass `--deploy=false` to use the binary where it is. Remove the service with `muti-metroo service uninstall`. The [System Service](/deployment/system-service) guide covers each platform, and the [`service` command reference](/cli/service) lists every flag.
 
-# Check status
-sc query muti-metroo
-```
+## Agent identity and data directory
 
-:::tip No Manual Start Needed
-The `service install` command automatically enables and starts the service. You don't need to run additional commands or reboot.
-:::
-
-### Uninstall Service
+Each agent has a 128-bit agent ID, stored in its data directory (`agent.data_dir`, default `./data`). The agent creates the ID on first start if none exists. To create it in advance, for example to put the ID in another agent's peer config before this agent runs, use `init`:
 
 ```bash
-# Linux
-sudo muti-metroo service uninstall
-
-# Windows (as Administrator)
-muti-metroo.exe service uninstall
-```
-
-## Directory Structure
-
-After installation, you will typically have:
-
-```
-/etc/muti-metroo/          # Configuration (Linux)
-  config.yaml              # Main configuration file
-/var/lib/muti-metroo/      # Data directory (Linux)
-  agent_id                 # Agent identity file
-/var/log/muti-metroo/      # Logs (if using file logging)
-```
-
-For development:
-
-```
-./config.yaml              # Configuration file
-./data/                    # Data directory
-  agent_id                 # Agent identity (128-bit hex)
-  agent_key                # E2E encryption private key
-  agent_key.pub            # E2E encryption public key
-./certs/                   # TLS certificates
-  ca.crt                   # Certificate Authority
-  ca.key                   # CA private key
-  <name>.crt               # Agent certificate (named after -n flag)
-  <name>.key               # Agent private key
-```
-
-## Verify Installation
-
-After installation, verify everything works:
-
-```bash
-# Check the binary works
-muti-metroo --version
-
-# Initialize agent identity
 muti-metroo init -d ./data
-# Output: Agent ID: a1b2c3d4...
-
-# Check the generated files
-ls ./data/
-# Output: agent_id  agent_key  agent_key.pub
 ```
 
-:::info No Certificate Setup Required
-TLS certificates are auto-generated at startup. Manual certificate setup is only needed for [strict TLS verification](/configuration/tls-certificates) or mTLS.
-:::
+```text
+Agent initialized in ./data
+Agent ID: 250bcc6f4401c0cfe55de1c8b643c9db
+```
 
-## Next Steps
+Running `init` again on an initialized directory prints the existing ID and changes nothing.
 
-- [Interactive Setup](/getting-started/interactive-setup) - Guided wizard (recommended)
-- [Quick Start](/getting-started/quick-start) - Manual configuration
-- [Configuration Reference](/configuration/overview) - All configuration options
+`init` creates `agent_id` in the data directory. On first start, the agent also creates `agent_key` and `agent_key.pub`, the X25519 key pair used for end-to-end encryption. Keep the data directory between restarts; deleting it gives the agent a new identity.
+
+TLS certificates for peer connections are generated in memory at startup when none are configured, so a first agent needs no certificate setup. See [TLS Certificates](/configuration/tls-certificates) to use your own CA.
+
+## See Also
+
+- [Download](/download): download buttons, checksum verification, and the PDF user manual
+- [Quick Start](/getting-started/quick-start): write a minimal config and run a first agent
+- [Interactive Setup](/getting-started/interactive-setup): generate a config with the setup wizard
+- [System Service](/deployment/system-service): service installation details for each platform
+- [`init` command](/cli/init): reference for agent initialization
