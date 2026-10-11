@@ -2,6 +2,7 @@
 package peer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -278,18 +279,31 @@ func (m *Manager) registerConnection(conn *Connection) {
 
 	var evicted *Connection
 	if existing, ok := m.peers[conn.RemoteID]; ok {
-		if !m.isStale(existing) {
-			// Existing connection is still alive -- keep it, close the new
-			// one. Prevents connection churn when both sides dial each other
-			// at the same time.
+		if m.isStale(existing) {
+			// Existing connection is past the keepalive deadline. Evict it so
+			// a brand-new reconnect doesn't wait up to
+			// KeepaliveInterval+Timeout (~6.5m by default) for keepaliveLoop
+			// to catch up.
+			evicted = existing
+		} else if preferNewConnection(m.cfg.LocalID, conn.RemoteID, existing, conn) {
+			// The deterministic tie-break (or a same-direction duplicate)
+			// picks the new connection. A fresh completed handshake always
+			// replaces a live-looking connection of the same direction, so a
+			// zombie that has not tripped the staleness check yet cannot
+			// block reconnects from the far side.
+			evicted = existing
+		} else {
+			// The tie-break keeps the existing connection: both sides of a
+			// simultaneous dial converge on the socket dialed by the lower
+			// AgentID. Close the loser without registering it.
 			m.mu.Unlock()
+			m.logger.Debug("closing duplicate connection (tie-break keeps existing)",
+				"peer", conn.RemoteID.ShortString(),
+				"new_dialer", conn.IsDialer(),
+				"existing_dialer", existing.IsDialer())
 			conn.Close()
 			return
 		}
-		// Existing connection is past the keepalive deadline. Evict it so a
-		// brand-new reconnect doesn't wait up to KeepaliveInterval+Timeout
-		// (~6.5m by default) for keepaliveLoop to catch up.
-		evicted = existing
 		delete(m.peers, conn.RemoteID)
 	}
 	m.peers[conn.RemoteID] = conn
@@ -298,12 +312,17 @@ func (m *Manager) registerConnection(conn *Connection) {
 	m.wg.Add(2)
 	m.mu.Unlock()
 
-	// Close the stale connection after dropping the lock. Its readLoop will
+	// Close the evicted connection after dropping the lock. Its readLoop will
 	// fail and call handleDisconnect, which will be a no-op (peers map no
 	// longer holds it) and will not fire OnPeerDisconnect (gated on
 	// wasActive). That stops the agent-level cleanup from wiping out the
-	// routes the new connection is about to install.
+	// routes the new connection is about to install, and prevents a second
+	// full disconnect cleanup for the same peer.
 	if evicted != nil {
+		m.logger.Debug("closing replaced connection (new connection wins)",
+			"peer", conn.RemoteID.ShortString(),
+			"new_dialer", conn.IsDialer(),
+			"existing_dialer", evicted.IsDialer())
 		evicted.Close()
 	}
 
@@ -314,6 +333,26 @@ func (m *Manager) registerConnection(conn *Connection) {
 	if m.cfg.OnPeerConnected != nil {
 		m.cfg.OnPeerConnected(conn)
 	}
+}
+
+// preferNewConnection decides which of two live connections to the same peer
+// survives registration. Both sides apply the same rule, so after a
+// simultaneous dial they converge on the same socket without communication:
+//
+//   - Opposite directions (one outbound, one inbound on this side): the
+//     surviving connection is the one dialed by the peer with the lower
+//     AgentID. Equivalently, the lower AgentID keeps its OUTBOUND connection
+//     and closes inbound duplicates; the higher AgentID keeps inbound.
+//   - Same direction (a redial or re-accept racing teardown of the old
+//     connection): the fresh connection wins, so a reconnect from the far
+//     side is never rejected in favor of a zombie that has not tripped the
+//     staleness check yet.
+func preferNewConnection(localID, remoteID identity.AgentID, existing, newConn *Connection) bool {
+	if existing.IsDialer() != newConn.IsDialer() {
+		lowerKeepsOutbound := bytes.Compare(localID[:], remoteID[:]) < 0
+		return newConn.IsDialer() == lowerKeepsOutbound
+	}
+	return true
 }
 
 // isStale reports whether conn has received no inbound traffic for longer

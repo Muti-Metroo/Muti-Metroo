@@ -2651,6 +2651,26 @@ when a peer disconnects.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 10.5 Duplicate Connections
+
+When both peers dial each other at the same time (common after a partition
+heals), two sockets exist for the same AgentID pair. Registration resolves the
+duplicate deterministically, so both sides keep the same socket without any
+coordination:
+
+- A connection whose peer has been silent past the keepalive deadline is always
+  evicted in favor of the fresh one.
+- Otherwise, if the two connections run in opposite directions, the surviving
+  socket is the one dialed by the peer with the **lower AgentID** (the lower
+  side keeps its outbound connection, the higher side keeps its inbound one).
+- Same-direction duplicates (a redial racing teardown of the old connection)
+  are resolved in favor of the new connection, so a reconnect is never blocked
+  by a zombie that has not tripped the staleness check yet.
+
+The replaced connection is closed without firing the peer-disconnect callback,
+so its teardown cannot wipe the routes and relays the surviving connection is
+installing.
+
 ---
 
 ## 11. SOCKS5 Server

@@ -625,34 +625,171 @@ func TestManager_RegisterConnection_EvictsStaleDuplicate(t *testing.T) {
 	}
 }
 
-func TestManager_RegisterConnection_KeepsFreshDuplicate(t *testing.T) {
+func TestManager_RegisterConnection_SameDirectionNewWins(t *testing.T) {
 	localID, _ := identity.NewAgentID()
 	tr := transport.NewQUICTransport()
 	defer tr.Close()
 
-	cfg := DefaultManagerConfig(localID, tr)
-	m := NewManager(cfg)
-	defer m.Close()
+	for _, dialer := range []bool{false, true} {
+		name := "both_inbound"
+		if dialer {
+			name = "both_outbound"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := DefaultManagerConfig(localID, tr)
+			m := NewManager(cfg)
+			defer m.Close()
 
-	remoteID, _ := identity.NewAgentID()
+			remoteID, _ := identity.NewAgentID()
 
-	// Fresh existing connection (NewConnection sets lastActivity to now).
-	oldConn := NewConnection(&mockPeerConn{}, ConnectionConfig{LocalID: localID})
-	oldConn.RemoteID = remoteID
-	m.peers[remoteID] = oldConn
+			// Fresh existing connection (NewConnection sets activity to now).
+			oldConn := NewConnection(&mockPeerConn{isDialer: dialer}, ConnectionConfig{LocalID: localID})
+			oldConn.RemoteID = remoteID
+			m.peers[remoteID] = oldConn
 
-	// New incoming connection with the same RemoteID -- duplicate while the
-	// existing one is healthy, so the new one must be the one that loses.
-	newConn := NewConnection(&mockPeerConn{}, ConnectionConfig{LocalID: localID})
-	newConn.RemoteID = remoteID
+			// Same-direction duplicate: the freshly handshaked connection
+			// wins, so a reconnect is never blocked by a zombie that has not
+			// tripped the staleness check yet.
+			newConn := NewConnection(&mockPeerConn{isDialer: dialer}, ConnectionConfig{LocalID: localID})
+			newConn.RemoteID = remoteID
 
-	m.registerConnection(newConn)
+			m.registerConnection(newConn)
 
-	if got := m.GetPeer(remoteID); got != oldConn {
-		t.Fatalf("expected existing connection retained, got %v", got)
+			if got := m.GetPeer(remoteID); got != newConn {
+				t.Fatalf("expected new connection in peers, got %v", got)
+			}
+			if oldConn.State() != StateDisconnected {
+				t.Errorf("expected replaced connection closed, state=%v", oldConn.State())
+			}
+		})
 	}
-	if newConn.State() != StateDisconnected {
-		t.Errorf("expected duplicate connection closed, state=%v", newConn.State())
+}
+
+func TestManager_RegisterConnection_TieBreak(t *testing.T) {
+	tr := transport.NewQUICTransport()
+	defer tr.Close()
+
+	lowID := identity.AgentID{0x01}
+	highID := identity.AgentID{0x02}
+
+	tests := []struct {
+		name           string
+		localID        identity.AgentID
+		existingDialer bool
+		newDialer      bool
+		wantNewWins    bool
+	}{
+		// Local is the lower AgentID: keeps its OUTBOUND connection.
+		{"lower_local/new_inbound_loses", lowID, true, false, false},
+		{"lower_local/new_outbound_wins", lowID, false, true, true},
+		// Local is the higher AgentID: keeps its INBOUND connection.
+		{"higher_local/new_outbound_loses", highID, false, true, false},
+		{"higher_local/new_inbound_wins", highID, true, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remoteID := highID
+			if tt.localID == highID {
+				remoteID = lowID
+			}
+
+			cfg := DefaultManagerConfig(tt.localID, tr)
+			var disconnectCount atomic.Int32
+			cfg.OnPeerDisconnect = func(*Connection, error) { disconnectCount.Add(1) }
+			m := NewManager(cfg)
+			defer m.Close()
+
+			existing := NewConnection(&mockPeerConn{isDialer: tt.existingDialer}, ConnectionConfig{LocalID: tt.localID})
+			existing.RemoteID = remoteID
+			m.peers[remoteID] = existing
+
+			newConn := NewConnection(&mockPeerConn{isDialer: tt.newDialer}, ConnectionConfig{LocalID: tt.localID})
+			newConn.RemoteID = remoteID
+
+			m.registerConnection(newConn)
+
+			wantSurvivor := existing
+			wantClosed := newConn
+			if tt.wantNewWins {
+				wantSurvivor, wantClosed = newConn, existing
+			}
+			if got := m.GetPeer(remoteID); got != wantSurvivor {
+				t.Errorf("survivor mismatch: new_wins=%v", tt.wantNewWins)
+			}
+			if wantClosed.State() != StateDisconnected {
+				t.Errorf("loser not closed, state=%v", wantClosed.State())
+			}
+			if wantSurvivor.State() == StateDisconnected {
+				t.Error("survivor must stay connected")
+			}
+			// Replacing a connection must not fire OnPeerDisconnect for it:
+			// the agent-level cleanup would wipe the routes the surviving
+			// connection is installing.
+			if got := disconnectCount.Load(); got != 0 {
+				t.Errorf("OnPeerDisconnect fired %d times during duplicate resolution", got)
+			}
+		})
+	}
+}
+
+// TestPreferNewConnection_Converges simulates a simultaneous dial from both
+// sides' perspectives and verifies they keep complementary ends of the same
+// socket (the one dialed by the lower AgentID) in both registration orders.
+func TestPreferNewConnection_Converges(t *testing.T) {
+	lowID := identity.AgentID{0x01}
+	highID := identity.AgentID{0x02}
+
+	newConnAt := func(local, remote identity.AgentID, dialer bool) *Connection {
+		c := NewConnection(&mockPeerConn{isDialer: dialer}, ConnectionConfig{LocalID: local})
+		c.RemoteID = remote
+		return c
+	}
+
+	// A (low) dialed B (high): socket A->B is outbound on A, inbound on B.
+	// B dialed A: socket B->A is outbound on B, inbound on A.
+	for _, order := range []string{"ab_first", "ba_first"} {
+		// Side A's view: its own outbound (A->B) plus inbound duplicate (B->A).
+		aOut := newConnAt(lowID, highID, true)
+		aIn := newConnAt(lowID, highID, false)
+		var aExisting, aNew *Connection
+		// Side B's view: its own outbound (B->A) plus inbound duplicate (A->B).
+		bOut := newConnAt(highID, lowID, true)
+		bIn := newConnAt(highID, lowID, false)
+		var bExisting, bNew *Connection
+
+		if order == "ab_first" {
+			aExisting, aNew = aOut, aIn // A's socket registered first
+			bExisting, bNew = bIn, bOut // same physical socket arrives first on B
+		} else {
+			aExisting, aNew = aIn, aOut
+			bExisting, bNew = bOut, bIn
+		}
+
+		aKeepsNew := preferNewConnection(lowID, highID, aExisting, aNew)
+		bKeepsNew := preferNewConnection(highID, lowID, bExisting, bNew)
+
+		// Survivor on each side must be the A->B socket: outbound on A,
+		// inbound on B.
+		aSurvivorDialer := aExisting.IsDialer()
+		if aKeepsNew {
+			aSurvivorDialer = aNew.IsDialer()
+		}
+		bSurvivorDialer := bExisting.IsDialer()
+		if bKeepsNew {
+			bSurvivorDialer = bNew.IsDialer()
+		}
+
+		if !aSurvivorDialer {
+			t.Errorf("%s: A (lower ID) must keep its outbound connection", order)
+		}
+		if bSurvivorDialer {
+			t.Errorf("%s: B (higher ID) must keep its inbound connection", order)
+		}
+
+		for _, c := range []*Connection{aOut, aIn, bOut, bIn} {
+			c.Close()
+		}
 	}
 }
 
