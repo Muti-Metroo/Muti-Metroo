@@ -113,7 +113,7 @@ exit:
       metric: 10
 ```
 
-Without a metric difference, the ingress picks the exit with fewer hops, and between exits at the same distance it may use either. Routes added at runtime with [`muti-metroo route add --metric`](/cli/route) accept a metric too.
+Without a metric difference, which exit the ingress uses is not defined: path length is not compared, so the closer exit is not preferred. Routes added at runtime with [`muti-metroo route add --metric`](/cli/route) accept a metric too.
 
 Both exits must be able to reach the destination network, and exit-side DNS (`exit.dns`, used for domain routes) should resolve the same names on both.
 

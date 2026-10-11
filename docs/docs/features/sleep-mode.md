@@ -79,7 +79,7 @@ sleep:
   auto_sleep_on_start: true
 ```
 
-When `persist_state` is enabled (the default), an agent that was sleeping when it stopped resumes sleeping when it restarts.
+An agent that was sleeping when it stopped reads its saved state on restart (with `persist_state`, the default) and reports `SLEEPING`, but in the current release it does not actually go back to sleep: its SOCKS5 proxy keeps running and it does not poll. Run `muti-metroo wake` and then `muti-metroo sleep` against it after a restart. `auto_sleep_on_start` does put a freshly started agent to sleep.
 
 ## Restrict who can sleep and wake the mesh
 
@@ -127,7 +127,7 @@ Agent logs show "sleep command rejected" or "wake command rejected" when a comma
 
 ### Agent does not stay asleep after restart
 
-Check that `sleep.persist_state` is `true` and that `agent.data_dir` is writable; the state is stored in `sleep_state.json` there.
+An agent restarted while asleep reports `SLEEPING` but keeps running its services; see [Start agents asleep](#start-agents-asleep). Run `muti-metroo wake` and then `muti-metroo sleep` against it.
 
 ## See Also
 

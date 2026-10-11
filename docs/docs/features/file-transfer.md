@@ -57,7 +57,7 @@ muti-metroo download [flags] <target-agent-id> <remote-path> <local-path>
 - The remote path must be absolute and inside an `allowed_paths` entry on the target.
 - The target agent ID can be a unique prefix of the full ID.
 - Directories are detected automatically and sent as a compressed tar archive, then unpacked at the destination.
-- File permissions are preserved.
+- Permission bits are kept for downloads and for the files inside an uploaded directory. A single uploaded file is written with mode `0600`; change it afterwards with the `chmod` action of the [browse API](#browse-remote-directories) or `muti-metroo shell`.
 - Files are streamed, so they do not have to fit in memory. The target's `max_file_size` (default 500 MB) caps a single transfer.
 
 Use `-q` to suppress progress output and `-w` to change the transfer timeout (default `5m`). All flags are listed in [File Transfer CLI](/cli/file-transfer).

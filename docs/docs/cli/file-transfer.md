@@ -30,7 +30,7 @@ Both commands take the target agent as a full 32-character agent ID or a unique 
 muti-metroo upload [flags] <target-agent-id> <local-path> <remote-path>
 ```
 
-Uploads `<local-path>` to `<remote-path>` on the target agent. `<remote-path>` is the full destination path, not a directory to copy into. For a directory, the contents of `<local-path>` are unpacked into `<remote-path>`, and file modes inside the directory are preserved.
+Uploads `<local-path>` to `<remote-path>` on the target agent. `<remote-path>` is the full destination path, not a directory to copy into. For a directory, the contents of `<local-path>` are unpacked into `<remote-path>`, and file modes inside the directory are preserved. A single file is written with mode `0600`, whatever its local mode.
 
 ### Flags
 

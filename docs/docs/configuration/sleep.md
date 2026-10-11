@@ -67,6 +67,8 @@ With `persist_state: true` and `agent.data_dir` set, the agent writes its state 
 
 `state` is `0` (awake), `1` (sleeping), or `2` (polling). The file is not encrypted.
 
+An agent that starts with a saved sleeping state reports `SLEEPING`, but in the current release it does not stop its SOCKS5 proxy and listeners or schedule polls. After restarting an agent that was asleep, run `muti-metroo wake` and then `muti-metroo sleep` against it to put it back to sleep. `auto_sleep_on_start` is not affected.
+
 ## Deterministic windows
 
 With `deterministic_windows.enabled: true`, each sleeping agent polls in a window whose position within every `poll_interval` cycle is derived from its agent ID and `epoch`. Other agents can compute when it will be reachable. All agents in a mesh need the same `poll_interval` and `epoch` for the windows to line up.

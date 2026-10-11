@@ -125,7 +125,7 @@ forward:
 
 ### Redundant endpoints
 
-Two agents can register the same key. Each listener sends new connections to the endpoint with the fewest hops; if that endpoint disappears, its route expires or is withdrawn and the next one is used.
+Two agents can register the same key. Each listener sends new connections to the endpoint whose route has the lowest metric; with equal metrics, which endpoint is used is not defined, and path length is not compared. If that endpoint disappears, its route expires or is withdrawn and the other one is used.
 
 ```yaml
 # Primary and secondary hosts use the same entry

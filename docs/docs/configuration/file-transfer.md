@@ -68,7 +68,7 @@ Because a parent directory match is enough, `/tmp/*` allows everything below `/t
 
 ## Transfers
 
-Directories are sent as gzip-compressed tar archives, and file permission bits are preserved. The CLI can resume interrupted downloads with `--resume`; see [file transfer CLI](/cli/file-transfer).
+Directories are sent as gzip-compressed tar archives that keep the permission bits of the files inside them. A single file uploaded through the HTTP API, which the CLI uses, is written with mode `0600`. The CLI can resume interrupted downloads with `--resume`; see [file transfer CLI](/cli/file-transfer).
 
 ## Examples
 

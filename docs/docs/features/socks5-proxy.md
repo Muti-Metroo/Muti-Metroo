@@ -84,7 +84,7 @@ Firefox prompts for a username and password when the listener requires authentic
 
 ```bash
 # One clone through the proxy
-git -c http.proxy=socks5h://localhost:1080 clone https://github.com/postalsys/muti-metroo.git
+git -c http.proxy=socks5h://localhost:1080 clone https://github.com/postalsys/Muti-Metroo.git
 
 # All HTTP(S) Git traffic through the proxy
 git config --global http.proxy socks5h://localhost:1080

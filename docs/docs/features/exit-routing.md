@@ -78,7 +78,7 @@ For a hostname from a SOCKS client, the ingress agent checks domain routes first
 
 If a domain route matches, the hostname travels to the exit and the exit resolves it, with its `exit.dns` servers or the system resolver. Otherwise the ingress resolves the name itself (mesh hostname registry first, then system DNS) and continues with the first address returned.
 
-For an IP address, the CIDR route with the longest matching prefix wins. When two routes have the same prefix, the one with the lower metric (fewer hops) wins. For example, `10.1.2.0/24` beats `10.0.0.0/8` for `10.1.2.3`.
+For an IP address, the CIDR route with the longest matching prefix wins. When two routes have the same prefix, the one with the lower metric wins; the metric is set on the exit and does not grow with distance. For example, `10.1.2.0/24` beats `10.0.0.0/8` for `10.1.2.3`.
 
 If no route matches, the ingress agent dials the destination itself. See [SOCKS Proxy](/features/socks5-proxy#how-destinations-are-routed).
 
@@ -93,7 +93,7 @@ muti-metroo route trace 10.1.2.3
 ```text
 Trace for 10.1.2.3
     -> 10.1.2.0/24          metric=1 hops=1 next_hop=exit-b (1f743225) origin=exit-b (1f743225)
-       10.0.0.0/8           metric=2 hops=2 next_hop=transit (9a0b1c2d) origin=office (5e6f7a8b)  [shorter prefix]
+       10.0.0.0/8           metric=1 hops=2 next_hop=transit (9a0b1c2d) origin=office (5e6f7a8b)  [shorter prefix]
 ```
 
 The arrow marks the winning route. A hostname argument also shows the domain-route decision and how the name was resolved. Use `muti-metroo route status` to print the whole route table.
