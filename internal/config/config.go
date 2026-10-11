@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +17,11 @@ import (
 	"github.com/postalsys/muti-metroo/internal/sysinfo"
 	"gopkg.in/yaml.v3"
 )
+
+// ErrValidation marks configuration validation failures, so callers can
+// distinguish a parsed-but-invalid config from I/O and YAML parse errors
+// with errors.Is.
+var ErrValidation = errors.New("config validation failed")
 
 // getPEM returns inline PEM content if set, otherwise reads from file path.
 // Returns nil if neither is configured.
@@ -1101,7 +1107,7 @@ func Parse(data []byte) (*Config, error) {
 
 	// Validate
 	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrValidation, err)
 	}
 
 	return cfg, nil

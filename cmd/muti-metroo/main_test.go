@@ -3,10 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 func TestConfirmActionYesShortCircuits(t *testing.T) {
@@ -192,4 +196,119 @@ func TestExitCodesAreStable(t *testing.T) {
 		}
 	}
 	_ = strings.Builder{} // satisfy "strings" import if other refs disappear
+}
+
+// runConfigCmd executes a freshly built config subcommand with args, capturing
+// stdout (jsonReport writes to os.Stdout directly) and silencing stderr, then
+// maps any returned error through classifyExitCode as main() would.
+func runConfigCmd(t *testing.T, cmdName string, args ...string) (string, int) {
+	t.Helper()
+
+	var cmd *cobra.Command
+	switch cmdName {
+	case "validate":
+		cmd = configValidateCmd()
+	case "show":
+		cmd = configShowCmd()
+	default:
+		t.Fatalf("unknown config subcommand %q", cmdName)
+	}
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs(args)
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	runErr := cmd.Execute()
+
+	w.Close()
+	os.Stdout = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	return string(out), classifyExitCode(runErr)
+}
+
+// TestConfigValidateExitCodes covers the documented exit contract in both
+// plain and --json modes: 0 valid, 2 parsed-but-invalid, 1 unreadable.
+func TestConfigValidateExitCodes(t *testing.T) {
+	dir := t.TempDir()
+
+	validPath := filepath.Join(dir, "valid.yaml")
+	if err := os.WriteFile(validPath, []byte("agent:\n  display_name: test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	invalidPath := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalidPath, []byte("listeners:\n  - transport: bogus\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	missingPath := filepath.Join(dir, "missing.yaml")
+
+	cases := []struct {
+		name     string
+		args     []string
+		wantCode int
+		wantOK   string // "true"/"false" to assert on the JSON ok field; "" skips
+	}{
+		{"valid plain", []string{validPath}, exitOK, ""},
+		{"valid json", []string{"--json", validPath}, exitOK, "true"},
+		{"invalid plain", []string{invalidPath}, exitUsageError, ""},
+		{"invalid json", []string{"--json", invalidPath}, exitUsageError, "false"},
+		{"missing plain", []string{missingPath}, exitGenericError, ""},
+		{"missing json", []string{"--json", missingPath}, exitGenericError, "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, code := runConfigCmd(t, "validate", tc.args...)
+			if code != tc.wantCode {
+				t.Errorf("exit code = %d, want %d (output: %s)", code, tc.wantCode, out)
+			}
+			if tc.wantOK != "" && !strings.Contains(out, `"ok": `+tc.wantOK) {
+				t.Errorf("JSON output missing \"ok\": %s; got: %s", tc.wantOK, out)
+			}
+		})
+	}
+}
+
+// TestConfigShowExitCodes: config show shares the load path with validate, so
+// unreadable files exit 1 and parsed-but-invalid configs exit 2 there too.
+func TestConfigShowExitCodes(t *testing.T) {
+	dir := t.TempDir()
+
+	validPath := filepath.Join(dir, "valid.yaml")
+	if err := os.WriteFile(validPath, []byte("agent:\n  display_name: test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	invalidPath := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalidPath, []byte("listeners:\n  - transport: bogus\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, code := runConfigCmd(t, "show", validPath); code != exitOK {
+		t.Errorf("show valid: exit code = %d, want %d", code, exitOK)
+	}
+	if _, code := runConfigCmd(t, "show", invalidPath); code != exitUsageError {
+		t.Errorf("show invalid: exit code = %d, want %d", code, exitUsageError)
+	}
+	if _, code := runConfigCmd(t, "show", filepath.Join(dir, "missing.yaml")); code != exitGenericError {
+		t.Errorf("show missing: exit code = %d, want %d", code, exitGenericError)
+	}
+}
+
+// TestClassifyExitCode_ConfigValidation: a parsed-but-invalid config maps to
+// exit code 2 while keeping the validator's own message text.
+func TestClassifyExitCode_ConfigValidation(t *testing.T) {
+	inner := errors.New("config validation failed: validation errors:\n  - listeners[0]: invalid transport")
+	err := configValidationError{err: inner}
+	if got := classifyExitCode(err); got != exitUsageError {
+		t.Errorf("classifyExitCode(configValidationError) = %d, want %d", got, exitUsageError)
+	}
+	if err.Error() != inner.Error() {
+		t.Errorf("configValidationError message = %q, want %q", err.Error(), inner.Error())
+	}
 }

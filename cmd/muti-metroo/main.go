@@ -81,6 +81,14 @@ var (
 	errUsageError           = errors.New("usage error")
 )
 
+// configValidationError marks a config that parsed but failed validation, so
+// main() maps it to exit code 2 (the documented `config validate` contract)
+// while the printed message stays the validator's own text.
+type configValidationError struct{ err error }
+
+func (e configValidationError) Error() string { return e.err.Error() }
+func (e configValidationError) Unwrap() error { return e.err }
+
 var (
 	// Version is set at build time via ldflags.
 	// When "dev", we use sysinfo.Version which has enhanced dev version info.
@@ -322,9 +330,12 @@ func main() {
 // Sentinel errors take precedence; otherwise we fall back to generic error.
 // Cobra's own argument-parsing errors are treated as usage errors.
 func classifyExitCode(err error) int {
+	var cve configValidationError
 	switch {
 	case err == nil:
 		return exitOK
+	case errors.As(err, &cve):
+		return exitUsageError
 	case errors.Is(err, errConfirmationRequired):
 		return exitConfirmationRequired
 	case errors.Is(err, errAgentUnreachable):
@@ -7696,25 +7707,32 @@ Exit codes:
 			cfg, embedded, err := loadConfigForInspect(args[0])
 			if err != nil {
 				if jsonOutput {
-					return jsonReport(map[string]interface{}{
+					if rErr := jsonReport(map[string]interface{}{
 						"path":  args[0],
 						"ok":    false,
 						"error": err.Error(),
-					})
+					}); rErr != nil {
+						return rErr
+					}
 				}
-				return fmt.Errorf("%w: %v", errOperationRejected, err)
+				if errors.Is(err, config.ErrValidation) {
+					return configValidationError{err: err}
+				}
+				return err
 			}
 			// Load already calls Validate(), but be explicit so future
 			// refactors don't silently bypass it.
 			if vErr := cfg.Validate(); vErr != nil {
 				if jsonOutput {
-					return jsonReport(map[string]interface{}{
+					if rErr := jsonReport(map[string]interface{}{
 						"path":  args[0],
 						"ok":    false,
 						"error": vErr.Error(),
-					})
+					}); rErr != nil {
+						return rErr
+					}
 				}
-				return fmt.Errorf("%w: %v", errOperationRejected, vErr)
+				return configValidationError{err: vErr}
 			}
 			if jsonOutput {
 				return jsonReport(map[string]interface{}{
@@ -7766,7 +7784,10 @@ built-in defaults; useful for diffing two deployments quickly.`,
 			}
 			cfg, _, err := loadConfigForInspect(path)
 			if err != nil {
-				return fmt.Errorf("%w: %v", errOperationRejected, err)
+				if errors.Is(err, config.ErrValidation) {
+					return configValidationError{err: err}
+				}
+				return err
 			}
 			redacted := config.Redacted(cfg)
 

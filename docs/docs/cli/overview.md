@@ -148,7 +148,7 @@ muti-metroo route remove 10.0.0.0/8 --yes
 | 2 | Usage error: unknown command or flag, wrong number of arguments, invalid flag value |
 | 3 | Agent unreachable: the HTTP API could not be contacted |
 | 4 | Authentication failed: bearer token missing or rejected |
-| 5 | Operation rejected by the agent, or a config file failed validation |
+| 5 | Operation rejected by the agent |
 | 6 | Confirmation required: stdin is not a terminal and `--yes` was not given |
 
 Some commands use additional exit codes; their pages say so. For example, `shell` exits with the remote command's exit code.

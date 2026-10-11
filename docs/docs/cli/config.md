@@ -40,7 +40,7 @@ OK: /usr/local/bin/my-agent (embedded in binary)
 On failure, the error lists every problem found:
 
 ```text
-Error: operation rejected: config validation failed: validation errors:
+Error: config validation failed: validation errors:
   - listeners[0]: invalid transport: carrier-pigeon (must be quic, h2, or ws)
 ```
 
@@ -64,7 +64,7 @@ With `--json`, the object has `path` and `ok`, plus `embedded` on success or `er
 
 ### Exit status
 
-0 if the configuration is valid, 5 if it fails validation or cannot be read. With `--json`, test the `ok` field rather than the exit status.
+0 if the configuration is valid, 2 if it parses but fails validation, 1 if the file cannot be read. The same codes apply with `--json`, which also reports the outcome in the `ok` field.
 
 ### Examples
 
@@ -141,7 +141,7 @@ muti-metroo config show /usr/local/bin/my-agent
 
 ### Exit status
 
-0 on success, 5 if the configuration cannot be read or fails validation.
+0 on success, 2 if the configuration parses but fails validation, 1 if it cannot be read.
 
 ## See Also
 
