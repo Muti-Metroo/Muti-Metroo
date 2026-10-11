@@ -77,6 +77,9 @@ const FREEZE_CSS = `
     transition-delay: 0s !important;
     caret-color: transparent !important;
   }
+  /* Map links animate a dash offset; with the animation removed the dots
+     always sit at the same phase. */
+  .metro-svg .connection { animation: none !important; }
 `;
 
 async function main() {
@@ -94,6 +97,10 @@ async function main() {
     // so every shot except 25 is in the light theme.
     colorScheme: "light",
   });
+  // Freeze the page clock, so "Last update" and "tested" times in the
+  // footer, and any other rendered time, are the same on every run. Timers
+  // keep running; only the reported wall time is fixed.
+  await context.clock.setFixedTime(new Date("2026-01-15T10:30:00Z"));
   context.setDefaultTimeout(STEP_TIMEOUT);
   context.setDefaultNavigationTimeout(NAV_TIMEOUT);
 
@@ -185,6 +192,13 @@ async function main() {
     await page.waitForSelector(".metro-svg .station", {
       timeout: STEP_TIMEOUT,
     });
+    // The footer's mesh summary arrives with the first mesh-test result
+    // after load; wait for it so every shot carries the same footer.
+    await page
+      .locator("footer", { hasText: /Mesh: \d+\/\d+ reachable/ })
+      .first()
+      .waitFor({ timeout: STEP_TIMEOUT * 2 })
+      .catch(() => {});
   }
 
   // The major tab strip is the first tablist inside <main>; the agent
@@ -947,7 +961,22 @@ async function main() {
     // SOCKS5, and exit sections built from the inputs above are.
     const yaml = wizard.locator(".wizard-pane pre").first();
     await yaml.waitFor();
+    // The fixture generates fresh keys on every run. Replace the public
+    // keys in the YAML with fixed placeholder values so the shot is the
+    // same each time.
     await yaml.evaluate((el) => {
+      const placeholders = [
+        "5f1e0c3a9b7d24e8a6c0f3b19d82e7a4c5b6f0e1d2c3b4a59687f0e1d2c3b4a5",
+        "a4b3c2d1e0f9687a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+      ];
+      const seen = new Map();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        node.textContent = node.textContent.replace(/\b[0-9a-f]{64}\b/g, (key) => {
+          if (!seen.has(key)) seen.set(key, placeholders[seen.size % placeholders.length]);
+          return seen.get(key);
+        });
+      }
       el.scrollTop = el.scrollHeight;
     });
     await page.screenshot({ path: out });

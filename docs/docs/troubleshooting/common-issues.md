@@ -230,6 +230,7 @@ agent:
 
 tls:
   cert: "C:\\muti-metroo\\certs\\agent1.crt"
+  key: "C:/muti-metroo/certs/agent1.key"
 ```
 
 ### The agent stops when the SSH session ends

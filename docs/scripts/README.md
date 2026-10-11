@@ -33,8 +33,7 @@ The script is self-contained:
    ```
 
    `gateway` runs SOCKS5 and the HTTP API that Manager proxies, and holds the
-   management and signing private keys (a fixed pair used only by this
-   fixture). `gateway` and `transit` advertise their listeners as public dial
+   management and signing private keys (generated fresh on every run). `gateway` and `transit` advertise their listeners as public dial
    targets. `exit-datacenter` allows management commands and file transfer
    under `/srv/files`. Sleep mode is enabled on every agent. Each container
    adds a fixed egress delay with `tc netem`, so links show realistic RTTs.
@@ -103,9 +102,20 @@ required; the run fails if one is skipped.
 - Each view waits for a selector that proves it is rendered, not for a fixed
   delay.
 
-Live values (clock times, uptime, measured RTTs, ping results, file
-timestamps, and the date in the generated agent config) differ between runs.
-Everything else is the same.
+- The page clock is frozen at 2026-01-15 10:30 UTC and fixture files carry a
+  fixed timestamp, so rendered times and file listings are the same on every
+  run.
+- Fresh key pairs are generated per run and never stored in the repository.
+  The agent config wizard shot replaces the public keys in its YAML with
+  fixed placeholder values.
+
+Two consecutive runs produce byte-identical images for most shots. What can
+still differ:
+
+- `15-mesh-test-modal`: the per-agent latencies are live measurements.
+- Shots that show the map: the dot phase of a link can shift, because Manager
+  draws each link from whichever end the topology response lists first.
+- A few anti-aliased pixels at table corners.
 
 ## Adding a screenshot
 

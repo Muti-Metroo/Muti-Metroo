@@ -165,14 +165,18 @@ fi
 
 # --- Keys ----------------------------------------------------------------------
 
-# Fixed management and signing key pairs, so values derived from them (the
-# public keys in the agent config wizard's generated YAML) match between
-# runs. They exist only for this throwaway fixture mesh and authorize
-# nothing else.
-MGMT_PUB="86bbd5dd7988c97243ead76c83ab542af4d7114feda246acf58834b7644fc863"
-MGMT_PRIV="d8bd06b3baba6f14b87cb5538b09acd86bd02ca8af8713faa8c26a7df366ce65"
-SIGN_PUB="27668892a1c45111707df1ab5badfdd2e994bbd60e9911bb93d912c732414821"
-SIGN_PRIV="3a621b06e895da74ef55699da2a514a203bdf9a3efdd019354b785dcc062ae1b27668892a1c45111707df1ab5badfdd2e994bbd60e9911bb93d912c732414821"
+# Fresh key pairs on every run; no key material lives in the repository. The
+# only place a key shows up in a screenshot is the agent config wizard's
+# YAML, and the capture script replaces the public keys there with fixed
+# placeholder values before taking that shot.
+log "Generating management and signing keys"
+"$MM" management-key generate --out "$WORK/keys" >/dev/null
+"$MM" signing-key generate --out "$WORK/keys" >/dev/null
+read_key() { tr -d '[:space:]' < "$WORK/keys/$1"; }
+MGMT_PUB="$(read_key management-public.key)"
+MGMT_PRIV="$(read_key management-private.key)"
+SIGN_PUB="$(read_key signing-public.key)"
+SIGN_PRIV="$(read_key signing-private.key)"
 
 # --- Fixture mesh ----------------------------------------------------------------
 
@@ -180,6 +184,9 @@ mkdir -p "$WORK/files/reports" "$WORK/files/configs"
 printf 'Q3 summary\n' > "$WORK/files/reports/q3-summary.txt"
 printf 'Q4 forecast\n' > "$WORK/files/reports/q4-forecast.txt"
 printf 'listeners: []\n' > "$WORK/files/configs/edge.yaml"
+# Fixed timestamps, so listings in the shell and file browser shots match
+# between runs.
+find "$WORK/files" -exec touch -t 202601151030 {} +
 
 # write_config NAME ID EXTRA_YAML
 write_config() {

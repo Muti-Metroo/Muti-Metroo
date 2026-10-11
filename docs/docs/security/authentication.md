@@ -43,7 +43,7 @@ management:
 # Operator agents only
 management:
   signing_public_key: "86d6714fc48cd41afd5051e6ad9523ad889c806001e92bc739913a18c6709a83"
-  signing_private_key: "<128 hex characters from signing-key generate>"
+  signing_private_key: "${MESH_SIGNING_PRIVATE_KEY}" # 128 hex characters from signing-key generate
 ```
 
 See [signing-key CLI](/cli/signing-key) and [Management Key Configuration](/configuration/management#command-signing-keys).
