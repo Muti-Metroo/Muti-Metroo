@@ -850,6 +850,10 @@ func TestServer_handleSplash(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
 		}
+		// The CLI and every served page are English-only.
+		if !strings.Contains(rec.Body.String(), `<html lang="en">`) {
+			t.Error(`expected the 404 page to declare <html lang="en">`)
+		}
 	})
 
 	t.Run("POST to root not allowed", func(t *testing.T) {

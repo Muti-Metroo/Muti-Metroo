@@ -1268,7 +1268,7 @@ func handleNotFoundImage(w http.ResponseWriter, r *http.Request) {
 
 // notFoundPage is the custom 404 page with the same foggy background as the splash page.
 const notFoundPage = `<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
