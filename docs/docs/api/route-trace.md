@@ -220,7 +220,7 @@ Additional errors:
 
 ## See Also
 
-- [CLI - route trace](/cli/route) - Command-line wrapper for these endpoints
-- [Route Management Endpoints](/api/route-management) - Add and remove routes
-- [Routing](/concepts/routing) - How routes are selected
-- [Mesh Hostnames](/features/mesh-hostnames) - Names resolved from the mesh hostname registry
+- [route trace CLI](/cli/route): command-line wrapper for these endpoints
+- [Route Management Endpoints](/api/route-management): add and remove routes
+- [Routing](/concepts/routing): how routes are selected
+- [Mesh Hostnames](/features/mesh-hostnames): names resolved from the mesh hostname registry

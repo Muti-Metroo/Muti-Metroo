@@ -112,6 +112,6 @@ Then run the commands above against `http://localhost:8080` on your workstation.
 
 ## See Also
 
-- [HTTP Configuration](/configuration/http) - Enable or disable the pprof group
-- [Performance Troubleshooting](/troubleshooting/performance) - Diagnosing slow or resource-hungry agents
-- [HTTP API Overview](/api/overview) - Endpoint groups and authentication
+- [HTTP Configuration](/configuration/http): enable or disable the pprof group
+- [Performance Troubleshooting](/troubleshooting/performance): diagnosing slow or resource-hungry agents
+- [HTTP API Overview](/api/overview): endpoint groups and authentication

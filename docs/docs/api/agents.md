@@ -194,7 +194,7 @@ curl http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/interfaces
 
 ## See Also
 
-- [HTTP API Overview](/api/overview) - Endpoint index and authentication
-- [Dashboard Endpoints](/api/dashboard) - Topology and node details for the whole mesh
-- [CLI - status](/cli/status) - Read agent status from the command line
-- [Management Keys](/configuration/management) - Topology encryption and its restrictions
+- [HTTP API Overview](/api/overview): endpoint index and authentication
+- [Dashboard Endpoints](/api/dashboard): topology and node details for the whole mesh
+- [status CLI](/cli/status): read agent status from the command line
+- [Management Keys](/configuration/management): topology encryption and its restrictions

@@ -15,7 +15,7 @@ These endpoints stop an agent gracefully, the same way as a `SIGTERM`: the agent
 
 Shutdown is a signed operation: the agent serving the request must have `management.signing_private_key`, and for the remote endpoint the target must have `management.signing_public_key`.
 
-An agent installed as a system service may be started again by the service manager after it exits. See [CLI - stop](/cli/stop) for the behavior per platform, and run `muti-metroo service uninstall` first to remove an agent permanently.
+An agent installed as a system service may be started again by the service manager after it exits. See [stop CLI](/cli/stop) for the behavior per platform, and run `muti-metroo service uninstall` first to remove an agent permanently.
 
 ## `POST /shutdown`
 
@@ -75,6 +75,6 @@ curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/shutd
 
 ## See Also
 
-- [CLI - stop](/cli/stop) - Stop agents from the command line
-- [Service management](/cli/service) - Install and uninstall agents as system services
-- [Management Keys](/configuration/management) - Signing keys for privileged operations
+- [stop CLI](/cli/stop): stop agents from the command line
+- [Service management](/cli/service): install and uninstall agents as system services
+- [Management Keys](/configuration/management): signing keys for privileged operations

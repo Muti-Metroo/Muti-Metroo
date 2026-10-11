@@ -98,6 +98,6 @@ The local agent signs `set` and forwards the request over the mesh; the target v
 
 ## See Also
 
-- [CLI - display-name](/cli/display-name) - The `display-name` commands that call these endpoints
-- [Agent Configuration](/configuration/agent) - The configured `display_name`
-- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart
+- [display-name CLI](/cli/display-name): the `display-name` commands that call these endpoints
+- [Agent Configuration](/configuration/agent): the configured `display_name`
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence): how runtime changes survive restart

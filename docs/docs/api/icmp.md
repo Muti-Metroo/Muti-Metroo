@@ -111,6 +111,6 @@ ws.onmessage = (event) => {
 
 ## See Also
 
-- [CLI - ping](/cli/ping) - Command-line client
-- [ICMP Configuration](/configuration/icmp) - Enable ICMP and set limits
-- [ICMP Relay](/features/icmp-relay) - Feature overview
+- [ping CLI](/cli/ping): command-line client
+- [ICMP Configuration](/configuration/icmp): enable ICMP and set limits
+- [ICMP Relay](/features/icmp-relay): feature overview

@@ -546,8 +546,8 @@ curl http://localhost:8080/api/setup-defaults
 
 ## See Also
 
-- [Muti Metroo Manager](/muti-metroo-manager) - Web dashboard that uses these endpoints
-- [Agent Endpoints](/api/agents) - Status of individual remote agents
-- [Probe Endpoints](/api/probe) - Test a single listener
-- [CLI - mesh-test](/cli/mesh-test) - Mesh test from the command line
-- [HTTP Configuration](/configuration/http) - Enable or disable the dashboard group
+- [Muti Metroo Manager](/muti-metroo-manager): web dashboard that uses these endpoints
+- [Agent Endpoints](/api/agents): status of individual remote agents
+- [Probe Endpoints](/api/probe): test a single listener
+- [mesh-test CLI](/cli/mesh-test): mesh test from the command line
+- [HTTP Configuration](/configuration/http): enable or disable the dashboard group

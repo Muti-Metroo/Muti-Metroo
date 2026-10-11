@@ -131,7 +131,7 @@ done
 
 ## See Also
 
-- [CLI - probe](/cli/probe) - Probe from the command line
-- [Dashboard Endpoints](/api/dashboard#get-post-apimesh-test) - Reachability test of every agent
-- [Listeners Configuration](/configuration/listeners) - Listener transports and paths
-- [Protocol Configuration](/configuration/protocol) - Custom ALPN, header, and subprotocol values
+- [probe CLI](/cli/probe): probe from the command line
+- [Dashboard Endpoints](/api/dashboard#get-post-apimesh-test): reachability test of every agent
+- [Listeners Configuration](/configuration/listeners): listener transports and paths
+- [Protocol Configuration](/configuration/protocol): custom ALPN, header, and subprotocol values

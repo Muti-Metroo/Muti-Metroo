@@ -280,7 +280,7 @@ Errors reported by the target keep the response shape and add `error`, plus `err
 
 ## See Also
 
-- [File Transfer](/features/file-transfer) - Feature overview
-- [CLI - upload and download](/cli/file-transfer) - Command-line clients
-- [File Transfer Configuration](/configuration/file-transfer) - Enable transfers and set allowed paths
-- [Authentication](/security/authentication) - Management signing keys
+- [File Transfer](/features/file-transfer): feature overview
+- [upload and download CLI](/cli/file-transfer): command-line clients
+- [File Transfer Configuration](/configuration/file-transfer): enable transfers and set allowed paths
+- [Authentication](/security/authentication): management signing keys

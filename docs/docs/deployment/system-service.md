@@ -18,7 +18,7 @@ sidebar_position: 2
 | macOS | launchd daemon | Not supported |
 | Windows | Windows Service | Registry Run key + `rundll32.exe` (requires the DLL) |
 
-For the full flag reference, see [CLI - service](/cli/service).
+For the full flag reference, see [service CLI](/cli/service).
 
 ## Before you install
 
@@ -205,7 +205,7 @@ The command copies the binary to `/usr/local/bin/muti-metroo`, writes `/Library/
 </plist>
 ```
 
-The daemon runs as root. `KeepAlive` with `SuccessfulExit` set to `false` restarts the agent only after a non-zero exit. Log files are written to the config file's directory.
+The daemon runs as root. `KeepAlive` with `SuccessfulExit` set to `false` restarts the agent only after a non-zero exit. Log files are written to the config file's directory, or to `/var/log` for a binary with an embedded configuration.
 
 ### Manage the service
 
@@ -283,7 +283,7 @@ Without Administrator rights, install a per-user service that starts the [DLL](/
 muti-metroo.exe service install --user --dll C:\Users\alice\muti-metroo\muti-metroo.dll -c C:\Users\alice\muti-metroo\config.yaml
 ```
 
-`--dll` is required in this mode and must point to the DLL that matches the host architecture. See [CLI - service](/cli/service) for the other flags.
+`--dll` is required in this mode and must point to the DLL that matches the host architecture. See [service CLI](/cli/service) for the other flags.
 
 The command:
 
@@ -362,8 +362,8 @@ sudo /usr/local/bin/muti-metroo run -c /etc/muti-metroo/config.yaml
 
 ## See Also
 
-- [CLI - service](/cli/service) - Flags for `service install`, `status`, and `uninstall`
-- [PM2 Process Manager](/deployment/pm2) - Supervise the agent with PM2 instead of the OS service manager
-- [Embedded Configuration](/deployment/embedded-config) - Install a single binary that carries its own config
-- [DLL Mode](/deployment/dll-mode) - Run the agent through `rundll32.exe` on Windows
-- [Common Issues](/troubleshooting/common-issues) - Startup errors and their fixes
+- [service CLI](/cli/service): flags for `service install`, `status`, and `uninstall`
+- [PM2 Process Manager](/deployment/pm2): supervise the agent with PM2 instead of the OS service manager
+- [Embedded Configuration](/deployment/embedded-config): install a single binary that carries its own config
+- [DLL Mode](/deployment/dll-mode): run the agent through `rundll32.exe` on Windows
+- [Common Issues](/troubleshooting/common-issues): startup errors and their fixes

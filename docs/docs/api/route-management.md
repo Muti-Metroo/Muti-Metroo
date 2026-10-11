@@ -252,8 +252,8 @@ curl -s -X POST "$API/routes/manage" -d '{"action": "list"}' \
 
 ## See Also
 
-- [CLI - route](/cli/route) - The `route` commands that call these endpoints
-- [Route Trace Endpoints](/api/route-trace) - Check which route a destination would use
-- [Exit Configuration](/configuration/exit) - Static routes, `source_ip`, and `interface`
-- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart
-- [Routing Configuration](/configuration/routing) - Advertisement interval and route TTL
+- [route CLI](/cli/route): the `route` commands that call these endpoints
+- [Route Trace Endpoints](/api/route-trace): check which route a destination would use
+- [Exit Configuration](/configuration/exit): static routes, `source_ip`, and `interface`
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence): how runtime changes survive restart
+- [Routing Configuration](/configuration/routing): advertisement interval and route TTL

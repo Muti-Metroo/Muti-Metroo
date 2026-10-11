@@ -108,7 +108,7 @@ readinessProbe:
 
 ## See Also
 
-- [HTTP API Overview](/api/overview) - Endpoint groups and authentication
-- [HTTP Configuration](/configuration/http) - Enable the HTTP server
-- [CLI - status](/cli/status) - Check agent status from the command line
-- [Docker Deployment](/deployment/docker) - Health checks in containers
+- [HTTP API Overview](/api/overview): endpoint groups and authentication
+- [HTTP Configuration](/configuration/http): enable the HTTP server
+- [status CLI](/cli/status): check agent status from the command line
+- [Docker Deployment](/deployment/docker): health checks in containers

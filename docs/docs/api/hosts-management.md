@@ -130,8 +130,8 @@ Remove the dependent entries before removing their suffix. Entries from `mesh_ho
 
 ## See Also
 
-- [CLI - host](/cli/host) - The `host` commands that call these endpoints
-- [Mesh Hostnames](/features/mesh-hostnames) - How mesh names are resolved
-- [Hosts Configuration](/configuration/hosts) - Static entries and suffixes
-- [Dashboard Endpoints](/api/dashboard#get-apidashboard) - The `mesh_hosts` and `mesh_hosts_suffixes` fields
-- [Route Trace Endpoints](/api/route-trace) - Trace a registered name
+- [host CLI](/cli/host): the `host` commands that call these endpoints
+- [Mesh Hostnames](/features/mesh-hostnames): how mesh names are resolved
+- [Hosts Configuration](/configuration/hosts): static entries and suffixes
+- [Dashboard Endpoints](/api/dashboard#get-apidashboard): the `mesh_hosts` and `mesh_hosts_suffixes` fields
+- [Route Trace Endpoints](/api/route-trace): trace a registered name

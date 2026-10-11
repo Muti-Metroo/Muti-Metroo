@@ -221,7 +221,7 @@ For both remote endpoints the local agent signs `add` and `remove` and forwards 
 
 ## See Also
 
-- [CLI - forward](/cli/forward) - The `forward` commands that call these endpoints
-- [Port Forwarding](/features/port-forwarding) - How listeners and endpoints work together
-- [Forward Configuration](/configuration/forward) - Static listeners and endpoints
-- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart
+- [forward CLI](/cli/forward): the `forward` commands that call these endpoints
+- [Port Forwarding](/features/port-forwarding): how listeners and endpoints work together
+- [Forward Configuration](/configuration/forward): static listeners and endpoints
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence): how runtime changes survive restart

@@ -166,8 +166,8 @@ Errors come in two shapes:
 
 ## See Also
 
-- [HTTP Configuration](/configuration/http) - Enable the server and choose endpoint groups
-- [Management Keys](/configuration/management) - Signing and topology encryption keys
-- [Authentication](/security/authentication) - Authorization model for privileged operations
-- [CLI Overview](/cli/overview) - CLI commands that call this API
-- [Muti Metroo Manager](/muti-metroo-manager) - Web dashboard built on this API
+- [HTTP Configuration](/configuration/http): enable the server and choose endpoint groups
+- [Management Keys](/configuration/management): signing and topology encryption keys
+- [Authentication](/security/authentication): authorization model for privileged operations
+- [CLI Overview](/cli/overview): CLI commands that call this API
+- [Muti Metroo Manager](/muti-metroo-manager): web dashboard built on this API

@@ -167,7 +167,7 @@ Without root, listeners must use ports above 1023. To accept peers on a web host
 
 ## See Also
 
-- [System Service](/deployment/system-service) - systemd, launchd, and Windows Service installation
-- [Reverse Proxy](/deployment/reverse-proxy) - Accept peers through Nginx, Caddy, or Apache
-- [CLI - run](/cli/run) - Options for `muti-metroo run`
-- [Common Issues](/troubleshooting/common-issues) - Startup errors and their fixes
+- [System Service](/deployment/system-service): systemd, launchd, and Windows Service installation
+- [Reverse Proxy](/deployment/reverse-proxy): accept peers through Nginx, Caddy, or Apache
+- [run CLI](/cli/run): options for `muti-metroo run`
+- [Common Issues](/troubleshooting/common-issues): startup errors and their fixes

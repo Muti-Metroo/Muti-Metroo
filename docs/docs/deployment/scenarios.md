@@ -302,8 +302,8 @@ If outbound traffic must go through an HTTP proxy, the inside agent cannot reach
 
 ## See Also
 
-- [High Availability](/deployment/high-availability) - Redundant paths, exits, and ingress agents
-- [Configuration Overview](/configuration/overview) - Every config section
-- [Exit Routing](/features/exit-routing) - CIDR and domain routes
-- [Agent Roles](/concepts/agent-roles) - Ingress, transit, and exit
-- [System Service](/deployment/system-service) - Running agents at boot
+- [High Availability](/deployment/high-availability): redundant paths, exits, and ingress agents
+- [Configuration Overview](/configuration/overview): every config section
+- [Exit Routing](/features/exit-routing): CIDR and domain routes
+- [Agent Roles](/concepts/agent-roles): ingress, transit, and exit
+- [System Service](/deployment/system-service): running agents at boot

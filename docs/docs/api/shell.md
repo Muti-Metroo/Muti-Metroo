@@ -99,7 +99,7 @@ WebSocket close codes for sessions that fail:
 
 ## See Also
 
-- [Management Commands](/features/shell) - Feature overview
-- [CLI - shell](/cli/shell) - Command-line client
-- [Management Commands Configuration](/configuration/shell) - Enable commands and set the whitelist
-- [Authentication](/security/authentication) - Management signing keys
+- [Management Commands](/features/shell): feature overview
+- [shell CLI](/cli/shell): command-line client
+- [Management Commands Configuration](/configuration/shell): enable commands and set the whitelist
+- [Authentication](/security/authentication): management signing keys

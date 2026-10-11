@@ -159,7 +159,7 @@ The local agent signs `add` and `remove` and forwards the request over the mesh;
 
 ## See Also
 
-- [CLI - listener](/cli/listener) - The `listener` commands that call these endpoints
-- [Listeners Configuration](/configuration/listeners) - Listener options and advertisement
-- [Peer Management Endpoints](/api/peer-management) - Dial peers at runtime
-- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence) - How runtime changes survive restart
+- [listener CLI](/cli/listener): the `listener` commands that call these endpoints
+- [Listeners Configuration](/configuration/listeners): listener options and advertisement
+- [Peer Management Endpoints](/api/peer-management): dial peers at runtime
+- [Dynamic Configuration Persistence](/configuration/dynamic-config-persistence): how runtime changes survive restart

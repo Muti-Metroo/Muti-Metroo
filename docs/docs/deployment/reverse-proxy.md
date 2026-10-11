@@ -240,8 +240,8 @@ A plain HTTP request to the listener path returns `426 Upgrade Required`, which 
 
 ## See Also
 
-- [Configuration - Listeners](/configuration/listeners) - `plaintext`, `path`, and `advertise` reference
-- [Transports](/concepts/transports) - QUIC, HTTP/2, and WebSocket compared
-- [CLI - probe](/cli/probe) - Testing listeners and endpoints
-- [PM2 Process Manager](/deployment/pm2) - Running the agent without root
-- [Connectivity Troubleshooting](/troubleshooting/connectivity) - Diagnosing peers that do not connect
+- [Configuration - Listeners](/configuration/listeners): `plaintext`, `path`, and `advertise` reference
+- [Transports](/concepts/transports): QUIC, HTTP/2, and WebSocket compared
+- [probe CLI](/cli/probe): testing listeners and endpoints
+- [PM2 Process Manager](/deployment/pm2): running the agent without root
+- [Connectivity Troubleshooting](/troubleshooting/connectivity): diagnosing peers that do not connect

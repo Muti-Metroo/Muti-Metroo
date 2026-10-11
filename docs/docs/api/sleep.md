@@ -109,6 +109,6 @@ Timestamps that do not apply are reported as `0001-01-01T00:00:00Z`.
 
 ## See Also
 
-- [Sleep Mode](/features/sleep-mode) - How sleep and polling work
-- [Sleep Configuration](/configuration/sleep) - Poll interval, jitter, and persistence
-- [CLI - sleep](/cli/sleep) - The `sleep`, `wake`, and status commands
+- [Sleep Mode](/features/sleep-mode): how sleep and polling work
+- [Sleep Configuration](/configuration/sleep): poll interval, jitter, and persistence
+- [sleep CLI](/cli/sleep): the `sleep`, `wake`, and status commands
