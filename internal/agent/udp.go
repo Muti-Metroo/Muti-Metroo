@@ -23,6 +23,11 @@ import (
 var (
 	ErrUDPNoRoute        = errors.New("no UDP route available")
 	ErrUDPStreamNotFound = errors.New("UDP stream not found")
+
+	// ErrUDPDatagramTooLarge is returned when a datagram exceeds
+	// protocol.MaxUDPDatagramSize. Rejecting at ingress instead of letting
+	// the exit drop it silently makes the loss diagnosable at the source.
+	ErrUDPDatagramTooLarge = errors.New("UDP datagram exceeds maximum size")
 )
 
 // udpDestAssociation tracks a single exit-path for one destination route.
@@ -310,6 +315,25 @@ func (d *udpDestAssociation) closePendingOpen(err error) {
 // Called when a SOCKS5 client sends a UDP datagram to relay through the mesh.
 // Routes based on actual destination IP, creating mesh paths on demand.
 func (a *Agent) RelayUDPDatagram(streamID uint64, destAddr net.Addr, destPort uint16, addrType byte, rawAddr []byte, data []byte) error {
+	// Reject oversize datagrams at the ingress. The exit would drop them
+	// anyway (its MaxDatagramSize check), and the SOCKS5 read loop discards
+	// the returned error, so without this guard the sender sees a silent
+	// black hole. UDP has no error back-channel here; the log is the signal.
+	if len(data) > protocol.MaxUDPDatagramSize {
+		drops := a.udpOversizeDrops.Add(1)
+		now := time.Now()
+		last := a.udpOversizeDropLogAt.Load()
+		if now.Sub(time.Unix(0, last)) >= time.Second &&
+			a.udpOversizeDropLogAt.CompareAndSwap(last, now.UnixNano()) {
+			a.logger.Warn("dropping oversize UDP datagram at ingress",
+				logging.KeyStreamID, streamID,
+				"size", len(data),
+				"max", protocol.MaxUDPDatagramSize,
+				"total_drops", drops)
+		}
+		return fmt.Errorf("%w: %d > %d", ErrUDPDatagramTooLarge, len(data), protocol.MaxUDPDatagramSize)
+	}
+
 	// Get ingress and verify it exists under lock
 	a.udpIngressMu.RLock()
 	ingress := a.udpIngressByBase[streamID]

@@ -164,6 +164,11 @@ type Agent struct {
 	// Per-agent for the same reason as the ingress maps above.
 	udpRelay *relayTable
 
+	// Oversize-datagram drop accounting for RelayUDPDatagram: the reject is
+	// logged at most once per second, with the running total attached.
+	udpOversizeDrops     atomic.Uint64
+	udpOversizeDropLogAt atomic.Int64
+
 	// ICMP echo (for exit nodes)
 	icmpHandler *icmp.Handler
 

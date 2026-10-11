@@ -86,6 +86,12 @@ type Connection struct {
 	frameCh    chan *protocol.Frame // Sequential frame dispatch channel (stream-ordered frames)
 	fastLaneCh chan *protocol.Frame // Parallel dispatch for unordered frames (UDP_DATAGRAM, ICMP_ECHO)
 
+	// Fast-lane drop accounting: readLoop never blocks on a full fastLaneCh
+	// (a datagram burst must not stall stream traffic), so overflows are
+	// dropped and counted here, with the log line rate-limited.
+	fastLaneDrops     atomic.Uint64
+	fastLaneDropLogAt atomic.Int64
+
 	// Callbacks
 	onFrame      func(*Connection, *protocol.Frame)
 	onDisconnect func(*Connection, error)
@@ -176,6 +182,27 @@ func (c *Connection) drainFrames(ch <-chan *protocol.Frame) {
 			return
 		}
 	}
+}
+
+// noteFastLaneDrop records a dropped fast-lane frame and reports whether the
+// caller should log it (rate-limited to once per second per connection).
+func (c *Connection) noteFastLaneDrop() (drops uint64, shouldLog bool) {
+	drops = c.fastLaneDrops.Add(1)
+	now := time.Now()
+	last := c.fastLaneDropLogAt.Load()
+	if now.Sub(time.Unix(0, last)) < time.Second {
+		return drops, false
+	}
+	if !c.fastLaneDropLogAt.CompareAndSwap(last, now.UnixNano()) {
+		return drops, false
+	}
+	return drops, true
+}
+
+// FastLaneDrops returns the number of fast-lane frames dropped because the
+// dispatch queue was full.
+func (c *Connection) FastLaneDrops() uint64 {
+	return c.fastLaneDrops.Load()
 }
 
 // State returns the current connection state.

@@ -22,6 +22,17 @@ func formatIPAddress(ip net.IP) (addrType uint8, addr []byte) {
 	return protocol.AddrTypeIPv6, ip.To16()
 }
 
+// datagramResolveTimeout bounds the DNS lookup for domain-addressed
+// datagrams. HandleUDPDatagram runs on a peer connection's fast-lane worker,
+// so an unbounded lookup would park one of the few drainers. It is a var so
+// tests can shrink it.
+var datagramResolveTimeout = 5 * time.Second
+
+// lookupIP is injectable for tests.
+var lookupIP = func(ctx context.Context, domain string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", domain)
+}
+
 // resolveDatagramAddress resolves the destination address from a UDP datagram.
 func resolveDatagramAddress(datagram *protocol.UDPDatagram) (*net.UDPAddr, error) {
 	port := int(datagram.Port)
@@ -35,7 +46,9 @@ func resolveDatagramAddress(datagram *protocol.UDPDatagram) (*net.UDPAddr, error
 			return nil, fmt.Errorf("invalid domain address")
 		}
 		domain := string(datagram.Address[1:])
-		ips, err := net.LookupIP(domain)
+		ctx, cancel := context.WithTimeout(context.Background(), datagramResolveTimeout)
+		defer cancel()
+		ips, err := lookupIP(ctx, domain)
 		if err != nil {
 			return nil, fmt.Errorf("DNS lookup failed: %w", err)
 		}

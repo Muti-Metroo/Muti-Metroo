@@ -481,13 +481,27 @@ func (m *Manager) readLoop(conn *Connection) {
 			// to avoid head-of-line blocking the sequential path; UDP and
 			// ICMP are unordered by definition and per-frame handlers
 			// have no cross-frame state.
-			ch := conn.frameCh
-			switch frame.Type {
-			case protocol.FrameUDPDatagram, protocol.FrameICMPEcho:
-				ch = conn.fastLaneCh
+			if frame.Type == protocol.FrameUDPDatagram || frame.Type == protocol.FrameICMPEcho {
+				// Drop-tail: UDP/ICMP have loss semantics, so a burst
+				// overflows the fast lane by dropping datagrams -- never
+				// by blocking readLoop, which would stall every stream
+				// and control frame on this connection.
+				select {
+				case conn.fastLaneCh <- frame:
+				case <-conn.Done():
+					return
+				default:
+					if drops, shouldLog := conn.noteFastLaneDrop(); shouldLog {
+						m.logger.Warn("fast lane full, dropping datagram frame",
+							"peer_id", conn.RemoteID.ShortString(),
+							"frame_type", protocol.FrameTypeName(frame.Type),
+							"total_drops", drops)
+					}
+				}
+				continue
 			}
 			select {
-			case ch <- frame:
+			case conn.frameCh <- frame:
 			case <-conn.Done():
 				return
 			}

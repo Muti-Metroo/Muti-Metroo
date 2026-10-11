@@ -1347,6 +1347,8 @@ destination travels in each UDP_DATAGRAM frame.
 
 - **Fragmentation**: Not supported. Datagrams with frag > 0 are rejected.
 - **Max Datagram Size**: 1472 bytes (MTU - IP/UDP headers)
+- **Oversize Datagrams**: rejected at the SOCKS5 ingress against `MaxUDPDatagramSize` (rate-limited log); the exit-side size check remains as defense in depth.
+- **DNS at the Exit**: domain-addressed datagrams are resolved with a bounded (5s) lookup so a slow resolver cannot park a fast-lane worker.
 - **Association Lifetime**: Tied to TCP control connection. When TCP closes, UDP association terminates.
 - **Access Control**: Uses CIDR-based exit routes (same as TCP streams).
 - **Authentication**: Uses existing SOCKS5 authentication (not separate password).
@@ -4132,6 +4134,10 @@ muti-metroo/
 │  • 1 destination-writer goroutine per exit/forward connection               │
 │    (bounded queue of 64 writes; overflow resets only that stream,           │
 │    never stalls the frame drainer)                                          │
+│                                                                             │
+│  Fast-lane overflow is drop-tail: readLoop drops the datagram               │
+│  (counted, rate-limited log) instead of blocking the whole                  │
+│  connection behind a UDP burst.                                             │
 │                                                                             │
 │  Writes are serialised via a mutex (writeMu) around synchronous WriteFrame  │
 │  calls; there is no dedicated writer goroutine. Each WriteFrame arms a      │

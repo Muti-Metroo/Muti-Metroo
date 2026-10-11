@@ -2795,3 +2795,101 @@ func TestManager_KeepaliveInboundStale(t *testing.T) {
 		t.Error("connection should be closed")
 	}
 }
+
+// A datagram burst that overflows the fast lane must drop datagrams, never
+// block readLoop -- otherwise UDP loss semantics become connection-wide
+// backpressure stalling unrelated streams and control traffic. The test jams
+// all four fast-lane workers, floods the lane, and then proves readLoop is
+// still responsive by getting a KEEPALIVE_ACK through.
+func TestManager_FastLaneOverflowDropsWithoutStalling(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	tr := transport.NewQUICTransport()
+	defer tr.Close()
+
+	cfg := DefaultManagerConfig(localID, tr)
+	cfg.KeepaliveInterval = time.Hour // keep the link quiet
+
+	m := NewManager(cfg)
+	defer m.Close()
+
+	// All fast-lane workers wedge in OnFrame until the gate opens.
+	gate := make(chan struct{})
+	defer close(gate)
+
+	remoteID, _ := identity.NewAgentID()
+	pc := newPipePeerConn(false)
+	conn := NewConnection(pc, ConnectionConfig{
+		LocalID: m.cfg.LocalID,
+		OnFrame: func(_ *Connection, _ *protocol.Frame) { <-gate },
+	})
+	conn.RemoteID = remoteID
+	conn.reader = protocol.NewFrameReader(pc.inR)
+	conn.writer = protocol.NewFrameWriter(pc.outW)
+	conn.SetState(StateConnected)
+	conn.markReady()
+	m.registerConnection(conn)
+	t.Cleanup(func() { conn.Close() })
+
+	// Overflow the fast lane: 4 blocked workers + 256 buffer slots, then some.
+	const datagrams = 300
+	writeErr := make(chan error, 1)
+	go func() {
+		w := protocol.NewFrameWriter(pc.inW)
+		for i := 0; i < datagrams; i++ {
+			frame := &protocol.Frame{
+				Type:     protocol.FrameUDPDatagram,
+				StreamID: uint64(i + 1),
+				Payload:  []byte("x"),
+			}
+			if err := w.Write(frame); err != nil {
+				writeErr <- err
+				return
+			}
+		}
+		writeErr <- nil
+	}()
+
+	select {
+	case err := <-writeErr:
+		if err != nil {
+			t.Fatalf("writing inbound datagrams: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("readLoop stalled on fast-lane overflow (inbound writes blocked)")
+	}
+
+	if drops := conn.FastLaneDrops(); drops == 0 {
+		t.Error("FastLaneDrops = 0, want drops after overflow")
+	}
+
+	// readLoop is still responsive: a keepalive gets an ACK.
+	ka := &protocol.Frame{
+		Type:     protocol.FrameKeepalive,
+		StreamID: protocol.ControlStreamID,
+		Payload:  (&protocol.Keepalive{Timestamp: uint64(time.Now().UnixNano())}).Encode(),
+	}
+	if err := protocol.NewFrameWriter(pc.inW).Write(ka); err != nil {
+		t.Fatalf("write keepalive: %v", err)
+	}
+
+	ackCh := make(chan *protocol.Frame, 1)
+	go func() {
+		reader := protocol.NewFrameReader(pc.outR)
+		for {
+			frame, err := reader.Read()
+			if err != nil {
+				return
+			}
+			if frame.Type == protocol.FrameKeepaliveAck {
+				ackCh <- frame
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-ackCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no KEEPALIVE_ACK: readLoop stalled behind the overflowing fast lane")
+	}
+}

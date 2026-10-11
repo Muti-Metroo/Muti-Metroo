@@ -3,6 +3,7 @@ package udp
 import (
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"sync"
 	"testing"
@@ -336,5 +337,33 @@ func TestHandler_CleanupExpired(t *testing.T) {
 
 	if h.ActiveCount() != 0 {
 		t.Errorf("ActiveCount after cleanup = %d, want 0", h.ActiveCount())
+	}
+}
+
+// A domain-addressed datagram triggers a DNS lookup on a fast-lane worker;
+// the lookup must be bounded by datagramResolveTimeout so a slow resolver
+// cannot park the worker indefinitely.
+func TestResolveDatagramAddress_DomainLookupBounded(t *testing.T) {
+	oldLookup, oldTimeout := lookupIP, datagramResolveTimeout
+	lookupIP = func(ctx context.Context, domain string) ([]net.IP, error) {
+		<-ctx.Done() // Resolver that never answers on its own
+		return nil, ctx.Err()
+	}
+	datagramResolveTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { lookupIP, datagramResolveTimeout = oldLookup, oldTimeout })
+
+	datagram := &protocol.UDPDatagram{
+		AddressType: protocol.AddrTypeDomain,
+		Address:     append([]byte{byte(len("slow.example"))}, "slow.example"...),
+		Port:        53,
+	}
+
+	start := time.Now()
+	_, err := resolveDatagramAddress(datagram)
+	if err == nil {
+		t.Fatal("expected error from bounded lookup")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("lookup took %v, want bounded near 50ms", elapsed)
 	}
 }
