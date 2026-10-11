@@ -94,6 +94,15 @@ emphasis left.
 - The mole mascot images in `static/img/` are decorative page headers. Keep the
   existing ones; do not add new ones to reference pages.
 
+## Verification
+
+`node docs/scripts/verify-docs.mjs` checks every page against an agent built
+from the current checkout: each `muti-metroo` command line and flag in an
+example, each complete config example (through `config validate`), each
+agent HTTP path, and the mechanical rules above. It writes the per-page
+results to `docs/VERIFICATION.md` and runs in CI on every change to the docs
+or the code. A failing page is fixed, not excluded.
+
 ## Moving and removing pages
 
 When a page is renamed, merged, or removed, add a redirect from the old URL in

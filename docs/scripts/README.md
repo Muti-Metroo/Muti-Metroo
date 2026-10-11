@@ -65,7 +65,7 @@ required; the run fails if one is skipped.
 | `13-routes-test-routing`    | Routes tab > Test routing for a seeded mesh host            |
 | `14-downloads-tab`          | Downloads tab                                               |
 | `15-mesh-test-modal`        | Mesh test results dialog                                    |
-| `16-agent-ping`             | Agent panel Ping tab with a running session                 |
+| `16-agent-ping`             | Agent panel Ping tab after a 10-echo session to exit-cloud  |
 | `17-dns-tlds`               | DNS tab > TLDs                                              |
 | `18-config-wizard-entry`    | Mutiauk config wizard, first step                           |
 | `19-agent-listeners`        | Agent panel Connectivity > Listeners (gateway)              |
@@ -86,36 +86,39 @@ required; the run fails if one is skipped.
 
 ## Determinism
 
-- Fixed viewport (1600x900), UTC timezone, en-US locale, reduced motion, and
-  an injected stylesheet that stops CSS animations and the text caret.
-- Fixed agent IDs, names, hostnames, IP addresses, link delays, and a fixed
-  bundle timestamp. The capture script picks agents by sorting full IDs, so
-  the same agent appears in the same shot every run.
-- State a shot needs is seeded through the agent API (forwards, mesh hosts)
-  or Manager's own API (network membership, station positions) before the
-  shot and removed after it. The Manager's displayed agent API and SOCKS5
-  addresses are set to `gateway.example.net` for the whole run and restored
-  at the end.
-- Every page load clears the Manager's localStorage (map view, panel width,
-  theme), and the browser reports a light color scheme, so all shots except
-  `25-topology-dark` use the light theme.
-- Each view waits for a selector that proves it is rendered, not for a fixed
-  delay.
+Two consecutive runs write byte-identical files. What makes that hold:
 
-- The page clock is frozen at 2026-01-15 10:30 UTC and fixture files carry a
-  fixed timestamp, so rendered times and file listings are the same on every
-  run.
-- Fresh key pairs are generated per run and never stored in the repository.
-  The agent config wizard shot replaces the public keys in its YAML with
-  fixed placeholder values.
+- **Fixed fixture.** Agent IDs, names, hostnames, IP addresses, link delays,
+  file timestamps, and the bundle timestamp never change. Key pairs are
+  generated fresh on every run and never stored in the repository.
+- **Fixed browser.** Viewport 1600x900, UTC timezone, en-US locale, light
+  color scheme, reduced motion, software rendering with a fixed color
+  profile and a single raster thread. A stylesheet installed before first
+  paint stops animations, transitions, and the text caret.
+- **Frozen clock.** The page clock is fixed at 2026-01-15 10:30 UTC.
+- **Normalized live data.** Agent API responses pass through the capture
+  script before Manager sees them: agents and links are sorted, uptimes and
+  timestamps are set to fixed values, and mesh-test latencies are replaced
+  with the fixture's nominal values (transit 12 ms, exit-datacenter 30 ms,
+  exit-cloud 77 ms). The ping shot shows the nominal 76 ms for its path,
+  and the agent config wizard shot shows fixed placeholder public keys.
+- **Seeded state.** Forwards, mesh hosts, network membership, and station
+  positions are created through the agent or Manager API before a shot and
+  removed after it.
+- **Settled rendering.** Every shot opens in a fresh page, tabs are opened
+  by URL, and a shot is taken only after three consecutive screenshots 1.2 s
+  apart are identical.
+- **Noise guard.** Chromium can still rasterize a few anti-aliased edge
+  pixels a few color levels apart. When a new capture differs from the file
+  on disk only by such noise (at most 200 pixels differ, none by more than 16
+  levels in any channel), the file is left untouched. Any real change, even
+  a subtle color shift across a component, exceeds that and replaces it.
 
-Two consecutive runs produce byte-identical images for most shots. What can
-still differ:
-
-- `15-mesh-test-modal`: the per-agent latencies are live measurements.
-- Shots that show the map: the dot phase of a link can shift, because Manager
-  draws each link from whichever end the topology response lists first.
-- A few anti-aliased pixels at table corners.
+To capture only some shots, set `ONLY` to a comma-separated list of names,
+for example `ONLY=07-routes-table,08-port-forwarding`. It needs a running
+fixture: start one with `KEEP_RUNNING=1 docs/scripts/capture-screenshots.sh`,
+then run `METROO_MANAGER_URL=http://127.0.0.1:27130 ONLY=... node
+docs/scripts/capture-muti-metroo-manager.js`.
 
 ## Adding a screenshot
 

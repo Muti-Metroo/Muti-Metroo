@@ -23,7 +23,9 @@ npm run build      # production build into build/
 npm run serve      # serve the production build
 ```
 
-`npm run build` must finish without broken link or anchor warnings.
+`npm run build` must finish without broken link or anchor warnings, and
+`node scripts/verify-docs.mjs` (run from `docs/`) must report every page as
+passing. CI runs both.
 
 ## Structure
 

@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - "docs/**"
+      - "cmd/**"
+      - "internal/**"
       - ".github/workflows/docs.yml"
   release:
     types: [published]
@@ -32,9 +34,18 @@ jobs:
           cache: "npm"
           cache-dependency-path: docs/package-lock.json
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
       - name: Install dependencies
         working-directory: docs
         run: npm ci
+
+      # Every command line, config example, and HTTP path in the docs must
+      # match the agent built from this commit.
+      - name: Verify documentation against the implementation
+        run: node docs/scripts/verify-docs.mjs
 
       - name: Build documentation
         working-directory: docs

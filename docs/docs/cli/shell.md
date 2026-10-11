@@ -63,8 +63,8 @@ muti-metroo shell abc123de whoami
 muti-metroo shell abc123de -- ls -la /tmp
 
 # Continuous output
-muti-metroo shell abc123de tail -f /var/log/syslog
-muti-metroo shell abc123de journalctl -u muti-metroo -f
+muti-metroo shell abc123de -- tail -f /var/log/syslog
+muti-metroo shell abc123de -- journalctl -u muti-metroo -f
 
 # Send local data to a remote command
 seq 1 1000 | muti-metroo shell abc123de -- wc -l

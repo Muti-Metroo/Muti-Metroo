@@ -97,7 +97,7 @@ teardown() {
 
 cleanup() {
   local rc=$?
-  if [ "${KEEP_RUNNING:-}" = "1" ] && [ $rc -eq 0 ]; then
+  if [ "${KEEP_RUNNING:-}" = "1" ]; then
     log "KEEP_RUNNING=1: Manager at http://127.0.0.1:$MANAGER_PORT (pid $MANAGER_PID)"
     log "Containers: ${AGENTS[*]/#/mm-docs-}; work dir $WORK"
     return

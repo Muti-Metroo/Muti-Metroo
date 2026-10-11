@@ -14,7 +14,7 @@ sidebar_position: 9
 
 ```bash
 muti-metroo shell 1f743225 uptime
-muti-metroo shell 1f743225 journalctl -u muti-metroo -f
+muti-metroo shell 1f743225 -- journalctl -u muti-metroo -f
 muti-metroo shell --tty 1f743225 htop
 ```
 
@@ -59,8 +59,8 @@ With `["*"]`, any command runs with any arguments. Commands are started directly
 Without `--tty`, the command runs without a terminal. Standard output and standard error arrive separately, so you can redirect them locally, and the session ends when the command exits.
 
 ```bash
-muti-metroo shell 1f743225 df -h
-muti-metroo shell 1f743225 journalctl -u muti-metroo --since today
+muti-metroo shell 1f743225 -- df -h
+muti-metroo shell 1f743225 -- journalctl -u muti-metroo --since today
 ```
 
 Put `--` before the remote command when its flags would otherwise be read as `muti-metroo` flags:

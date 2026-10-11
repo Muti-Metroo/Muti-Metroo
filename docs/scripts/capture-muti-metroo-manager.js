@@ -85,7 +85,20 @@ const FREEZE_CSS = `
 async function main() {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
-  const browser = await chromium.launch({ headless: !process.env.HEADED });
+  const browser = await chromium.launch({
+    headless: !process.env.HEADED,
+    // Software rendering with a fixed color profile and grayscale text
+    // anti-aliasing, so edges rasterize the same way on every run.
+    args: [
+      "--disable-gpu",
+      "--force-color-profile=srgb",
+      "--disable-lcd-text",
+      "--font-render-hinting=none",
+      // One raster thread: tiles rasterize in a fixed order, so
+      // anti-aliased edges come out identical.
+      "--num-raster-threads=1",
+    ],
+  });
   const context = await browser.newContext({
     viewport: VIEWPORT,
     ignoreHTTPSErrors: true,
@@ -102,12 +115,100 @@ async function main() {
   // keep running; only the reported wall time is fixed.
   await context.clock.setFixedTime(new Date("2026-01-15T10:30:00Z"));
   context.setDefaultTimeout(STEP_TIMEOUT);
+
+  // Normalize the two responses that carry run-to-run noise:
+  //  - topology: the agent lists agents in no fixed order, and lists
+  //    either end of a link first, which reorders search results and shifts
+  //    where the map draws its dots. Sort agents by ID, orient every link
+  //    from the lower to the higher short ID, and sort the links.
+  //  - mesh test: per-agent latencies are live measurements. Replace them
+  //    with the fixture's nominal values (set by the netem delays in
+  //    capture-screenshots.sh) and sort results by agent ID.
+  const NOMINAL_LATENCY_MS = {
+    transit: 12,
+    "exit-datacenter": 30,
+    "exit-cloud": 77,
+  };
+  // Fixed stand-ins for live values in agent API responses, so uptimes and
+  // timestamps render the same on every run.
+  const FIXED_TIME = "2026-01-15T10:30:00Z";
+  function normalizeLive(value) {
+    if (Array.isArray(value)) return value.forEach(normalizeLive);
+    if (!value || typeof value !== "object") return;
+    for (const [key, v] of Object.entries(value)) {
+      if (key === "uptime_hours" && typeof v === "number") value[key] = 26.5;
+      else if (
+        ["started_at", "last_update", "last_poll_time", "test_time"].includes(key) &&
+        typeof v === "string" &&
+        !v.startsWith("0001-")
+      )
+        value[key] = FIXED_TIME;
+      else normalizeLive(v);
+    }
+  }
+  function normalizeTopology(body) {
+    if (Array.isArray(body.agents)) {
+      body.agents.sort((a, b) => a.id.localeCompare(b.id));
+    }
+    if (Array.isArray(body.connections)) {
+      body.connections = body.connections
+        .map((c) =>
+          c.from_agent > c.to_agent
+            ? { ...c, from_agent: c.to_agent, to_agent: c.from_agent }
+            : c,
+        )
+        .sort((a, b) =>
+          `${a.from_agent}|${a.to_agent}`.localeCompare(`${b.from_agent}|${b.to_agent}`),
+        );
+    }
+  }
+  function normalizeMeshTest(body) {
+    if (!Array.isArray(body.results)) return;
+    for (const r of body.results) {
+      if (r.reachable && r.display_name in NOMINAL_LATENCY_MS) {
+        r.response_time_ms = NOMINAL_LATENCY_MS[r.display_name];
+      }
+    }
+    body.results.sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+    body.duration_ms = Math.max(0, ...body.results.map((r) => r.response_time_ms || 0));
+  }
+  await context.route("**/api/proxy/**", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET" && !request.url().endsWith("/api/mesh-test")) {
+      return route.continue();
+    }
+    const response = await route.fetch();
+    const type = response.headers()["content-type"] || "";
+    if (!type.includes("application/json")) return route.fulfill({ response });
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      return route.fulfill({ response });
+    }
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/api/topology")) normalizeTopology(body);
+    if (url.pathname.endsWith("/api/mesh-test")) normalizeMeshTest(body);
+    normalizeLive(body);
+    await route.fulfill({ response, json: body });
+  });
   context.setDefaultNavigationTimeout(NAV_TIMEOUT);
 
   // Clear UI state that Muti Metroo Manager persists in localStorage so
   // every navigation starts from the same centered map, default panel
   // width, and OS-derived (light) theme. Keys from the Manager frontend:
   // MetroMap.tsx, usePanelWidth.ts, and theme.ts. Tabs live in the URL.
+  // Install the freeze stylesheet before the page's first paint, so no
+  // view is restyled after it has rendered.
+  await context.addInitScript((css) => {
+    const install = () => {
+      const style = document.createElement("style");
+      style.textContent = css;
+      document.documentElement.appendChild(style);
+    };
+    if (document.documentElement) install();
+    else document.addEventListener("DOMContentLoaded", install, { once: true });
+  }, FREEZE_CSS);
   await context.addInitScript(() => {
     try {
       localStorage.removeItem("muti-metroo-manager.map-view");
@@ -118,7 +219,93 @@ async function main() {
     }
   });
 
-  const page = await context.newPage();
+  let page;
+  // Each shot gets a fresh page, so no layout or compositor state carries
+  // over from the previous shot.
+  async function freshPage() {
+    if (page) await page.close();
+    page = await context.newPage();
+    instrumentScreenshot(page);
+  }
+
+  // Let the page settle before every shot: web fonts loaded, two frames
+  // painted, and a short pause for late layout (table rows, sticky
+  // headers). Without it a shot can land between layout passes and differ
+  // in a few anti-aliased pixels from the previous run.
+  // Wait for the rendering to settle before writing a shot. Chromium
+  // re-rasterizes anti-aliased edges (map stations, rounded table frames)
+  // a second or two after the page loads or the layout changes, and the
+  // timing varies, so a fixed delay cannot guarantee the same pixels. Take
+  // screenshots until three in a row are byte-identical, then write that
+  // one.
+  // Even with all of the above, Chromium occasionally rasterizes a few
+  // anti-aliased edge pixels a few color levels apart between runs. When
+  // the new capture differs from the existing file only by such noise (same
+  // size, at most 200 pixels differ, none by more than 16 levels in any
+  // channel), keep the existing file, so
+  // re-running the script leaves unchanged shots byte-identical. Any real
+  // visual change is far above this threshold and replaces the file.
+  async function onlyRasterNoise(existingPath, fresh) {
+    let existing;
+    try {
+      existing = await fs.readFile(existingPath);
+    } catch {
+      return false;
+    }
+    if (existing.equals(fresh)) return true;
+    const probe = await context.newPage();
+    try {
+      return await probe.evaluate(
+        async ([a, b]) => {
+          const load = async (b64) =>
+            createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+          const [ia, ib] = await Promise.all([load(a), load(b)]);
+          if (ia.width !== ib.width || ia.height !== ib.height) return false;
+          const pixels = (img) => {
+            const canvas = new OffscreenCanvas(img.width, img.height);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0);
+            return ctx.getImageData(0, 0, img.width, img.height).data;
+          };
+          const pa = pixels(ia);
+          const pb = pixels(ib);
+          let differing = 0;
+          for (let i = 0; i < pa.length; i += 4) {
+            let delta = 0;
+            for (let c = 0; c < 4; c++) delta = Math.max(delta, Math.abs(pa[i + c] - pb[i + c]));
+            if (delta > 16) return false;
+            if (delta > 0 && ++differing > 200) return false;
+          }
+          return true;
+        },
+        [existing.toString("base64"), fresh.toString("base64")],
+      );
+    } finally {
+      await probe.close();
+    }
+  }
+
+  function instrumentScreenshot(p) {
+    const rawScreenshot = p.screenshot.bind(p);
+    p.screenshot = async (options = {}) => {
+      const { path: outPath, ...rest } = options;
+      await p.evaluate(() => document.fonts.ready);
+      let previous = await rawScreenshot(rest);
+      let stable = 1;
+      for (let attempt = 0; attempt < 20 && stable < 3; attempt++) {
+        await p.waitForTimeout(1200);
+        const current = await rawScreenshot(rest);
+        stable = current.equals(previous) ? stable + 1 : 1;
+        previous = current;
+      }
+      if (stable < 3) throw new Error("rendering did not settle");
+      if (outPath && !(await onlyRasterNoise(outPath, previous))) {
+        await fs.writeFile(outPath, previous);
+      }
+      return previous;
+    };
+  }
+  await freshPage();
 
   // Pick agent IDs deterministically (lexicographically lowest id) so
   // the ?agent=<id> deep-link in the panel shots is stable across runs.
@@ -173,10 +360,15 @@ async function main() {
   const captured = [];
   const skipped = [];
 
+  // ONLY=01-topology,07-routes-table captures just those shots.
+  const only = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
+
   async function capture(name, fn) {
+    if (only && !only.has(name)) return;
     const filename = `${name}.png`;
     const out = path.join(OUTPUT_DIR, filename);
     try {
+      await freshPage();
       await fn(out);
       captured.push(filename);
       console.log(`  captured ${filename}`);
@@ -188,7 +380,6 @@ async function main() {
 
   async function openTopology() {
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
-    await page.addStyleTag({ content: FREEZE_CSS });
     await page.waitForSelector(".metro-svg .station", {
       timeout: STEP_TIMEOUT,
     });
@@ -211,14 +402,36 @@ async function main() {
       .first();
   }
 
+  // Tabs live in the URL. Navigating there directly, instead of clicking
+  // the tab, renders the view in one pass: a client-side tab switch leaves
+  // rounded table frames rasterized slightly differently from run to run.
+  const TAB_PATHS = {
+    Routes: "/routes/active",
+    "Test routing": "/routes/test",
+    "Port Forwarding": "/forwards",
+    DNS: "/dns/hosts",
+    TLDs: "/dns/tlds",
+    Downloads: "/downloads",
+  };
   async function switchMainTab(label) {
-    await mainTab(label).click();
+    const tabPath = TAB_PATHS[label];
+    if (!tabPath) {
+      await mainTab(label).click();
+      return;
+    }
+    await page.goto(`${BASE_URL}${tabPath}`, { waitUntil: "domcontentloaded" });
+    const parent = { "Test routing": "Routes", TLDs: "DNS" }[label] || label;
+    await mainTab(parent).waitFor({ timeout: STEP_TIMEOUT });
+    await page
+      .locator("footer", { hasText: /Mesh: \d+\/\d+ reachable/ })
+      .first()
+      .waitFor({ timeout: STEP_TIMEOUT * 2 })
+      .catch(() => {});
   }
 
   async function openAgentPanel(id = mainId, panel) {
     const url = `${BASE_URL}/topology?agent=${id}${panel ? `&panel=${panel}` : ""}`;
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.addStyleTag({ content: FREEZE_CSS });
     await page.waitForSelector(".metro-svg .station", {
       timeout: STEP_TIMEOUT,
     });
@@ -296,6 +509,8 @@ async function main() {
     await page.waitForSelector('ul[role="listbox"]', {
       timeout: STEP_TIMEOUT,
     });
+    // Park the pointer away from the clear button so no hover state shows.
+    await page.mouse.move(800, 860);
     await page.screenshot({ path: out });
   });
 
@@ -539,13 +754,7 @@ async function main() {
     await seedDomain(context, "db.mesh", { ipv4: "10.20.0.15" });
     try {
       await openTopology();
-      await switchMainTab("Routes");
-      await page
-        .locator("main section [role=tablist]")
-        .first()
-        .locator("button[role=tab]", { hasText: /^Test routing$/ })
-        .first()
-        .click();
+      await switchMainTab("Test routing");
       const input = page
         .locator('input[placeholder^="IP address or hostname"]')
         .first();
@@ -595,7 +804,7 @@ async function main() {
         "Downloads tab not present (no downloads bundle deployed)",
       );
     }
-    await tab.click();
+    await switchMainTab("Downloads");
     // The downloads listing renders one section per binary group with a
     // plain table each; wait until at least one artifact row is visible.
     await page.waitForSelector("main section table tbody tr", {
@@ -645,7 +854,9 @@ async function main() {
         : [pingId, mainId].filter(Boolean);
     if (candidates.length === 0)
       throw new Error("no agent available for ping panel");
-    const destIp = "8.8.8.8";
+    // exit-cloud inside the fixture network: the RTT is set by the fixed
+    // netem delays, not by an internet path, so it is the same every run.
+    const destIp = "10.99.0.40";
     let success = false;
     let lastError = null;
     for (const candidate of candidates) {
@@ -671,34 +882,38 @@ async function main() {
           .locator(".agent-panel button", { hasText: /^Start$/ })
           .first()
           .click();
-        // Wait for at least 3 successful (rtt-bearing) rows. If the
-        // agent's ICMP socket fails to open, no rows will land --
-        // detect that and try the next candidate.
+        // Let the default 10-echo run finish, so the shot always shows ten
+        // replies and the Stopped state. If the agent's ICMP socket fails
+        // to open no replies land; try the next candidate.
         const ok = await page
           .waitForFunction(
             () => {
               const rows = document.querySelectorAll(
                 ".agent-panel .ui-table-frame tbody tr",
               );
-              let rttRows = 0;
-              for (const row of rows) {
-                const cells = row.querySelectorAll("td");
-                if (cells.length >= 2 && /ms|s/.test(cells[1].textContent))
-                  rttRows += 1;
-              }
-              return rttRows >= 3;
+              let replies = 0;
+              for (const row of rows) if (/reply/.test(row.textContent)) replies += 1;
+              const panel = document.querySelector(".agent-panel");
+              return replies >= 10 && /Stopped/.test(panel.textContent);
             },
-            { timeout: STEP_TIMEOUT * 3 },
+            undefined,
+            { timeout: STEP_TIMEOUT * 4 },
           )
           .then(() => true)
           .catch(() => false);
         if (ok) {
+          // Manager times each echo in the browser with Date.now(), which
+          // is frozen for these shots, and the values would be live
+          // measurements otherwise. Show the fixture's nominal RTT for this
+          // path (transit 6 ms + exit-cloud 70 ms of netem delay) instead.
+          await page.evaluate(() => {
+            const panel = document.querySelector(".agent-panel");
+            const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+            for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+              if (/^\s*\d+(\.\d+)?ms\s*$/.test(n.textContent)) n.textContent = "76.0ms";
+            }
+          });
           await page.screenshot({ path: out });
-          await page
-            .locator(".agent-panel button", { hasText: /^Stop$/ })
-            .first()
-            .click()
-            .catch(() => {});
           success = true;
           break;
         }
@@ -723,13 +938,7 @@ async function main() {
   // "Loading..." state.
   await capture("17-dns-tlds", async (out) => {
     await openTopology();
-    await switchMainTab("DNS");
-    await page
-      .locator("main section [role=tablist]")
-      .first()
-      .locator("button[role=tab]", { hasText: /^TLDs$/ })
-      .first()
-      .click();
+    await switchMainTab("TLDs");
     // The loading placeholder itself is a .ui-empty cell, so key off the
     // section text: done when "Loading..." is gone (rows or empty state).
     await page.waitForFunction(
@@ -738,6 +947,7 @@ async function main() {
         if (!section) return false;
         return !section.textContent.includes("Loading");
       },
+      undefined,
       { timeout: STEP_TIMEOUT * 2 },
     );
     await page.screenshot({ path: out });
