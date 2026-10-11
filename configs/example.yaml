@@ -68,11 +68,17 @@ agent:
 # ------------------------------------------------------------------------------
 # Global TLS Configuration
 # -----------------------
-# By default, Muti Metroo auto-generates self-signed certificates and does NOT
-# verify peer certificates. This is safe because the E2E encryption layer
-# (X25519 + ChaCha20-Poly1305) provides confidentiality and integrity.
+# Default posture: listeners auto-generate self-signed certificates and dialers
+# accept any certificate, and no client certificate is requested. Links are
+# encrypted, but peers are NOT authenticated: an attacker who can intercept a
+# connection can terminate TLS and relay (and read) the sessions crossing that
+# link, because the end-to-end session key exchange is not authenticated
+# either. The agent ID exchanged in the handshake is self-asserted at every
+# TLS mode -- certificates are not tied to agent IDs.
 #
-# For higher trust environments, enable strict mode and/or use CA-signed certs.
+# On links that cross networks you do not control, authenticate peers: enable
+# strict verification and mutual TLS below (both sides then need certificates
+# from your CA), or at minimum pin the expected agent ID with peers[].id.
 # ------------------------------------------------------------------------------
 tls:
   # Strict TLS verification (default: false)
@@ -184,6 +190,12 @@ listeners:
 # ------------------------------------------------------------------------------
 # Peer Connections
 # Connect to other agents in the mesh
+#
+# peers[].id pins the agent ID you expect the remote to present. Agent IDs are
+# self-asserted (the handshake carries no proof of possession of the identity
+# key), so the pin detects misconfiguration and impersonation after the first
+# connection, but it is not a substitute for tls.strict/tls.mtls on untrusted
+# networks.
 # ------------------------------------------------------------------------------
 peers:
   # Example QUIC peer

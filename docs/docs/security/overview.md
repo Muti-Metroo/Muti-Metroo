@@ -49,6 +49,7 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 | Routing metadata | Transit agents see destination addresses and ports, hostnames for domain routes, the remaining path, the session type, and traffic timing and volume. |
 | A malicious transit agent | Session key exchange is not authenticated. An agent that rewrites session setup can read and alter the sessions it relays. |
 | Active interception of unverified links | With the default TLS settings, an attacker who intercepts a peer connection can act as a malicious transit agent. |
+| Agent identity | Agent IDs in the peer handshake are self-asserted at every TLS mode, and the identity key pair never authenticates the link. On an unauthenticated link, any reachable endpoint can join the mesh as any agent ID and inject route advertisements. Pin `peers[].id` where identity matters. See [TLS and mTLS](/security/tls-mtls#agent-ids-are-self-asserted). |
 | Compromised ingress or exit agents | They are session endpoints and see plaintext. |
 | Operator agents' HTTP API | An operator agent signs every privileged request that reaches its API. Access to that API grants control of the mesh. |
 | File browse on operator agents | An agent that holds the signing private key accepts unsigned file browse requests (including `chmod` and `delete`) from other agents. See [Authentication](/security/authentication#how-a-request-is-signed). |

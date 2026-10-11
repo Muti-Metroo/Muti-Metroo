@@ -74,6 +74,17 @@ A valid certificate proves that its holder was issued a certificate by your CA. 
 
 Treat every holder of a certificate from your CA as a trusted member of the mesh.
 
+## Agent IDs are self-asserted
+
+The agent ID exchanged in the peer handshake is self-asserted at every TLS mode, including mutual TLS. The persistent X25519 identity key pair each agent generates (see [End-to-End Encryption](/security/e2e-encryption)) is used for ECDH key exchange and is distributed through node information, but it never authenticates the peer link: the handshake carries no signature or challenge that would prove possession of the identity key.
+
+Two consequences:
+
+- On an unauthenticated link (the default), any reachable endpoint that completes the handshake can join the mesh under any agent ID, and can then receive and inject route advertisements.
+- Even with mutual TLS, proof stops at "holds a certificate from your CA" -- the agent ID it claims is not bound to the certificate.
+
+If a peer's identity matters (rather than just its membership), pin the expected ID with `peers[].id` in addition to certificate verification. The pin is checked on every (re)connection, so an impostor that joins with a valid certificate but the wrong ID is refused.
+
 ## Generate certificates
 
 Muti Metroo only accepts ECDSA certificates and keys for its own certificate and CA. RSA and Ed25519 are rejected. The built-in commands generate ECDSA P-256:
