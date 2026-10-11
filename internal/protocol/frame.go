@@ -2485,7 +2485,12 @@ func DecodeQueuedState(buf []byte) (*QueuedState, error) {
 		// Read remaining bytes for sleep command
 		sleepData := r.buf[r.offset:]
 		sleepCmd, err := DecodeSleepCommand(sleepData)
-		if err == nil {
+		if err != nil {
+			// Fail the decode: the sleep blob is not length-prefixed, so a
+			// corrupt command leaves the offset stale and the WakeCmd flag
+			// would be read from inside the sleep blob.
+			r.setError(fmt.Sprintf("sleep command decode: %v", err))
+		} else {
 			q.SleepCmd = sleepCmd
 			r.offset += sleepCmd.encodedLen()
 		}

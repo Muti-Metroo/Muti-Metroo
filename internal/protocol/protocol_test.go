@@ -2462,3 +2462,30 @@ func TestQueuedState_SleepCommandOffset(t *testing.T) {
 		}
 	}
 }
+
+// A corrupt embedded SleepCommand must fail the whole decode. The sleep blob
+// is not length-prefixed, so swallowing the error would leave the reader
+// offset stale and the WakeCmd flag would be read from inside the blob.
+func TestQueuedState_CorruptSleepCommandFails(t *testing.T) {
+	origin := identity.AgentID{4}
+	q := &QueuedState{
+		SleepCmd: &SleepCommand{OriginAgent: origin, CommandID: 77, Timestamp: 1234},
+		WakeCmd:  &WakeCommand{OriginAgent: origin, CommandID: 88, Timestamp: 5678},
+	}
+
+	data := q.Encode()
+
+	// Corrupt the sleep command's SeenBy count so DecodeSleepCommand fails:
+	// 6 bytes of section counts, 1 byte sleep-present flag, then 96 bytes of
+	// OriginAgent + CommandID + Timestamp + Signature before the count byte.
+	const seenByCountOffset = 6 + 1 + 16 + 8 + 8 + SignatureSize
+	data[seenByCountOffset] = 0xFF
+
+	decoded, err := DecodeQueuedState(data)
+	if err == nil {
+		t.Fatalf("DecodeQueuedState() should fail on a corrupt sleep command, got %+v", decoded)
+	}
+	if !errors.Is(err, ErrInvalidFrame) {
+		t.Errorf("error = %v, want ErrInvalidFrame", err)
+	}
+}
