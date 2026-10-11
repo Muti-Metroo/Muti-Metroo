@@ -3,8 +3,8 @@ package agent
 import (
 	"sync"
 
-	"github.com/postalsys/muti-metroo/internal/health"
-	"github.com/postalsys/muti-metroo/internal/routing"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/routing"
 )
 
 // routeWatchProvider adapts the agent to socks5.RouteWatchProvider. It serves

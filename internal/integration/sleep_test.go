@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/agent"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/sleep"
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/agent"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/sleep"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // SleepMesh represents a 5-agent mesh for sleep mode testing.

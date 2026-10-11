@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/filetransfer"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/filetransfer"
 )
 
 // uploadDirectory tars+gzips a local directory and POSTs it to the remote

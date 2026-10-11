@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
 )
 
 // Message type constants for shell stream protocol.

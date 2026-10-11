@@ -11,7 +11,7 @@ sidebar_position: 100
 These Terms of Service ("Terms") govern your download and use of pre-built Muti Metroo binaries ("Binaries") provided by Team Muti Metroo ("we", "us", or "our").
 
 :::note Source Code License
-The Muti Metroo source code is available under the [MIT License](https://github.com/postalsys/Muti-Metroo/blob/master/LICENSE). These Terms do not apply to the source code; you may use, modify, and distribute the source code according to the MIT License terms.
+The Muti Metroo source code is available under the [MIT License](https://github.com/Muti-Metroo/Muti-Metroo/blob/master/LICENSE). These Terms do not apply to the source code; you may use, modify, and distribute the source code according to the MIT License terms.
 :::
 
 ## 1. Scope and Acceptance
@@ -118,5 +118,5 @@ By downloading Muti Metroo binaries, you acknowledge that you have read and unde
 ## See Also
 
 - [Download](/download): the pre-built binaries these Terms cover
-- [MIT License](https://github.com/postalsys/Muti-Metroo/blob/master/LICENSE): the license for the source code
+- [MIT License](https://github.com/Muti-Metroo/Muti-Metroo/blob/master/LICENSE): the license for the source code
 - [Installation](/getting-started/installation): install a downloaded binary, or build one from source

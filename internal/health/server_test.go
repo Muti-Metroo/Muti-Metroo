@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/hosts"
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/hosts"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 	"golang.org/x/crypto/bcrypt"
 )
 

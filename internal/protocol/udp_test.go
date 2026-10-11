@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // ============================================================================

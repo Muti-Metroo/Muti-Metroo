@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/apiclient"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/apiclient"
 	"golang.org/x/term"
 	"nhooyr.io/websocket"
 )

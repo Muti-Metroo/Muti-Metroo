@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 var (
 	// Version is the agent version, set at build time via ldflags.
-	// Example: go build -ldflags="-X github.com/postalsys/muti-metroo/internal/sysinfo.Version=1.0.0"
+	// Example: go build -ldflags="-X github.com/Muti-Metroo/Muti-Metroo/internal/sysinfo.Version=1.0.0"
 	Version = "dev"
 
 	// startTime is when the agent started.

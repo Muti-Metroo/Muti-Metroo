@@ -32,7 +32,7 @@ The Windows DLL runs the agent through `rundll32.exe` without a console window. 
 The [Download](/download) page has download buttons and per-platform instructions. On Linux and macOS, the steps are:
 
 ```bash
-curl -L -O https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
+curl -L -O https://github.com/Muti-Metroo/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
 chmod +x muti-metroo-linux-amd64
 sudo mv muti-metroo-linux-amd64 /usr/local/bin/muti-metroo
 muti-metroo --version
@@ -45,7 +45,7 @@ Replace `linux-amd64` with the asset for your platform from the table above. To 
 Building requires Go 1.26 or later.
 
 ```bash
-git clone https://github.com/postalsys/Muti-Metroo.git
+git clone https://github.com/Muti-Metroo/Muti-Metroo.git
 cd Muti-Metroo
 make build
 ./build/muti-metroo --version

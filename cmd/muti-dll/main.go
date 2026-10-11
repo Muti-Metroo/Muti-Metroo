@@ -30,10 +30,10 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/postalsys/muti-metroo/internal/agent"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/service"
-	"github.com/postalsys/muti-metroo/internal/sysinfo"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/agent"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/service"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/sysinfo"
 )
 
 // Windows API constants

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // relayTestStream is a scripted control stream for relay tests: Read first

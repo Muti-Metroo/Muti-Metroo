@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
 	"golang.org/x/crypto/bcrypt"
 )
 

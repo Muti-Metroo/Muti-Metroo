@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // mustNewAgentID creates a new agent ID and panics on error (test helper).

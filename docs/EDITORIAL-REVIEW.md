@@ -1092,9 +1092,9 @@ Fixes:
 
 Claims verified:
 
-- Muti Metroo asset names, DLLs, checksums.txt, muti-metroo-user-manual.pdf -> `gh release view -R postalsys/Muti-Metroo` (v4.10.6 assets)
-- Manager assets named metroo-manager-* -> `gh release view -R postalsys/Muti-Metroo-Manager` (metroo-manager-v0.2.39)
-- Mutiauk releases are Linux-only today -> `gh release view -R postalsys/Mutiauk` (mutiauk-v0.5.2: linux-amd64, linux-arm64)
+- Muti Metroo asset names, DLLs, checksums.txt, muti-metroo-user-manual.pdf -> `gh release view -R Muti-Metroo/Muti-Metroo` (v4.10.6 assets)
+- Manager assets named metroo-manager-* -> `gh release view -R Muti-Metroo/Muti-Metroo-Manager` (metroo-manager-v0.2.39)
+- Mutiauk releases are Linux-only today -> `gh release view -R Muti-Metroo/Mutiauk` (mutiauk-v0.5.2: linux-amd64, linux-arm64)
 - checksums.txt generated over dist/* -> release.sh:489
 
 ## `features/exit-routing.md`
@@ -1324,7 +1324,7 @@ Claims verified:
 
 - status_probe_target default example.com:80 -> ../Mutiauk/internal/config/config.go:338
 - expose defaults (max_streams_per_key 256, keepalive_period 25s) -> ../Mutiauk/internal/config/config.go:410-413; admin listen 127.0.0.1:48088 -> config.go:201
-- Latest release ships only Linux binaries -> gh release view --repo postalsys/Mutiauk (mutiauk-v0.5.2: checksums.txt, mutiauk-linux-amd64, mutiauk-linux-arm64)
+- Latest release ships only Linux binaries -> gh release view --repo Muti-Metroo/Mutiauk (mutiauk-v0.5.2: checksums.txt, mutiauk-linux-amd64, mutiauk-linux-arm64)
 - make build-darwin/-darwin-amd64/-windows/-windows-arm64 targets -> ../Mutiauk/Makefile:31-43
 - MUTIAUK_SOCKS5_PASSWORD overrides YAML -> ../Mutiauk/internal/config/config.go:280
 - dns status probe lines use ' -- ' -> ../Mutiauk/internal/cli/dns.go:278 (real output, kept)

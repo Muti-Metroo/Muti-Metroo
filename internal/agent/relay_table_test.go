@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
 )
 
 // Stream IDs are allocated per peer connection, so two upstream peers relaying

@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // Golden-bytes tests pin the exact wire encoding of the frame families whose

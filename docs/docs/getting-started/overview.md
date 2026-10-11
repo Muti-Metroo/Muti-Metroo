@@ -18,7 +18,7 @@ This page shows two ways in: a demo mesh that runs in Docker with no installatio
 The repository includes a six-agent example mesh. It needs Docker with Compose and builds the agent image from source.
 
 ```bash
-git clone https://github.com/postalsys/Muti-Metroo.git
+git clone https://github.com/Muti-Metroo/Muti-Metroo.git
 cd Muti-Metroo/examples/docker-tryout
 docker compose up -d
 ```

@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // fixedAgentID returns a deterministic AgentID with b as its first byte, so

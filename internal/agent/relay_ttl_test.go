@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // findFrameByType returns the first captured frame of the given type,

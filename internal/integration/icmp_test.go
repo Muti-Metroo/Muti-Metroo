@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/socks5"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/socks5"
 )
 
 // tryICMPSession opens a SOCKS5 TCP connection, performs the no-auth method

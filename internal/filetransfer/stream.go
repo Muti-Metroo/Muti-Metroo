@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
 )
 
 // Wire codes carried in TransferMetadata.ErrorCode / BrowseResponse.ErrorCode

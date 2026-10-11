@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/wizard/prompt"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/wizard/prompt"
 )
 
 // feed scripts the prompt package's input for the interactive ask* functions.

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // entryOps injects entry-type-specific field access into keyedTable.

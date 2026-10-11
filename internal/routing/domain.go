@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // DomainRoute represents a single domain route entry.

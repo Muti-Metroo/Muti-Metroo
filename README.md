@@ -44,7 +44,7 @@ A userspace mesh networking agent that builds VPN-like overlay networks across h
 
 ## Transparent TUN Routing with Mutiauk
 
-For transparent traffic routing without per-application SOCKS5 configuration, use **[Mutiauk](https://github.com/postalsys/Mutiauk)** - a companion TUN interface tool that forwards all traffic through Muti Metroo's SOCKS5 proxy.
+For transparent traffic routing without per-application SOCKS5 configuration, use **[Mutiauk](https://github.com/Muti-Metroo/Mutiauk)** - a companion TUN interface tool that forwards all traffic through Muti Metroo's SOCKS5 proxy.
 
 ```
     OPERATOR LINUX                                 MESH NETWORK
@@ -71,7 +71,7 @@ For transparent traffic routing without per-application SOCKS5 configuration, us
 
 ```bash
 # Install Mutiauk (Linux only)
-curl -L -o mutiauk https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64
+curl -L -o mutiauk https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64
 chmod +x mutiauk && sudo mv mutiauk /usr/local/bin/
 
 # Run interactive setup
@@ -87,14 +87,14 @@ With Mutiauk, any application's traffic to configured routes is automatically tu
 - **End-to-end encryption** - transit nodes cannot decrypt traffic
 - **Multiple transports** - QUIC, HTTP/2, WebSocket vs TCP-only
 
-See the [Mutiauk repository](https://github.com/postalsys/Mutiauk) for detailed setup instructions.
+See the [Mutiauk repository](https://github.com/Muti-Metroo/Mutiauk) for detailed setup instructions.
 
 ## Documentation
 
 | Resource                                                             | Description                                                                          |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **[Documentation](https://github.com/postalsys/Muti-Metroo)**              | Online documentation with installation, configuration, and usage guides              |
-| **[User Manual (PDF)](https://github.com/postalsys/Muti-Metroo/releases)** | Comprehensive PDF manual for offline use and printing (download from latest release) |
+| **[Documentation](https://github.com/Muti-Metroo/Muti-Metroo)**              | Online documentation with installation, configuration, and usage guides              |
+| **[User Manual (PDF)](https://github.com/Muti-Metroo/Muti-Metroo/releases)** | Comprehensive PDF manual for offline use and printing (download from latest release) |
 | **[Architecture.md](./Architecture.md)**                             | Technical internals, protocol specification, and implementation details              |
 
 ## Quick Start
@@ -107,7 +107,7 @@ See the [Mutiauk repository](https://github.com/postalsys/Mutiauk) for detailed 
 
 ```bash
 # Clone the repository
-git clone git@github.com:postalsys/Muti-Metroo.git
+git clone git@github.com:Muti-Metroo/Muti-Metroo.git
 cd Muti-Metroo
 
 # Build the binary

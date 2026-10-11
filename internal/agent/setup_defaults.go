@@ -4,8 +4,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/postalsys/muti-metroo/internal/health"
-	"github.com/postalsys/muti-metroo/internal/sysinfo"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/sysinfo"
 )
 
 // GetSetupDefaults returns non-sensitive defaults for seeding a new agent's

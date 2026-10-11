@@ -8,7 +8,7 @@ package agent
 import (
 	"sync"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // relayEntry tracks a stream/association/session being relayed through this

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
 )
 
 func TestBrowse_Disabled(t *testing.T) {

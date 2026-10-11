@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/socks5"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/socks5"
 )
 
 // startEchoServer starts a TCP echo server on 127.0.0.1 with an ephemeral

@@ -23,7 +23,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 
 ARG TARGETARCH
-ADD --chmod=755 https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-${TARGETARCH} /usr/local/bin/muti-metroo
+ADD --chmod=755 https://github.com/Muti-Metroo/Muti-Metroo/releases/latest/download/muti-metroo-linux-${TARGETARCH} /usr/local/bin/muti-metroo
 
 WORKDIR /app
 ENTRYPOINT ["muti-metroo"]
@@ -41,7 +41,7 @@ docker build -t muti-metroo .
 The repository's `Dockerfile` builds the binary from the checked-out source in a Go build stage and produces the same layout (`/usr/local/bin/muti-metroo`, working directory `/app`, default command `run -c /app/config.yaml`):
 
 ```bash
-git clone https://github.com/postalsys/Muti-Metroo.git
+git clone https://github.com/Muti-Metroo/Muti-Metroo.git
 cd Muti-Metroo
 docker build -t muti-metroo .
 ```
@@ -166,7 +166,7 @@ peers:
 
 `id: "auto"` accepts whatever agent ID the peer presents. Replace it with agent2's ID once it is known, so the connection is rejected if a different agent answers.
 
-A complete multi-agent example with SOCKS ingress, split exit routing, management commands, and file transfer is in [`examples/docker-tryout/`](https://github.com/postalsys/Muti-Metroo/tree/master/examples/docker-tryout) in the repository. It builds the image from source with `docker compose up -d`.
+A complete multi-agent example with SOCKS ingress, split exit routing, management commands, and file transfer is in [`examples/docker-tryout/`](https://github.com/Muti-Metroo/Muti-Metroo/tree/master/examples/docker-tryout) in the repository. It builds the image from source with `docker compose up -d`.
 
 ## Operations
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // TestBuildTLSConfig_InlinePEMPreferredOverPath verifies that when both an

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/service"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/service"
 )
 
 func TestNewServiceStatusInfo(t *testing.T) {

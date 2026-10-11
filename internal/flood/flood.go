@@ -11,12 +11,12 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/protocol"
-	"github.com/postalsys/muti-metroo/internal/recovery"
-	"github.com/postalsys/muti-metroo/internal/routing"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/recovery"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/routing"
 )
 
 // AdvertisementKey uniquely identifies a route advertisement for dedup.

@@ -5,9 +5,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/probe"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/probe"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // ProbeFunc is the dialer used by the local /api/probe handler. Defaulted to

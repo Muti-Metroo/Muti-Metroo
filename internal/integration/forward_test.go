@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/agent"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/agent"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
 )
 
 // startForwardEchoServer starts a TCP echo server on 127.0.0.1:0 and returns

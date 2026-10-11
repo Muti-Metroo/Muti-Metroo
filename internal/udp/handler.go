@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // formatIPAddress returns the address type and byte representation for the given IP.

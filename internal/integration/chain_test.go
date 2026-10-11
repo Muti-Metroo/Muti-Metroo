@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/peer"
-	"github.com/postalsys/muti-metroo/internal/protocol"
-	"github.com/postalsys/muti-metroo/internal/routing"
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/peer"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/routing"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // TestAgent represents a test agent instance.

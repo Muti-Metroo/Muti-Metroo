@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // TestH2Transport_BidirectionalRelay tests bidirectional data relay through H2 transport.

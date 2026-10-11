@@ -4,7 +4,7 @@ package health
 import (
 	"net/http"
 
-	"github.com/postalsys/muti-metroo/internal/sysinfo"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/sysinfo"
 )
 
 // InterfacesResponse is the response body for GET /api/interfaces and

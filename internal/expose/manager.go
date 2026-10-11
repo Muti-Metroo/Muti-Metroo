@@ -7,8 +7,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/postalsys/muti-metroo/internal/forward"
-	"github.com/postalsys/muti-metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/forward"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
 )
 
 // AgentInterface is the slice of agent functionality the Manager needs to

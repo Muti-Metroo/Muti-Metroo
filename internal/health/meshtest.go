@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // MeshTestResult contains the result of testing a single agent's reachability.

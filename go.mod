@@ -1,4 +1,4 @@
-module github.com/postalsys/muti-metroo
+module github.com/Muti-Metroo/Muti-Metroo
 
 go 1.26.0
 

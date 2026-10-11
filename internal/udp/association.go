@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // AssociationState represents the state of a UDP association.

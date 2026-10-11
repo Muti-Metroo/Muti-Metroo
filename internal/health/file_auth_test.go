@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/filetransfer"
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/filetransfer"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // TestHandleFileUpload_AuthErrors asserts that the upload HTTP handler maps

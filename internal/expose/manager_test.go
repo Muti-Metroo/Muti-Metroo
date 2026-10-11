@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/forward"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/forward"
 )
 
 // mockAgent records register/unregister calls and stores ephemeral keys.

@@ -9,13 +9,13 @@ import (
 	"net"
 	"sync"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/health"
-	"github.com/postalsys/muti-metroo/internal/icmp"
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/protocol"
-	"github.com/postalsys/muti-metroo/internal/socks5"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/icmp"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/socks5"
 )
 
 // ICMP-related errors

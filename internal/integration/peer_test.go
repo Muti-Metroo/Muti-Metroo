@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/agent"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/health"
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/agent"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 // TestPeer_DynamicAddRemoveList exercises POST /peers/manage with the add,

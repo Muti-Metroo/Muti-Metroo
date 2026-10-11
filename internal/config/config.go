@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/embed"
-	"github.com/postalsys/muti-metroo/internal/hosts"
-	"github.com/postalsys/muti-metroo/internal/protocol"
-	"github.com/postalsys/muti-metroo/internal/sysinfo"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/embed"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/hosts"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/sysinfo"
 	"gopkg.in/yaml.v3"
 )
 

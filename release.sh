@@ -8,7 +8,7 @@ cd "$SCRIPT_DIR"
 
 # --- Configuration ---
 GITHUB_URL="https://github.com"
-REPO="postalsys/Muti-Metroo"
+REPO="Muti-Metroo/Muti-Metroo"
 VERSION_FILE="VERSION"
 BINARY="muti-metroo"
 TOKEN="${GITHUB_TOKEN:?GITHUB_TOKEN env var is required}"
@@ -364,8 +364,8 @@ if $HAS_PDF_DEPS; then
         if [ -f "$f" ]; then
             sed -i.bak \
                 -e "s|__MUTI_METROO_RELEASE__|${GITHUB_URL}/${REPO}/releases/download/v${NEW_VERSION}|g" \
-                -e "s|__MUTIAUK_RELEASE__|${GITHUB_URL}/postalsys/Mutiauk/releases/download/v${MUTIAUK_VER}|g" \
-                -e "s|__METROO_MANAGER_RELEASE__|${GITHUB_URL}/postalsys/Muti-Metroo-Manager/releases/download/v${METROO_MANAGER_VER}|g" \
+                -e "s|__MUTIAUK_RELEASE__|${GITHUB_URL}/Muti-Metroo/Mutiauk/releases/download/v${MUTIAUK_VER}|g" \
+                -e "s|__METROO_MANAGER_RELEASE__|${GITHUB_URL}/Muti-Metroo/Muti-Metroo-Manager/releases/download/v${METROO_MANAGER_VER}|g" \
                 "$f"
         fi
     done
@@ -415,8 +415,8 @@ if $HAS_PDF_DEPS; then
         if [ -f "$f" ]; then
             sed -i.bak \
                 -e "s|__MUTI_METROO_RELEASE__|${GITHUB_URL}/${REPO}/releases/download/v${NEW_VERSION}|g" \
-                -e "s|__MUTIAUK_RELEASE__|${GITHUB_URL}/postalsys/Mutiauk/releases/download/v${MUTIAUK_VER}|g" \
-                -e "s|__METROO_MANAGER_RELEASE__|${GITHUB_URL}/postalsys/Muti-Metroo-Manager/releases/download/v${METROO_MANAGER_VER}|g" \
+                -e "s|__MUTIAUK_RELEASE__|${GITHUB_URL}/Muti-Metroo/Mutiauk/releases/download/v${MUTIAUK_VER}|g" \
+                -e "s|__METROO_MANAGER_RELEASE__|${GITHUB_URL}/Muti-Metroo/Muti-Metroo-Manager/releases/download/v${METROO_MANAGER_VER}|g" \
                 "$f"
         fi
     done

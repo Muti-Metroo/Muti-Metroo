@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/postalsys/muti-metroo/internal/service"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/service"
 )
 
 // IsProcessInJob is not exported by golang.org/x/sys/windows@v0.39.0.

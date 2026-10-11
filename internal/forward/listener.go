@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/recovery"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/recovery"
 )
 
 // ListenerConfig holds listener configuration.

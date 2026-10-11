@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 func addRoute(t *testing.T, table *Table, cidr string, origin identity.AgentID, metric uint16) {

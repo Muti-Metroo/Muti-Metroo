@@ -10,7 +10,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // ICMPProvider provides ICMP session functionality.

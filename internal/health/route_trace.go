@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // RouteTraceRequest is the JSON body for POST /route/trace.

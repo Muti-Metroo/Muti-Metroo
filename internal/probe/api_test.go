@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/transport"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/transport"
 )
 
 func TestRequestValidate(t *testing.T) {

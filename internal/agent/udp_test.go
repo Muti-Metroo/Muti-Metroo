@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/logging"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // Oversize datagrams must be rejected at the ingress against

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
 )
 
 // allowAllVerifier accepts every envelope. Used for tests that do not

@@ -87,7 +87,7 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 
 ## Reporting security issues
 
-Report vulnerabilities privately through [GitHub security advisories](https://github.com/postalsys/Muti-Metroo/security/advisories/new) rather than in a public issue. Include the affected version and reproduction steps.
+Report vulnerabilities privately through [GitHub security advisories](https://github.com/Muti-Metroo/Muti-Metroo/security/advisories/new) rather than in a public issue. Include the affected version and reproduction steps.
 
 ## See Also
 

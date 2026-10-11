@@ -3,8 +3,8 @@ package sleep
 import (
 	"sync"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // PeerQueue holds queued state for a single sleeping peer.

@@ -7,8 +7,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/postalsys/muti-metroo/internal/crypto"
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // ForwardDialer is an interface for dialing port forward connections through the mesh.

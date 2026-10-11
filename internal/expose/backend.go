@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/postalsys/muti-metroo/internal/forward"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/forward"
 )
 
 // wsBackend adapts a Session into the forward.Backend interface so the

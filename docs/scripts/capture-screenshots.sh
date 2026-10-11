@@ -150,12 +150,12 @@ if [ -n "${MANAGER_BIN:-}" ]; then
 else
   case "$(uname -s)" in Darwin) host_os=darwin ;; Linux) host_os=linux ;; *) echo "Unsupported host OS" >&2; exit 1 ;; esac
   case "$(uname -m)" in arm64|aarch64) host_arch=arm64 ;; x86_64|amd64) host_arch=amd64 ;; *) echo "Unsupported host arch" >&2; exit 1 ;; esac
-  mgr_tag="$(gh release view --repo postalsys/Muti-Metroo-Manager --json tagName --jq .tagName)"
+  mgr_tag="$(gh release view --repo Muti-Metroo/Muti-Metroo-Manager --json tagName --jq .tagName)"
   MANAGER="$CACHE_DIR/$mgr_tag/metroo-manager-$host_os-$host_arch"
   if [ ! -x "$MANAGER" ]; then
     log "Downloading Muti Metroo Manager $mgr_tag"
     mkdir -p "$CACHE_DIR/$mgr_tag"
-    gh release download "$mgr_tag" --repo postalsys/Muti-Metroo-Manager --dir "$CACHE_DIR/$mgr_tag" \
+    gh release download "$mgr_tag" --repo Muti-Metroo/Muti-Metroo-Manager --dir "$CACHE_DIR/$mgr_tag" \
       --pattern "metroo-manager-$host_os-$host_arch" --clobber
     chmod +x "$MANAGER"
     xattr -d com.apple.quarantine "$MANAGER" 2>/dev/null || true
@@ -336,14 +336,14 @@ wait_for "mesh convergence" 120 mesh_converged
 
 # --- Downloads bundle ----------------------------------------------------------------
 
-mm_tag="$(gh release view --repo postalsys/Muti-Metroo --json tagName --jq .tagName)"
-ma_tag="$(gh release view --repo postalsys/Mutiauk --json tagName --jq .tagName)"
+mm_tag="$(gh release view --repo Muti-Metroo/Muti-Metroo --json tagName --jq .tagName)"
+ma_tag="$(gh release view --repo Muti-Metroo/Mutiauk --json tagName --jq .tagName)"
 assets="$CACHE_DIR/$mm_tag+$ma_tag"
 if [ ! -f "$assets/.complete" ]; then
   log "Downloading release assets for the downloads bundle ($mm_tag, $ma_tag)"
   rm -rf "$assets" && mkdir -p "$assets"
-  gh release download "$mm_tag" --repo postalsys/Muti-Metroo --dir "$assets" --pattern 'muti-metroo-*'
-  gh release download "$ma_tag" --repo postalsys/Mutiauk --dir "$assets" --pattern 'mutiauk-*'
+  gh release download "$mm_tag" --repo Muti-Metroo/Muti-Metroo --dir "$assets" --pattern 'muti-metroo-*'
+  gh release download "$ma_tag" --repo Muti-Metroo/Mutiauk --dir "$assets" --pattern 'mutiauk-*'
   touch "$assets/.complete"
 fi
 node "$SCRIPT_DIR/make-downloads-bundle.mjs" "$assets" "${mm_tag##*-}" "${ma_tag##*-}" \

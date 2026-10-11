@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 // ManagementTimestampWindow is the maximum tolerated clock skew between

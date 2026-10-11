@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/apiclient"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/shell"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/apiclient"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/shell"
 )
 
 // newShellTestChain creates a 4-agent chain with shell enabled on agent D

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/postalsys/muti-metroo/internal/apiclient"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/apiclient"
 )
 
 func TestNewClient(t *testing.T) {

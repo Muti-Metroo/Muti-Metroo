@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
 )
 
 func TestNew(t *testing.T) {

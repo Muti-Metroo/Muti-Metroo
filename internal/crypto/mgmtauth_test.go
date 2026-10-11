@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
 )
 
 func mustAgentID(t *testing.T, hexStr string) identity.AgentID {

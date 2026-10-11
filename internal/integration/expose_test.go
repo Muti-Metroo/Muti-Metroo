@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/agent"
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/expose"
-	"github.com/postalsys/muti-metroo/internal/socks5"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/agent"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/expose"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/socks5"
 )
 
 // TestExpose_EndToEnd verifies the full ephemeral forward endpoint path over

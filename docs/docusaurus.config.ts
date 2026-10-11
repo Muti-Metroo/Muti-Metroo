@@ -88,7 +88,7 @@ const config: Config = {
   baseUrl: "/",
 
   // GitHub deployment config.
-  organizationName: "postalsys", // GitHub organization
+  organizationName: "Muti-Metroo", // GitHub organization
   projectName: "Muti-Metroo", // GitHub repo name
 
   onBrokenLinks: "throw",
@@ -149,7 +149,7 @@ const config: Config = {
           position: "right",
         },
         {
-          href: "https://github.com/postalsys/Muti-Metroo",
+          href: "https://github.com/Muti-Metroo/Muti-Metroo",
           label: "Source",
           position: "right",
         },
@@ -213,7 +213,7 @@ const config: Config = {
             },
             {
               label: "Source Code",
-              href: "https://github.com/postalsys/Muti-Metroo",
+              href: "https://github.com/Muti-Metroo/Muti-Metroo",
             },
             {
               label: "Troubleshooting",

@@ -16,14 +16,14 @@ extensions, no TUN driver.
 Three-component suite (sibling checkouts):
 
 - **Muti Metroo** (this repo) — the mesh agent. Module
-  `github.com/postalsys/muti-metroo`, binary `muti-metroo`.
+  `github.com/Muti-Metroo/Muti-Metroo`, binary `muti-metroo`.
 - **Mutiauk** (`../Mutiauk/`) — TUN interface client forwarding traffic
-  through an agent's SOCKS5 proxy. Module `github.com/postalsys/mutiauk`.
+  through an agent's SOCKS5 proxy. Module `github.com/Muti-Metroo/Mutiauk`.
   Build it with `GOTOOLCHAIN=go1.25.5` — its gVisor dependency does not
   compile under Go 1.26.
 - **Muti Metroo Manager** (`../Muti-Metroo-Manager/`) — web dashboard
   (single Go binary + embedded React SPA) that reverse-proxies an agent's
-  HTTP API. Module `github.com/postalsys/muti-metroo-manager`.
+  HTTP API. Module `github.com/Muti-Metroo/Muti-Metroo-Manager`.
 
 ## Repo Layout
 

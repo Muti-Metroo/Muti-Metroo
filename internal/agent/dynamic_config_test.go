@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/config"
-	"github.com/postalsys/muti-metroo/internal/dynconfig"
-	"github.com/postalsys/muti-metroo/internal/health"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/config"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/dynconfig"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/health"
 )
 
 // waitForPeerInList polls ManagePeer("list") until an entry with the given

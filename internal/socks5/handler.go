@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/postalsys/muti-metroo/internal/protocol"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // SOCKS5 protocol constants per RFC 1928.

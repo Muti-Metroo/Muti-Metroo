@@ -51,7 +51,7 @@ http:
 
 TLS certificates are generated at startup when none are configured. See [TLS](/configuration/tls-certificates).
 
-The repository ships a commented example with every section: [configs/example.yaml](https://github.com/postalsys/Muti-Metroo/blob/master/configs/example.yaml).
+The repository ships a commented example with every section: [configs/example.yaml](https://github.com/Muti-Metroo/Muti-Metroo/blob/master/configs/example.yaml).
 
 ## Top-level sections
 
