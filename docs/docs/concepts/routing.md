@@ -130,7 +130,7 @@ See [`route trace`](/cli/route) for the output.
 
 Routes are removed from an agent's table when:
 
-- **The peer they were learned through disconnects.** The agent drops every route learned over that connection immediately.
+- **The peer they were learned through disconnects.** The agent drops every route learned over that connection as soon as it detects the disconnect. Agents further away are not told; they keep the route until it expires.
 - **The advertising agent stops refreshing them.** Routes not refreshed within `routing.route_ttl` (default `5m`) expire.
 - **The advertising agent removes them.** Removing a runtime route (`muti-metroo route remove`, `muti-metroo forward remove`, `muti-metroo forward endpoint remove`, or a disconnecting expose session) sends a withdrawal through the mesh, so other agents drop it at once instead of waiting for the TTL.
 
@@ -152,7 +152,7 @@ flowchart LR
 
 - Agents store both routes.
 - New connections use Exit A, which has the lower metric.
-- If Exit A disconnects, its route is removed and new connections use Exit B.
+- If Exit A disconnects, the transit agent drops its route at once, but the ingress agent keeps it until `routing.route_ttl` expires (default `5m`). New connections in that window fail; after it, they use Exit B.
 
 See [High Availability](/deployment/high-availability) for complete examples.
 

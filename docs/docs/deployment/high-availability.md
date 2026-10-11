@@ -14,7 +14,7 @@ A mesh survives the loss of an agent when another path or another exit can carry
 
 ## How failover works
 
-Every exit agent advertises its routes periodically (`routing.advertise_interval`, default 2 minutes), and the advertisement floods through the mesh. Each agent keeps, for every route and every exit that advertises it, one path: the one with the lowest metric. Metric is the exit's configured route metric plus one per hop. When two paths have the same metric, the agent keeps the path whose advertisement arrived first.
+Every exit agent advertises its routes periodically (`routing.advertise_interval`, default 2 minutes), and the advertisement floods through the mesh. Each agent keeps, for every route and every exit that advertises it, one path: the path over which the exit's latest advertisement arrived first. Every copy of an advertisement carries the same metric (the exit's configured metric plus one, whatever the distance), so paths are not compared by length; the first copy to arrive, normally over the fastest path, wins.
 
 When an agent looks up a destination, it picks the most specific matching route, then the route with the lowest metric. Between routes with the same prefix and metric from different exits, no particular exit is guaranteed; give them different metrics to control which one is used.
 
@@ -25,7 +25,7 @@ When something fails:
 | A directly connected peer goes away | Routes learned through that peer are removed as soon as the connection is detected as closed. A path through another peer is learned from the exit's next advertisement. | Disconnect detection (up to `connections.timeout`, default 90 seconds) plus up to one `advertise_interval` |
 | An agent further away goes away | Its neighbors remove their routes, but agents beyond them are not told. They keep the stale route until it expires. | Up to `routing.route_ttl` (default 5 minutes) |
 | An exit goes away while another exit advertises the same CIDR | Once the stale route is removed or expires, the other exit's route is used. | As above, depending on whether the exit was a direct peer |
-| The failed agent comes back | It reconnects with exponential backoff and advertises again. A path with a lower metric replaces the current one when its advertisement arrives. | Reconnect delay plus up to one `advertise_interval` |
+| The failed agent comes back | It reconnects with exponential backoff and advertises again. Agents switch to whichever path delivers the exit's next advertisement first. | Reconnect delay plus up to one `advertise_interval` |
 
 Streams that were running over the failed path are closed. Clients reconnect and their new connections use the new path.
 
