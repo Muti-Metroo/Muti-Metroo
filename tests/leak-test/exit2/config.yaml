@@ -1,0 +1,39 @@
+# Exit 2 ("Muti Metroo D"): h2 listener accepting transit; exits to target subnet.
+agent:
+  id: "25a028478e0538f06aaf36738cf6bb18"
+  data_dir: "/app/data"
+  display_name: "leak-exit2"
+  log_level: "info"
+
+tls:
+  ca: "/app/certs/ca.crt"
+  cert: "/app/certs/agent.crt"
+  key: "/app/certs/agent.key"
+
+listeners:
+  - transport: h2
+    address: "0.0.0.0:8443"
+    path: "/mesh"
+
+exit:
+  enabled: true
+  routes:
+    - "172.29.0.0/16"
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
+  remote_api: true
+
+routing:
+  advertise_interval: 10s
+  route_ttl: 60s
+
+connections:
+  idle_threshold: 20s
+  timeout: 10s
+  keepalive_jitter: 0.2
+
+sleep:
+  enabled: false

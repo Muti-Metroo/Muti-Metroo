@@ -1,0 +1,44 @@
+# Connectivity test client: Mutiauk TUN + Muti Metroo ingress container
+# Multi-stage build with parent directory as context
+
+# Stage 1: Build Mutiauk from sibling project (force amd64 for runtime compatibility)
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS mutiauk-builder
+WORKDIR /build
+COPY Mutiauk/ .
+RUN go mod download && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /mutiauk ./cmd/mutiauk
+
+# Stage 2: Build Muti Metroo (force amd64 for runtime compatibility)
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS muti-metroo-builder
+WORKDIR /build
+COPY Muti-Metroo/ .
+RUN apk add --no-cache git && go mod download && \
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev") && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=$VERSION" -o /muti-metroo ./cmd/muti-metroo
+
+# Stage 3: Runtime with diagnostic tools
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+# Install required tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    netcat-openbsd \
+    iproute2 \
+    iptables \
+    dnsutils \
+    tcpdump \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries from build stages
+COPY --from=mutiauk-builder /mutiauk /usr/local/bin/mutiauk
+COPY --from=muti-metroo-builder /muti-metroo /usr/local/bin/muti-metroo
+
+# Create directories for configs
+RUN mkdir -p /etc/muti-metroo /etc/mutiauk /app
+
+WORKDIR /app
+
+# Default command
+CMD ["/bin/bash"]

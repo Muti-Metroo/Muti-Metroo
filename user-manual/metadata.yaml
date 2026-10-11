@@ -1,0 +1,48 @@
+---
+title: "Muti Metroo User Manual"
+subtitle: "Userspace Mesh Networking Agent"
+author: "Team Muti Metroo"
+date: "2026"
+lang: en
+
+# Document class settings
+documentclass: report
+classoption:
+  - oneside
+  - 11pt
+  - a4paper
+
+# Font settings - removed for maximum compatibility
+# When using xelatex/tectonic, system fonts are used by default
+# On CI (Ubuntu), default LaTeX fonts work automatically
+
+# Page geometry
+geometry:
+  - margin=1in
+  - headheight=14pt
+
+# Table of contents
+toc: true
+toc-depth: 3
+numbersections: true
+
+# Colors and links
+colorlinks: true
+linkcolor: "blue"
+urlcolor: "blue"
+toccolor: "black"
+
+# Code highlighting
+highlight-style: tango
+
+# Version info (overridden by make via -V options)
+docversion: "dev"
+builddate: "\\today"
+
+# Header and footer
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{\leftmark}
+  - \fancyhead[R]{Muti Metroo User Manual}
+  - \fancyfoot[C]{\thepage}

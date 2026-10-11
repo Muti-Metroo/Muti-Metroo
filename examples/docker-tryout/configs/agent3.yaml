@@ -1,0 +1,25 @@
+# Agent 3: Exit Node for 0.0.0.0/1 (first half of IP space)
+agent:
+  id: "cccc333333333333cccc333333333333"
+  display_name: "agent3-exit-low"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+exit:
+  enabled: true
+  routes:
+    - "0.0.0.0/1"
+
+shell:
+  enabled: true
+  whitelist: ["*"]
+
+file_transfer:
+  enabled: true
+  allowed_paths: ["*"]
+
+http:
+  enabled: true
+  address: ":8080"

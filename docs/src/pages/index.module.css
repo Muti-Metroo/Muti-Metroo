@@ -1,0 +1,102 @@
+/**
+ * CSS files with the .module.css suffix will be treated as CSS modules
+ * and scoped locally.
+ */
+
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 2rem;
+  }
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heroContent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3rem;
+  flex-wrap: wrap;
+}
+
+.heroText {
+  flex: 1;
+  min-width: 300px;
+}
+
+.heroImage {
+  flex: 0 0 auto;
+}
+
+.heroImage img {
+  max-width: 280px;
+  height: auto;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+}
+
+@media screen and (max-width: 768px) {
+  .heroContent {
+    flex-direction: column-reverse;
+    gap: 1.5rem;
+  }
+
+  .heroImage img {
+    max-width: 200px;
+  }
+}
+
+.useCases {
+  padding: 3rem 0;
+  background-color: var(--ifm-color-emphasis-100);
+}
+
+.useCase {
+  padding: 1.5rem;
+  height: 100%;
+}
+
+.useCase h3 {
+  margin-bottom: 0.5rem;
+}
+
+.useCaseLink {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.example {
+  padding: 3rem 0;
+}
+
+.codeBlock {
+  background-color: var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+@media screen and (max-width: 996px) {
+  .useCases,
+  .example {
+    padding: 2rem 0;
+  }
+
+  .codeBlock {
+    font-size: 0.8rem;
+  }
+}

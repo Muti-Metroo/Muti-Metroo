@@ -1,0 +1,99 @@
+# Leak test: 4-agent mesh mirroring the affected production topology.
+#
+#   ingress --h2--> transit --h2--> exit1
+#                          \-h2--> exit2
+#
+# All peer hops are h2 (the transport implicated in the leak).
+# The target HTTP server lives on the same docker network in 172.29.0.0/16
+# so both exits' routes match it.
+services:
+  ingress:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: muti-metroo-leak-ingress
+    hostname: ingress
+    volumes:
+      - ./ingress/data:/app/data
+      - ./ingress/config.yaml:/app/config.yaml:ro
+      - ../../testbed/certs:/app/certs:ro
+    ports:
+      - "11080:1080"   # SOCKS5
+      - "18081:8080"   # HTTP API
+    networks:
+      mesh:
+        ipv4_address: 172.29.0.11
+    depends_on:
+      - transit
+    restart: unless-stopped
+
+  transit:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: muti-metroo-leak-transit
+    hostname: transit
+    volumes:
+      - ./transit/data:/app/data
+      - ./transit/config.yaml:/app/config.yaml:ro
+      - ../../testbed/certs:/app/certs:ro
+    ports:
+      - "18082:8080"
+    networks:
+      mesh:
+        ipv4_address: 172.29.0.12
+    depends_on:
+      - exit1
+      - exit2
+    restart: unless-stopped
+
+  exit1:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: muti-metroo-leak-exit1
+    hostname: exit1
+    volumes:
+      - ./exit1/data:/app/data
+      - ./exit1/config.yaml:/app/config.yaml:ro
+      - ../../testbed/certs:/app/certs:ro
+    ports:
+      - "18083:8080"
+    networks:
+      mesh:
+        ipv4_address: 172.29.0.13
+    restart: unless-stopped
+
+  exit2:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: muti-metroo-leak-exit2
+    hostname: exit2
+    volumes:
+      - ./exit2/data:/app/data
+      - ./exit2/config.yaml:/app/config.yaml:ro
+      - ../../testbed/certs:/app/certs:ro
+    ports:
+      - "18084:8080"
+    networks:
+      mesh:
+        ipv4_address: 172.29.0.14
+    restart: unless-stopped
+
+  # Static HTTP target the SOCKS workers hit through the mesh.
+  target:
+    image: nginx:alpine
+    container_name: muti-metroo-leak-target
+    hostname: target
+    networks:
+      mesh:
+        ipv4_address: 172.29.0.100
+    restart: unless-stopped
+
+networks:
+  mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16

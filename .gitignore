@@ -1,0 +1,76 @@
+# Binaries
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+coverage/
+*.test.exe
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Development data and certificates
+data/
+certs/
+*.pem
+*.key
+*.crt
+
+# Configuration files with secrets
+config.yaml
+secrets.yaml
+*.env
+.env*
+!.env.example
+# Test fixtures: leak-test mesh configs are tracked so a fresh clone can run
+# tests/leak-test/run.sh without manually re-creating them.
+!tests/leak-test/*/config.yaml
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*.orig
+
+# Debug files
+__debug_bin*
+testbed/*
+!testbed/e2e-test.sh
+
+# Third-party license files (generated at release time)
+internal/licenses/third_party/
+
+# Local notes and reviews
+notes/
+
+# Claude Code
+.claude/
+
+# Docker Compose local overrides
+docker-compose.override.yml
+
+# Root binary (built outside build/)
+/muti-metroo
+
+# Release artifacts
+dist/
+
+# Windows Event Log Lab (ephemeral test artifacts)
+windows-eventlog-lab/logs/
+windows-eventlog-lab/data/
+windows-eventlog-lab/.env
+windows-eventlog-lab/REPORT.md

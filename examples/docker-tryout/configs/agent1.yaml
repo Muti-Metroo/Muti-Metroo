@@ -1,0 +1,27 @@
+# Agent 1: SOCKS5 Ingress + Dashboard
+agent:
+  id: "aaaa111111111111aaaa111111111111"
+  display_name: "agent1-ingress"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+peers:
+  - id: "bbbb222222222222bbbb222222222222"
+    transport: quic
+    address: "agent2:4433"
+  - id: "eeee555555555555eeee555555555555"
+    transport: quic
+    address: "agent5:4433"
+
+socks5:
+  enabled: true
+  address: ":1080"
+
+http:
+  enabled: true
+  address: ":8080"
+  token_hash: "$2a$10$057dorcNcQ/5OEna9jDwrOc0x6obsEmjk2kjsR3PogX8oRJGpuCtW"
+  dashboard: true
+  remote_api: true

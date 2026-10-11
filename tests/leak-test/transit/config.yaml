@@ -1,0 +1,46 @@
+# Transit agent: h2 listener for ingress; dials BOTH exits over h2.
+# Mirrors "Muti Metroo B" in the affected production topology -- this is the agent
+# that did the leaking, since it's the dialer toward exits.
+agent:
+  id: "f7f3a7615b1ef38923c0c273c94ab0f9"
+  data_dir: "/app/data"
+  display_name: "leak-transit"
+  log_level: "info"
+
+tls:
+  ca: "/app/certs/ca.crt"
+  cert: "/app/certs/agent.crt"
+  key: "/app/certs/agent.key"
+
+listeners:
+  - transport: h2
+    address: "0.0.0.0:8443"
+    path: "/mesh"
+
+peers:
+  - id: "540cb4ee3ebd2409e1f408f572c8536c"
+    address: "exit1:8443"
+    transport: h2
+    path: "/mesh"
+  - id: "25a028478e0538f06aaf36738cf6bb18"
+    address: "exit2:8443"
+    transport: h2
+    path: "/mesh"
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
+  remote_api: true
+
+routing:
+  advertise_interval: 10s
+  route_ttl: 60s
+
+connections:
+  idle_threshold: 20s
+  timeout: 10s
+  keepalive_jitter: 0.2
+
+sleep:
+  enabled: false

@@ -1,0 +1,31 @@
+.diagramSection {
+  padding: 0.5rem 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.4)),
+    url('/img/tunnel-bg.png') repeat-x center center;
+  background-size: auto, auto 100%;
+}
+
+[data-theme='dark'] .diagramSection {
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)),
+    url('/img/tunnel-bg.png') repeat-x center center;
+  background-size: auto, auto 100%;
+}
+
+.mermaidWrapper {
+  padding: 1rem;
+  margin: 0 auto;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media screen and (max-width: 996px) {
+  .diagramSection {
+    padding: 0.25rem 0;
+  }
+
+  .mermaidWrapper {
+    padding: 0.5rem;
+  }
+}

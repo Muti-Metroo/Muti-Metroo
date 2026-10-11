@@ -1,0 +1,543 @@
+# ==============================================================================
+# Muti Metroo - Example Configuration
+# ==============================================================================
+#
+# This file shows recommended deployment values for a typical agent. Some
+# entries deliberately differ from the built-in defaults (e.g. socks5.enabled
+# and http.enabled are true here but false by default). Where the example
+# differs intentionally, the line is annotated with `# DEFAULT: <value>` so
+# you can see what omitting the line would give you.
+#
+# To inspect the actual effective configuration of a YAML file or a binary
+# with embedded config (with secrets redacted), run:
+#
+#   muti-metroo config show <path>
+#   muti-metroo config show <path> --diff-from-default
+#
+# To validate without starting the agent:
+#
+#   muti-metroo config validate <path>
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Default Action (Embedded Configs Only)
+# ------------------------------------------------------------------------------
+# When the binary runs without arguments and has embedded config, the implicit
+# default is to start the agent ("run"). Set this to "help" to opt out and show
+# usage instead. The field has no effect when no config is embedded.
+#
+# default_action: help   # Show help instead of auto-starting
+
+# ------------------------------------------------------------------------------
+# Agent Identity
+# ------------------------------------------------------------------------------
+agent:
+  # Agent ID: "auto" generates on first run, or specify hex string
+  id: "auto"
+
+  # Human-readable display name (Unicode allowed, e.g., "Moscow Gateway")
+  # If not set, falls back to agent ID for display
+  display_name: ""
+
+  # Directory for persistent state (agent_id, keypair)
+  # Optional when identity is fully specified via private_key below
+  data_dir: "./data"
+
+  # Logging configuration
+  log_level: "info" # debug, info, warn, error
+  log_format: "text" # text, json
+
+  # Delay before starting network activity (listeners, peers, SOCKS5, etc.)
+  # Useful for staggering agent startups or waiting for dependencies.
+  # Accepts Go duration strings: 30s, 1m30s, 2m, etc. Default: 0 (no delay).
+  # startup_delay: 90s
+
+  # X25519 keypair for E2E encryption (optional - enables single-file deployment)
+  # When specified, takes precedence over data_dir files, making data_dir optional.
+  # Generate with: muti-metroo init -d /tmp/keys && cat /tmp/keys/agent_key
+  # private_key: "48bbea6c0c9be254bde983c92c8a53db759f27e51a6ae77fd9cca81895a5d57c"
+  # public_key is optional - derived from private_key automatically
+  # public_key: "e7d4c3b2a1..."
+
+# Example: Single-file deployment (no data_dir needed)
+# agent:
+#   id: "ea468d30f0e0b80ea37ba9f6a7902407"
+#   private_key: "48bbea6c0c9be254bde983c92c8a53db759f27e51a6ae77fd9cca81895a5d57c"
+#   log_level: "info"
+
+# ------------------------------------------------------------------------------
+# Global TLS Configuration
+# -----------------------
+# Default posture: listeners auto-generate self-signed certificates and dialers
+# accept any certificate, and no client certificate is requested. Links are
+# encrypted, but peers are NOT authenticated: an attacker who can intercept a
+# connection can terminate TLS and relay (and read) the sessions crossing that
+# link, because the end-to-end session key exchange is not authenticated
+# either. The agent ID exchanged in the handshake is self-asserted at every
+# TLS mode -- certificates are not tied to agent IDs.
+#
+# On links that cross networks you do not control, authenticate peers: enable
+# strict verification and mutual TLS below (both sides then need certificates
+# from your CA), or at minimum pin the expected agent ID with peers[].id.
+# ------------------------------------------------------------------------------
+tls:
+  # Strict TLS verification (default: false)
+  # When true, peer certificates are verified against the CA
+  # Requires 'ca' or 'ca_pem' to be configured
+  # strict: true
+
+  # CA certificate for verifying peer certificates and client certs (mTLS)
+  # Required when: strict mode enabled, mTLS enabled
+  # ca: "./certs/ca.crt"
+  # Or inline PEM (takes precedence over file path):
+  # ca_pem: |
+  #   -----BEGIN CERTIFICATE-----
+  #   ...
+  #   -----END CERTIFICATE-----
+
+  # Agent's identity certificate (optional - auto-generated if not set)
+  # Auto-generated certs are regenerated on each startup (ephemeral)
+  # cert: "./certs/agent.crt"
+  # key: "./certs/agent.key"
+  # Or inline PEM (wizard can embed these):
+  # cert_pem: |
+  #   -----BEGIN CERTIFICATE-----
+  #   ...
+  #   -----END CERTIFICATE-----
+  # key_pem: |
+  #   -----BEGIN PRIVATE KEY-----
+  #   ...
+  #   -----END PRIVATE KEY-----
+
+  # Enable mutual TLS on listeners (require client certificates)
+  # Requires 'ca' or 'ca_pem' to be configured
+  # mtls: true
+
+  # TLS ClientHello profile (client-side only).
+  # Presents a browser-compatible ClientHello on outbound H2 and WS dials for
+  # compatibility with strict proxies and servers.
+  # Disabled by default -- opt in by setting a preset.
+  # Caveat: some WAFs treat a browser-like ClientHello + non-browser HTTP as a bot signal and reject the dial.
+  # Valid presets: chrome, firefox, safari, edge, ios, android, random, go, disabled
+  # QUIC ignores this setting (uses quic-go's internal TLS 1.3).
+  # fingerprint:
+  #   preset: "chrome"
+
+# ------------------------------------------------------------------------------
+# Protocol Identifiers
+# These identifiers appear in network traffic and can be customized or disabled
+# to match local network policy
+# ------------------------------------------------------------------------------
+protocol:
+  # ALPN (Application-Layer Protocol Negotiation) for QUIC and TLS connections
+  # Default: "muti-metroo/1". Set to empty string "" to disable custom ALPN.
+  alpn: "muti-metroo/1"
+
+  # Custom HTTP header for HTTP/2 transport protocol identification
+  # Default: "X-Muti-Metroo-Protocol". Set to empty string "" to disable.
+  http_header: "X-Muti-Metroo-Protocol"
+
+  # WebSocket subprotocol identifier
+  # Default: "muti-metroo/1". Set to empty string "" to disable.
+  ws_subprotocol: "muti-metroo/1"
+
+# Example: disable all custom protocol identifiers (use transport defaults)
+# protocol:
+#   alpn: ""
+#   http_header: ""
+#   ws_subprotocol: ""
+
+# ------------------------------------------------------------------------------
+# Transport Listeners
+# Listen for incoming peer connections
+# ------------------------------------------------------------------------------
+listeners:
+  # QUIC listener (best performance, recommended)
+  - transport: quic
+    address: "0.0.0.0:4433"
+    # Optional per-listener overrides (uses global tls settings if not specified):
+    # tls:
+    #   cert: "./certs/listener-specific.crt"
+    #   key: "./certs/listener-specific.key"
+    #   mtls: false  # Override global mTLS setting
+    # Optional: advertise this listener over NodeInfo so other agents
+    # can discover the public dial target. Loopback and unspecified
+    # hosts are rejected. Opt-in only.
+    # advertise:
+    #   address: "edge-1.example.com:4433"
+    #   transport: quic
+
+  # HTTP/2 listener (TCP fallback)
+  # - transport: h2
+  #   address: "0.0.0.0:8443"
+  #   path: "/mesh"
+  #   advertise:
+  #     address: "edge-1.example.com:8443"
+  #     path: "/mesh"
+  #     transport: h2
+
+  # WebSocket listener (maximum proxy compatibility)
+  # - transport: ws
+  #   address: "0.0.0.0:443"
+  #   path: "/mesh"
+
+  # WebSocket behind reverse proxy (plaintext mode)
+  # - transport: ws
+  #   address: "0.0.0.0:8080"
+  #   path: "/mesh"
+  #   plaintext: true  # No TLS - proxy handles it
+
+# ------------------------------------------------------------------------------
+# Peer Connections
+# Connect to other agents in the mesh
+#
+# peers[].id pins the agent ID you expect the remote to present. Agent IDs are
+# self-asserted (the handshake carries no proof of possession of the identity
+# key), so the pin detects misconfiguration and impersonation after the first
+# connection, but it is not a substitute for tls.strict/tls.mtls on untrusted
+# networks.
+# ------------------------------------------------------------------------------
+peers:
+  # Example QUIC peer
+  # - id: "abc123def456789012345678901234ab"
+  #   transport: quic
+  #   address: "192.168.1.50:4433"
+  #   # Optional per-peer TLS overrides:
+  #   # tls:
+  #   #   ca: "./certs/other-ca.crt"  # Override global CA
+  #   #   strict: true                # Enable cert verification for this peer
+
+  # Example WebSocket peer through corporate proxy
+  # Note: mTLS not available through proxy (external server may use RSA)
+  # - id: "ghi789jkl012345678901234567890cd"
+  #   transport: ws
+  #   address: "wss://relay.example.com:443/mesh"
+  #   proxy: "http://proxy.corp.local:8080"
+  #   proxy_auth:
+  #     username: "${PROXY_USER}"
+  #     password: "${PROXY_PASS}"
+
+  # Example HTTP/2 peer with a shorter TCP keepalive than the global default,
+  # e.g. when dialing out from behind a NAT that drops idle mappings quickly.
+  # - id: "jkl012mno345678901234567890123ef"
+  #   transport: h2
+  #   address: "relay.example.com:3000"
+  #   path: "/mesh"
+  #   tcp_keepalive: 20s  # Override connections.tcp_keepalive for this peer (0 disables)
+
+# ------------------------------------------------------------------------------
+# SOCKS5 Server
+# Accept client connections (ingress role)
+# ------------------------------------------------------------------------------
+socks5:
+  enabled: true # DEFAULT: false
+  address: "127.0.0.1:1080"
+
+  # Optional authentication
+  auth:
+    enabled: false
+    users:
+      # Option 1: Plaintext password (deprecated, for development only)
+      # - username: "user1"
+      #   password: "pass1"
+
+      # Option 2: bcrypt password hash (recommended for production)
+      # Generate with: htpasswd -bnBC 10 "" <password> | tr -d ':\n'
+      # Or use: muti-metroo hash <password>
+      - username: "user1"
+        password_hash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
+  # Connection limits
+  max_connections: 1000
+
+# ------------------------------------------------------------------------------
+# Exit Configuration
+# Open real TCP connections to destinations (exit role)
+# ------------------------------------------------------------------------------
+exit:
+  enabled: false
+
+  # CIDR routes to advertise to mesh.
+  # Each entry can be either a bare CIDR string or a structured mapping
+  # with an optional metric and an optional operator comment. Comments
+  # are local-only metadata (visible in `muti-metroo route list`, the dashboard,
+  # and `muti-metroo route trace`) and are never advertised to peers. The
+  # comment can also be edited at runtime with
+  # `muti-metroo route comment <cidr> "..."` -- the override is journalled and
+  # survives restart.
+  routes:
+    # - "10.0.0.0/8"                  # legacy form
+    # - cidr: "192.168.0.0/16"        # structured form with comment
+    #   comment: "office LAN"
+    #   source_ip: "192.168.1.50"     # bind outbound dials to this local IP (local-only)
+    #   interface: "ens192"           # pin the egress NIC (local-only)
+    # - cidr: "0.0.0.0/0"             # default route (be careful!)
+    #   metric: 5
+    #   comment: "fallback exit"
+
+  # DNS settings for domain resolution.
+  # DEFAULT for `servers`: [] (use the system resolver, including .local /
+  # mDNS). The example below pins Google + Cloudflare; for hospital,
+  # spacecraft, or compliance-bound deployments, leave `servers` unset or
+  # supply the operator's own resolvers.
+  dns:
+    servers:
+      - "8.8.8.8:53"
+      - "1.1.1.1:53"
+    timeout: 5s
+
+# ------------------------------------------------------------------------------
+# Mesh Hosts
+# Symbolic name -> IP entries served to local Mutiauk clients via
+# /api/dashboard. Entries here are config-seeded and cannot be removed
+# at runtime; runtime entries added via /hosts/manage live alongside them
+# and are journalled to data_dir.
+# ------------------------------------------------------------------------------
+mesh_hosts_suffixes: ["mesh"] # default; every host name must end with .<one of these>
+mesh_hosts: []
+# mesh_hosts:
+#   - name: gateway.mesh
+#     ipv4: 10.0.1.5
+#     comment: "edge gateway"
+#   - name: db.mesh
+#     ipv4: 10.0.1.20
+#     ipv6: fd00::20
+
+# ------------------------------------------------------------------------------
+# Routing
+# Route advertisement and propagation settings
+# ------------------------------------------------------------------------------
+routing:
+  advertise_interval: 2m # How often to re-advertise routes
+  # node_info_interval: 2m  # NodeInfo advertisement frequency (defaults to advertise_interval if unset)
+  route_ttl: 5m # How long routes are valid
+  max_hops: 16 # Maximum path length (TTL)
+
+# ------------------------------------------------------------------------------
+# Connection Tuning
+# Peer connection behavior
+# ------------------------------------------------------------------------------
+connections:
+  # Keepalive settings
+  idle_threshold:
+    5m # (default 5m) Three uses: peer keepalive interval; the deadline a
+    # SOCKS client has to complete its handshake (cleared once the tunnel is
+    # up -- idle established SOCKS connections are NOT reaped by this knob);
+    # and the read idle timeout exit/forward handlers apply to their target
+    # connections (a target silent for this long is closed).
+  timeout: 90s # Declare peer dead after no response
+  keepalive_jitter:
+    0.2 # Timing jitter (0.0-1.0) makes beacon patterns less distinguishable
+    # 0.2 = 20% jitter, so 5m becomes 4m-6m range
+  tcp_keepalive:
+    30s # SO_KEEPALIVE period for TCP transports (h2, ws); keeps NAT
+    # mappings warm so idle links don't drop. 0 disables. QUIC
+    # manages its own keepalive and ignores this.
+  write_timeout:
+    30s # Per-frame write deadline on peer connections (default 30s). A peer
+    # that stops reading makes the write fail -- and the connection tear down --
+    # instead of blocking every frame behind the stalled write. 0 disables.
+
+  # Reconnection behavior
+  reconnect:
+    initial_delay: 1s
+    max_delay: 60s
+    multiplier: 2.0
+    jitter: 0.2
+    max_retries: 0 # 0 = infinite
+
+# ------------------------------------------------------------------------------
+# Resource Limits
+# Prevent resource exhaustion
+# ------------------------------------------------------------------------------
+limits:
+  max_streams_total: 10000 # Max concurrent streams (established + pending opens); the only enforced stream limit
+  stream_open_timeout: 30s
+  # Deprecated, accepted but ignored (kept so older configs load):
+  max_streams_per_peer: 1000 # no per-peer limit is enforced
+  max_pending_opens: 100 # pending opens count toward max_streams_total instead
+  buffer_size: 262144 # stream buffering is a fixed per-stream frame queue, not a sized byte buffer
+
+# ------------------------------------------------------------------------------
+# HTTP API Server
+# Health checks, dashboard, remote agent APIs
+# ------------------------------------------------------------------------------
+http:
+  enabled: true # DEFAULT: false
+  # Bound to all interfaces so Muti Metroo Manager and remote CLI calls work out of
+  # the box. Mutation endpoints are protected by the management signing
+  # key (see `management` below); read endpoints (topology, dashboard) are
+  # NOT, so set `token_hash` if this address is reachable from untrusted
+  # networks. The agent prints a startup warning when it binds non-loopback
+  # without a token_hash.
+  address: ":8080"
+  read_timeout: 10s
+  write_timeout: 10s
+
+  # Minimal mode: only enable /health, /healthz, /ready endpoints
+  # When true, overrides all endpoint flags below to false
+  minimal: false
+
+  # Bearer token authentication for the HTTP API.
+  # When set, all non-health endpoints require Authorization: Bearer <token>
+  # or ?token=<token> query parameter. Health endpoints are always public.
+  # Generate with: muti-metroo hash
+  # token_hash: "$2a$10$..."
+
+  # Endpoint group controls (all default to true when http.enabled=true).
+  # Set to false to disable (returns 404 with debug logging).
+  pprof: false # DEFAULT: true. /debug/pprof/* - disable in production.
+  dashboard: true # /api/* - Dashboard API endpoints
+  remote_api: true # /agents/* - Distributed mesh APIs
+
+# Example: Minimal endpoint configuration (health endpoints only)
+# http:
+#   enabled: true
+#   address: "127.0.0.1:8080"
+#   minimal: true
+
+# Example: Authenticated API access
+# http:
+#   enabled: true
+#   address: ":8080"
+#   token_hash: "$2a$10$..."  # muti-metroo hash
+#   # CLI: muti-metroo status --token <token>
+#   # Env: MUTI_METROO_TOKEN=<token> muti-metroo status
+#   # curl: curl -H "Authorization: Bearer <token>" http://localhost:8080/agents
+
+# ------------------------------------------------------------------------------
+# Management Commands
+# Execute commands on remote agents (interactive and streaming modes)
+# ------------------------------------------------------------------------------
+shell:
+  enabled: false # Disabled by default for security
+  whitelist: [] # Empty = no commands allowed; ["*"] = all (testing only!)
+  # whitelist:                 # Commands must be base names only (no paths)
+  #   - whoami
+  #   - hostname
+  #   - bash
+  #   - vim
+  # Authorization: every management command request must carry a valid
+  # Ed25519 signature from the mesh management signing key (see `management`
+  # below). Agents without management.signing_public_key configured
+  # reject all command requests outright.
+  timeout: 0s # Optional command timeout (0 = no timeout)
+  max_sessions: 0 # Max concurrent sessions (0 = unlimited)
+
+# ------------------------------------------------------------------------------
+# File Transfer
+# Upload/download files to/from remote agents
+# ------------------------------------------------------------------------------
+file_transfer:
+  enabled: false # Disabled by default for security
+  max_file_size: 524288000 # 500 MB (0 = unlimited)
+  allowed_paths: [] # Empty = no paths allowed; ["*"] = all paths
+  # allowed_paths:             # Path prefixes and glob patterns
+  #   - /tmp                   # Prefix: allows /tmp and everything under it
+  #   - /data/**               # Recursive glob: any path under /data
+  #   - /home/*/uploads        # Wildcard: uploads dir for any user
+  #   - /var/log/*.log         # Extension: only .log files in /var/log
+  # Authorization: same mesh management signing key as shell. See the
+  # `management` block below.
+
+# ------------------------------------------------------------------------------
+# UDP Relay Configuration
+# Enable UDP relay for SOCKS5 UDP ASSOCIATE (RFC 1928)
+# ------------------------------------------------------------------------------
+udp:
+  enabled: true
+  max_associations: 1000 # Max concurrent UDP associations
+  idle_timeout: 5m # Association timeout after inactivity
+  max_datagram_size: 1472 # Max UDP payload (MTU - IP/UDP headers)
+
+# ------------------------------------------------------------------------------
+# ICMP Echo (Ping) Configuration
+# Allow sending ICMP echo requests through the mesh to test connectivity
+# ------------------------------------------------------------------------------
+icmp:
+  enabled: true
+  max_sessions: 100 # Max concurrent ICMP sessions
+  idle_timeout: 60s # Session idle timeout
+  echo_timeout: 5s # Per-echo request timeout
+
+# ------------------------------------------------------------------------------
+# Port Forwarding
+# Expose local services through the mesh network (like ngrok/localtunnel)
+# ------------------------------------------------------------------------------
+forward:
+  # Port forward endpoints (exit side) - expose local services
+  endpoints: []
+  # endpoints:
+  #   - key: "web-server"           # Routing key (advertised to mesh)
+  #     target: "localhost:3000"     # Fixed target host:port
+  #   - key: "internal-api"
+  #     target: "192.168.1.10:8080"
+
+  # Port forward listeners (ingress side) - accept incoming connections
+  listeners: []
+  # listeners:
+  #   - key: "web-server"           # Routing key to look up in mesh
+  #     address: ":8080"            # Local address to listen on
+  #     max_connections: 100        # Optional connection limit
+
+# ------------------------------------------------------------------------------
+# Management Keys
+# X25519 keys encrypt mesh topology data for privacy. Ed25519
+# signing keys authorize every privileged operation (management commands,
+# file transfer, dynamic config mutations, sleep/wake). Agents with only the
+# public key
+# configured can process signed requests; only operators with the private
+# key can initiate them; agents with neither cannot use these features.
+# ------------------------------------------------------------------------------
+management:
+  # X25519 management public key (64-character hex string)
+  # When set, NodeInfo and route paths are encrypted before flooding.
+  # All agents in the mesh should have the SAME public key.
+  # Generate with: muti-metroo management-key generate
+  public_key: ""
+
+  # X25519 management private key (64-character hex string)
+  # Only set on operator/management nodes that need to view topology.
+  # NEVER distribute to field agents.
+  private_key: ""
+
+  # Ed25519 signing public key (64-character hex string = 32 bytes)
+  # Required on every agent that should accept privileged operations
+  # (shell, file transfer, dynamic config mutations, sleep/wake). When
+  # absent, these operations are disabled on this agent.
+  # Generate with: muti-metroo signing-key generate
+  signing_public_key: ""
+
+  # Ed25519 signing private key (128-character hex string = 64 bytes)
+  # Only set on operator nodes that initiate privileged operations.
+  # NEVER distribute to field agents -- anyone with this key can
+  # authorize shell, file transfer, and dynamic config mutations across
+  # the mesh.
+  signing_private_key: ""
+
+# Example: Field agent (can accept signed commands; cannot initiate)
+# management:
+#   public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+#   signing_public_key: "9f8e7d6c5b4a3928171615141312111009080706050403020100fedcba987654"
+
+# Example: Operator node (can initiate and decrypt topology)
+# management:
+#   public_key: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+#   private_key: "e5f6a7b8c9d012345678901234567890123456789012345678901234567890ef"
+#   signing_public_key: "9f8e7d6c5b4a3928171615141312111009080706050403020100fedcba987654"
+#   signing_private_key: "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f209f8e7d6c5b4a3928171615141312111009080706050403020100fedcba987654"
+
+# ------------------------------------------------------------------------------
+# Sleep Mode
+# Mesh hibernation: a sleeping agent closes peer connections and only re-attaches
+# briefly during predictable polling windows to drain queued state. Sleep/wake
+# commands are signed with the management signing key (see above).
+# ------------------------------------------------------------------------------
+sleep:
+  enabled: false # Whether this agent can be put to sleep at all
+  poll_interval: 5m # Base interval between polls while sleeping
+  poll_interval_jitter: 0.3 # +/- 30% variation on poll_interval (0.0-1.0)
+  poll_duration: 30s # How long to stay connected during each poll
+  persist_state: true # Persist sleep state to disk so it survives restarts
+  max_queued_messages: 1000 # Max queued messages per sleeping peer (<=0 falls back to 1000)
+  auto_sleep_on_start: false # Start the agent in sleep mode

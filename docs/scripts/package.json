@@ -1,0 +1,11 @@
+{
+  "name": "muti-metroo-docs-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "screenshots": "node capture-muti-metroo-manager.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

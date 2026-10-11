@@ -1,0 +1,43 @@
+# Ingress agent: SOCKS5 listener; dials transit over h2.
+# Mirrors "Muti Metroo A" in the affected production topology.
+agent:
+  id: "f38019cbcb6b67f978e0a4dcaea533bf"
+  data_dir: "/app/data"
+  display_name: "leak-ingress"
+  log_level: "info"
+
+tls:
+  ca: "/app/certs/ca.crt"
+  cert: "/app/certs/agent.crt"
+  key: "/app/certs/agent.key"
+
+peers:
+  - id: "f7f3a7615b1ef38923c0c273c94ab0f9"
+    address: "transit:8443"
+    transport: h2
+    path: "/mesh"
+
+socks5:
+  enabled: true
+  address: "0.0.0.0:1080"
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
+  remote_api: true
+
+# Tight intervals so the test surfaces route convergence quickly.
+routing:
+  advertise_interval: 10s
+  route_ttl: 60s
+
+# Short keepalive so a dead peer is detected fast -- without this the test
+# would have to wait the full 6.5min wedge from bug #2 to see any churn.
+connections:
+  idle_threshold: 20s
+  timeout: 10s
+  keepalive_jitter: 0.2
+
+sleep:
+  enabled: false

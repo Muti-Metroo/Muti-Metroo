@@ -1,0 +1,25 @@
+# Agent 4: Exit Node for 128.0.0.0/1 (second half of IP space)
+agent:
+  id: "dddd444444444444dddd444444444444"
+  display_name: "agent4-exit-high"
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+exit:
+  enabled: true
+  routes:
+    - "128.0.0.0/1"
+
+shell:
+  enabled: true
+  whitelist: ["*"]
+
+file_transfer:
+  enabled: true
+  allowed_paths: ["*"]
+
+http:
+  enabled: true
+  address: ":8080"

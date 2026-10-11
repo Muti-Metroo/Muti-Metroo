@@ -1,0 +1,37 @@
+# Client Muti Metroo Ingress Agent - SOCKS5 proxy
+agent:
+  id: "cccc000000000000cccc000000000000"
+  display_name: "client-ingress"
+  log_level: debug
+
+listeners:
+  - transport: quic
+    address: ":4433"
+
+peers:
+  - id: "bbbb000000000000bbbb000000000000"
+    transport: quic
+    address: "transit:4433"
+
+socks5:
+  enabled: true
+  address: "127.0.0.1:1080"
+  auth:
+    enabled: true
+    users:
+      - username: "testuser"
+        password: "testpass" # Plaintext for testing
+
+  websocket:
+    enabled: true
+    address: "127.0.0.1:8081" # WebSocket endpoint for Mutiauk
+    path: "/socks5"
+    plaintext: true # No TLS for local testing
+
+udp:
+  enabled: true
+
+http:
+  enabled: true
+  address: ":8080"
+  dashboard: true
