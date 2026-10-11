@@ -383,7 +383,6 @@ An agent can serve multiple roles simultaneously:
 | `hosts`        | Mesh-local hostname registry - config + journalled runtime entries                                                                                                            |
 | `icmp`         | ICMP echo (ping) - exit handler, unprivileged sockets, session management with E2E encryption                                                                                 |
 | `identity`     | 128-bit AgentID generation, X25519 keypair storage for E2E encryption                                                                                                         |
-| `i18n`         | CLI output localization (en/ru) via go-i18n; translate at the display layer only                                                                                              |
 | `integration`  | Integration tests for multi-agent mesh scenarios                                                                                                                              |
 | `loadtest`     | Load testing utilities - stream throughput, route table, connection churn                                                                                                     |
 | `logging`      | Structured logging with slog - text/JSON formats, standard attribute keys                                                                                                     |

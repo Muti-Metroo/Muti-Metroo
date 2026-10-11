@@ -3723,7 +3723,7 @@ muti-metroo/
 ├── cmd/
 │   ├── muti-metroo/
 │   │   └── main.go                 # CLI entrypoint and all commands
-│   └── muti-metroo-dll/
+│   └── muti-dll/
 │       └── main.go                 # Windows DLL entry point for service installation
 │
 ├── internal/
@@ -3938,10 +3938,6 @@ muti-metroo/
 │   │
 │   ├── apiclient/
 │   │   └── client.go               # HTTP client used by the CLI (token auth, signed envelopes)
-│   │
-│   ├── i18n/
-│   │   ├── i18n.go                 # CLI output localization (en/ru), display-layer only
-│   │   └── locales/                # en.toml / ru.toml translation tables
 │   │
 │   ├── sysinfo/
 │   │   ├── sysinfo.go              # System info and shell detection for node advertisements
