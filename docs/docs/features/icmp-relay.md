@@ -111,9 +111,14 @@ Error: ICMP session failed: no route to agent 1f743225
 
 The local agent does not know a path to the target agent. Check `muti-metroo peer status` and `muti-metroo mesh-test`.
 
-### Every request times out
+### The first request times out and the rest fail
 
-The target agent sent the requests but got no reply. The destination may be down, or a firewall between the target agent and the destination drops ICMP.
+```text
+seq=1: timeout
+seq=2: send failed: failed to write msg: use of closed network connection
+```
+
+The target agent sent the request but got no reply. The destination may be down, or a firewall between the target agent and the destination drops ICMP. In the current release the session ends after the first timeout, so the requests after it fail without being sent.
 
 ## See Also
 

@@ -35,7 +35,7 @@ muti-metroo shell [flags] <target-agent-id> [command] [args...]
 | `<target-agent-id>` | The agent that runs the command. A full 32-character agent ID, or a unique prefix of one, resolved against the gateway agent's list of known agents. |
 | `[command] [args...]` | Command and arguments to run. Defaults to `bash` when omitted. |
 
-The CLI parses flags anywhere on the command line, so a remote argument that looks like a flag (`-l`, `-la`) is rejected with `unknown shorthand flag`. Put `--` before the remote command to stop flag parsing:
+The CLI parses flags anywhere on the command line, so a remote argument that looks like a flag (`-l`, `-la`) is rejected with `unknown shorthand flag`, and `-h` prints the help of `shell` instead of reaching the remote command. Put `--` before the remote command to stop flag parsing:
 
 ```bash
 muti-metroo shell abc123de -- ls -la /tmp

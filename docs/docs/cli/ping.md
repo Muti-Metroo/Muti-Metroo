@@ -62,6 +62,8 @@ rtt min/avg/max = 21.8/22.4/23.4 ms
 
 The header shows the first 12 characters of the target agent ID. `time` is measured by the CLI, from sending the request to receiving the reply. A request without a reply within `--timeout` prints `seq=N: timeout`, and an error reported by the target agent prints `seq=N: error: <message>`. The statistics are printed when the count is reached or when you press Ctrl+C.
 
+In the current release, the session ends after the first timeout: every later request prints `seq=N: send failed: failed to write msg: use of closed network connection`. Only the first timeout reflects the destination; run `ping` again to keep testing.
+
 ## Examples
 
 ```bash
