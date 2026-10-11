@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.10.5](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.4...muti-metroo-v4.10.5) (2026-10-11)
+
+
+### Bug Fixes
+
+* **crypto:** use curve25519.X25519 which rejects low-order points ([757173e](https://github.com/postalsys/Muti-Metroo/commit/757173e46ade038df5f96019abe224ef2453b6a1))
+* **embed:** restore original Muti Metroo embedded-config magic ([1fc5d6c](https://github.com/postalsys/Muti-Metroo/commit/1fc5d6c03bf197d26659fa991a067bac74497d64))
+
 ## [4.10.4](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.3...muti-metroo-v4.10.4) (2026-10-10)
 
 
