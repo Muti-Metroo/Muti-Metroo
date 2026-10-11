@@ -292,6 +292,81 @@ func TestListenerHandshake_PeerIDMismatch(t *testing.T) {
 	clientReader.Close()
 }
 
+func TestDialerHandshake_VersionMismatch(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	remoteID, _ := identity.NewAgentID()
+
+	h := NewHandshaker(localID, "", []string{"test"}, 1*time.Second)
+
+	// Create a pipe to simulate connection
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+
+	cfg := DefaultConnectionConfig(localID)
+
+	mockConn := &mockPeerConn{isDialer: true}
+	conn := NewConnection(mockConn, cfg)
+	defer conn.Close()
+
+	// Create mock stream with piped data
+	mockCtrlStream := &pipedMockStream{
+		reader: clientReader,
+		writer: clientWriter,
+	}
+	conn.controlStream = mockCtrlStream
+
+	// Start dialer handshake in goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		reader := protocol.NewFrameReader(mockCtrlStream)
+		writer := protocol.NewFrameWriter(mockCtrlStream)
+		_, err := h.dialerHandshake(context.Background(), conn, reader, writer, remoteID)
+		errCh <- err
+	}()
+
+	// Server side: read the PEER_HELLO and respond with a wrong version
+	serverFrameReader := protocol.NewFrameReader(serverReader)
+	serverFrameWriter := protocol.NewFrameWriter(serverWriter)
+
+	if _, err := serverFrameReader.Read(); err != nil {
+		t.Fatalf("Failed to read PEER_HELLO: %v", err)
+	}
+
+	// Send PEER_HELLO_ACK with wrong protocol version
+	ack := &protocol.PeerHello{
+		Version:      0xFF, // Wrong version
+		AgentID:      remoteID,
+		Timestamp:    uint64(time.Now().UnixNano()),
+		Capabilities: []string{},
+	}
+
+	ackFrame := &protocol.Frame{
+		Type:     protocol.FramePeerHelloAck,
+		StreamID: protocol.ControlStreamID,
+		Payload:  ack.Encode(),
+	}
+	if err := serverFrameWriter.Write(ackFrame); err != nil {
+		t.Fatalf("Failed to write ack: %v", err)
+	}
+
+	// Check for expected error
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Error("Expected error for version mismatch, got nil")
+		}
+		// Error should mention version mismatch
+		if err != nil && !bytes.Contains([]byte(err.Error()), []byte("protocol version mismatch")) {
+			t.Errorf("Expected 'protocol version mismatch' error, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handshake did not complete in time")
+	}
+
+	serverWriter.Close()
+	clientWriter.Close()
+}
+
 func TestDialerHandshake_PeerIDMismatch(t *testing.T) {
 	localID, _ := identity.NewAgentID()
 	remoteID, _ := identity.NewAgentID()

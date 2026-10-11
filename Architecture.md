@@ -2619,6 +2619,10 @@ when a peer disconnects.
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Version equality is enforced on both sides: the listener rejects a PEER_HELLO
+whose version differs from its own, and the dialer applies the same check to
+the PEER_HELLO_ACK it receives.
+
 ### 10.3 Reconnection Strategy
 
 ```

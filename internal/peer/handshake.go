@@ -134,6 +134,13 @@ func (h *Handshaker) dialerHandshake(ctx context.Context, conn *Connection, read
 		return nil, fmt.Errorf("failed to decode PEER_HELLO_ACK: %w", err)
 	}
 
+	// Verify protocol version (the listener enforces this on PEER_HELLO;
+	// the dialer must hold the ACK to the same bar)
+	if ack.Version != protocol.ProtocolVersion {
+		return nil, fmt.Errorf("protocol version mismatch: expected %d, got %d",
+			protocol.ProtocolVersion, ack.Version)
+	}
+
 	// Verify peer ID if expected
 	remoteID := ack.AgentID
 
