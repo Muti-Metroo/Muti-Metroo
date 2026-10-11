@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.10](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.9...muti-metroo-v4.10.10) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* re-cut release on consolidated history ([3589c31](https://github.com/Muti-Metroo/Muti-Metroo/commit/3589c318f4ce7eecb600c71afae2c2e315629b04))
+
 ## [4.10.9](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.8...muti-metroo-v4.10.9) (2026-10-11)
 
 
