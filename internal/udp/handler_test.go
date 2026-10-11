@@ -78,7 +78,6 @@ func (m *mockDataWriter) WriteUDPOpenErr(peerID identity.AgentID, streamID uint6
 	return nil
 }
 
-
 func (m *mockDataWriter) getOpenAcks() []*protocol.UDPOpenAck {
 	m.mu.Lock()
 	defer m.mu.Unlock()
