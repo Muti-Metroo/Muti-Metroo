@@ -163,7 +163,7 @@ module.exports = {
 };
 ```
 
-Without root, listeners must use ports above 1023. To accept peers on a web host's existing HTTPS port, run a plaintext WebSocket listener on loopback and forward to it from the web server, as described in [Reverse Proxy - Apache without server access](/deployment/reverse-proxy#apache-without-server-access-htaccess).
+Without root, listeners must use ports above 1023. To accept peers on a web host's existing HTTPS port, run a plaintext WebSocket listener on loopback and forward to it from the web server, as described in [Apache without server access](/deployment/reverse-proxy#apache-without-server-access-htaccess).
 
 ## See Also
 

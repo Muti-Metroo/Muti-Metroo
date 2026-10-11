@@ -211,14 +211,14 @@ Test the public endpoint from the remote side:
 muti-metroo probe --transport ws mesh.example.com:443 --path /mesh
 ```
 
-By default, agents do not verify the proxy's certificate; the peer ID check and [end-to-end encryption](/security/e2e-encryption) protect the connection. To verify it, set `tls.strict: true` and `tls.ca` on the peer to the CA certificate that issued the proxy's certificate. Verification uses only that CA, not the system trust store, and the CA certificate must use an ECDSA key. See [TLS Certificates](/configuration/tls-certificates).
+By default, agents do not verify the proxy's certificate. Stream payloads are still [end-to-end encrypted](/security/e2e-encryption), but without verification an attacker who can intercept the connection to the proxy can sit in the middle of it, and the peer ID check does not prevent that. To verify the certificate, set `tls.strict: true` and `tls.ca` on the peer to the CA certificate that issued the proxy's certificate. Verification uses only that CA, not the system trust store, and the CA certificate must use an ECDSA key. See [TLS Certificates](/configuration/tls-certificates).
 
-To let other agents discover this agent's public address automatically, add an `advertise` block to the listener with the public host, port, and path. See [Configuration - Listeners](/configuration/listeners).
+To let other agents discover this agent's public address automatically, add an `advertise` block to the listener with the public host, port, and path. See [Listeners configuration](/configuration/listeners).
 
 ## What changes behind a proxy
 
 - **mTLS is not available.** TLS ends at the proxy, so the agent never sees a client certificate.
-- **Peer identity and end-to-end encryption are unchanged.** The handshake still checks agent IDs, and stream payloads are encrypted between ingress and exit. The proxy cannot read them.
+- **Peer identity and end-to-end encryption are unchanged.** The handshake still checks agent IDs, and stream payloads are encrypted between ingress and exit. The proxy relays them without the session keys.
 - **The proxy sees connection metadata**: client IP addresses, connection times, and traffic volume.
 
 ## Troubleshooting
@@ -240,7 +240,7 @@ A plain HTTP request to the listener path returns `426 Upgrade Required`, which 
 
 ## See Also
 
-- [Configuration - Listeners](/configuration/listeners): `plaintext`, `path`, and `advertise` reference
+- [Listeners configuration](/configuration/listeners): `plaintext`, `path`, and `advertise` reference
 - [Transports](/concepts/transports): QUIC, HTTP/2, and WebSocket compared
 - [probe CLI](/cli/probe): testing listeners and endpoints
 - [PM2 Process Manager](/deployment/pm2): running the agent without root

@@ -67,7 +67,7 @@ Install the DLL as a user service with the CLI:
 muti-metroo.exe service install --user --dll C:\Users\alice\muti-metroo\muti-metroo.dll -c C:\Users\alice\muti-metroo\config.yaml
 ```
 
-See [System Service - Windows user service](/deployment/system-service#windows-user-service-registry-run) for the flags, the registry value it writes, and how to remove it.
+See [Windows user service](/deployment/system-service#windows-user-service-registry-run) for the flags, the registry value it writes, and how to remove it.
 
 To create the Run entry by hand instead:
 
