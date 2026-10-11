@@ -306,11 +306,11 @@ Example config in `configs/example.yaml`. Key sections:
 | Advertise Interval  | `routing.advertise_interval`   | 2m      | Route advertisement frequency                                 |
 | Node Info Interval  | `routing.node_info_interval`   | 2m      | Node info advertisement frequency                             |
 | Stream Open Timeout | `limits.stream_open_timeout`   | 30s     | Total round-trip time for STREAM_OPEN                         |
-| Buffer Size         | `limits.buffer_size`           | 256 KB  | Per-stream buffer at each hop                                 |
-| Max Streams/Peer    | `limits.max_streams_per_peer`  | 1000    | Concurrent streams per peer connection                        |
-| Max Total Streams   | `limits.max_streams_total`     | 10000   | Total concurrent streams across all peers                     |
-| Max Pending Opens   | `limits.max_pending_opens`     | 100     | Pending stream open requests                                  |
-| Idle Threshold      | `connections.idle_threshold`   | 5m      | Keepalive interval for idle connections                       |
+| Buffer Size         | `limits.buffer_size`           | 256 KB  | Deprecated; accepted but ignored                              |
+| Max Streams/Peer    | `limits.max_streams_per_peer`  | 1000    | Deprecated; accepted but ignored (no per-peer limit enforced) |
+| Max Total Streams   | `limits.max_streams_total`     | 10000   | Total concurrent streams across all peers (incl. pending opens) |
+| Max Pending Opens   | `limits.max_pending_opens`     | 100     | Deprecated; pending opens count toward max_streams_total      |
+| Idle Threshold      | `connections.idle_threshold`   | 5m      | Peer keepalive interval; SOCKS5 handshake deadline; exit/forward target read idle timeout |
 | Keepalive Jitter    | `connections.keepalive_jitter` | 0.2     | Timing jitter for keepalive                                   |
 | Connection Timeout  | `connections.timeout`          | 90s     | Disconnect after this keepalive timeout                       |
 | TCP Keepalive       | `connections.tcp_keepalive`    | 30s     | SO_KEEPALIVE period for h2/ws (per-peer override; 0 disables) |
