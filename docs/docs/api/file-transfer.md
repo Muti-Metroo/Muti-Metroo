@@ -54,7 +54,7 @@ curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/
 }
 ```
 
-`bytes_written` is the size received by the serving agent. Upload a directory by packing it first:
+`bytes_written` is the size received by the serving agent. A single uploaded file is written on the target with mode `0600`; files inside an uploaded directory archive keep their modes. Upload a directory by packing it first:
 
 ```bash
 tar czf site.tar.gz -C ./site .

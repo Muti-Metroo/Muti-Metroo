@@ -27,6 +27,8 @@ When something fails:
 | An exit goes away while another exit advertises the same CIDR | Once the stale route is removed or expires, the other exit's route is used. | As above, depending on whether the exit was a direct peer |
 | The failed agent comes back | It reconnects with exponential backoff and advertises again. Agents switch to whichever path delivers the exit's next advertisement first. | Reconnect delay plus up to one `advertise_interval` |
 
+A graceful stop (`muti-metroo stop`, `SIGTERM`, or a service stop) is different: the stopping agent withdraws its own routes before it exits, so every agent drops them at once. The delays in the table apply to crashes, lost links, and hosts that disappear.
+
 Streams that were running over the failed path are closed. Clients reconnect and their new connections use the new path.
 
 :::warning
