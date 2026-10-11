@@ -272,7 +272,7 @@ curl -s http://localhost:8080/api/dashboard | jq '.routes[0].path_display'
 ]
 ```
 
-Traffic is still encrypted end to end between A and B. Agent C forwards it without being able to read it.
+Traffic is still encrypted end to end between A and B. Agent C forwards the encrypted data without holding the session keys.
 
 ## Troubleshooting
 
@@ -292,7 +292,7 @@ See [Connectivity](/troubleshooting/connectivity) for more.
 ## See Also
 
 - [Architecture](/concepts/architecture): agent roles, routing, and encryption in depth
-- [Peers](/configuration/peers): peer connection options, including TLS and HTTP proxies
+- [Peers](/configuration/peers): peer connection options, including TLS
 - [Listeners](/configuration/listeners): QUIC, HTTP/2, and WebSocket listener options
 - [Exit Routing](/features/exit-routing): CIDR and domain routes
 - [Deployment Scenarios](/deployment/scenarios): topologies for real deployments

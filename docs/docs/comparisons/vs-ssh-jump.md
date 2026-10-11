@@ -61,7 +61,7 @@ Every hop needs a running SSH server that allows TCP forwarding, and you need cr
 
 ### Muti Metroo: a mesh of agents
 
-Muti Metroo agents connect to each other as peers. Exit agents advertise the networks they can reach, the advertisements spread through the mesh, and an ingress agent sends each client connection to the matching exit. Transit agents relay the traffic without being able to decrypt it.
+Muti Metroo agents connect to each other as peers. Exit agents advertise the networks they can reach, the advertisements spread through the mesh, and an ingress agent sends each client connection to the matching exit. Transit agents relay the traffic end-to-end encrypted, without the session keys.
 
 ```mermaid
 flowchart LR
@@ -262,17 +262,16 @@ Muti Metroo chooses a transport per link:
 | --------- | --------- | ----- |
 | QUIC | UDP | Any port; blocked where UDP is filtered |
 | HTTP/2 | TCP with TLS | Any port, commonly 443 |
-| WebSocket | TCP with TLS | Any port, commonly 443; can dial through an HTTP proxy and run behind a reverse proxy or CDN |
+| WebSocket | TCP with TLS | Any port, commonly 443; can run behind a reverse proxy or CDN |
 
 ```yaml
 peers:
   - id: "auto"
     transport: ws
     address: "wss://relay.example.com:443/mesh"
-    proxy: "http://proxy.example.com:8080"
 ```
 
-See [Transports](/concepts/transports).
+Muti Metroo agents connect to their peers directly. Peer entries accept `proxy` and `proxy_auth`, but the current release does not apply them, so a network that allows outbound traffic only through an HTTP proxy is a case for SSH. See [Transports](/concepts/transports).
 
 ## Connection lifetime
 
@@ -292,7 +291,7 @@ See [Connections configuration](/configuration/connections) for the reconnection
 | --- | --- | --- |
 | **Hop authentication** | SSH keys or passwords for each hop | TLS between agents. By default certificates are self-signed and not verified, and any agent that can reach a listener can connect; CA verification and mutual TLS restrict this. Peer entries can pin the expected agent ID. |
 | **Client authentication** | Each user authenticates to each hop | Optional SOCKS username/password on the ingress agent |
-| **Intermediate hops** | Jump hosts forward the encrypted inner session and cannot read it | Transit agents relay end-to-end encrypted streams and cannot read them |
+| **Intermediate hops** | Jump hosts forward the encrypted inner session and cannot read it; the destination's host key authenticates the session end to end | Transit agents relay end-to-end encrypted streams without the session keys; the stream key exchange is not authenticated, so a compromised transit agent can intercept a session |
 | **Where traffic leaves encryption** | The final SSH host (for `-L` and `-D`, traffic to the destination is unencrypted unless the application encrypts it) | The exit agent (traffic to the destination is unencrypted unless the application encrypts it) |
 | **Remote command execution** | Any authenticated user with a shell | Disabled by default; requires requests signed with the management signing key |
 
@@ -305,6 +304,7 @@ See [Security Overview](/security/overview) and [TLS and mTLS](/security/tls-mtl
 - You work with SSH-native tools such as `git`, `scp`, and `rsync`.
 - You need one-off access and do not want to deploy anything.
 - Every host on the path runs an SSH server you can use.
+- Outbound traffic must go through an HTTP proxy.
 
 ```bash
 ssh -J admin@bastion.example.com admin@10.20.30.40
@@ -316,7 +316,7 @@ ssh -L 5432:10.20.30.41:5432 -J admin@bastion.example.com admin@10.20.30.40
 - A host on the path has no SSH server and you cannot install one, for example a Windows host.
 - You need UDP or ICMP, not only TCP.
 - The topology has several sites, branches, or redundant paths.
-- Outbound traffic must go through an HTTP proxy, or only HTTPS is allowed.
+- Only HTTPS (port 443) is allowed outbound, or UDP is blocked.
 - Access should stay up without a person keeping sessions open.
 
 ## Using both

@@ -50,7 +50,7 @@ Every agent relays traffic for its peers. An agent becomes a transit hop by bein
 
 A transit agent:
 
-- Forwards streams between peers without being able to decrypt them
+- Forwards streams between peers without holding their session keys
 - Passes route advertisements on to its other peers
 
 Typical placements: a cloud relay that office networks dial out to, a DMZ host that can reach both an external and an internal segment, or an intermediate hop between regions.
@@ -107,10 +107,10 @@ Connection direction (which agent dials which) is independent of roles. See [Arc
 
 ## Checking agent roles
 
-The `/api/nodes` endpoint lists the roles of every known agent:
+The `/api/topology` endpoint lists the roles of the local agent and every known remote agent:
 
 ```bash
-curl http://localhost:8080/api/nodes | jq '.nodes[] | {display_name, roles}'
+curl -s http://localhost:8080/api/topology | jq '[.local_agent] + .agents | .[] | {display_name, roles}'
 ```
 
 The `roles` array contains `ingress`, `exit`, `forward_ingress`, and `forward_exit` as they apply. An agent with none of these is listed as `transit`.

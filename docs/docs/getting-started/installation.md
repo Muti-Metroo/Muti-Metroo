@@ -10,7 +10,7 @@ sidebar_position: 3
 
 # Installation
 
-Muti Metroo is a single binary with no runtime dependencies. It runs as an unprivileged user; root or Administrator is only needed to install it as a system service.
+Muti Metroo is a single binary with no runtime dependencies. It runs as an unprivileged user; root or Administrator is only needed to install it as a system service or, on Linux and macOS, to listen on ports below 1024.
 
 ## Supported platforms
 

@@ -19,9 +19,9 @@ A transport is the protocol that carries a peer connection between two agents. M
 | **Runs over** | UDP | TCP | TCP |
 | **Encryption** | TLS 1.3 | TLS 1.3 | TLS 1.3, or none behind a TLS-terminating reverse proxy (`plaintext: true`) |
 | **URL path** | Not used | Listener `path`, default `/mesh` | Listener `path`, default `/mesh` |
-| **Outbound HTTP proxy** | No | No | Yes (`proxy`, `proxy_auth`) |
-| **Needs open** | A UDP port | A TCP port | A TCP port, or only an HTTP proxy |
-| **Typical use** | Links where UDP is allowed | Links where only TCP, typically 443, is allowed | Links that must go through an HTTP proxy, reverse proxy, or CDN |
+| **Outbound HTTP proxy** | No | No | No (see below) |
+| **Needs open** | A UDP port | A TCP port | A TCP port |
+| **Typical use** | Links where UDP is allowed | Links where only TCP, typically 443, is allowed | Links that pass through a reverse proxy or CDN |
 
 All three carry the same traffic and support the same features. End-to-end encryption of stream payloads is independent of the transport.
 
@@ -53,7 +53,7 @@ HTTP/2 runs over TCP with TLS 1.3, as a long-lived HTTPS request to the listener
 
 A peer that dials a `host:port` address uses the path `/mesh`. To dial a different path, give the address as a URL, for example `https://relay.example.com:443/tunnel`.
 
-HTTP/2 listeners always use TLS; there is no plaintext mode. HTTP/2 peers cannot be configured to go through an HTTP proxy; use WebSocket for that.
+HTTP/2 listeners always use TLS; there is no plaintext mode.
 
 ```yaml
 listeners:
@@ -66,22 +66,22 @@ listeners:
 
 ```mermaid
 flowchart LR
-    A[Agent A] <-->|"HTTP CONNECT"| Proxy[HTTP Proxy]
-    Proxy <-->|"WebSocket over TLS"| B[Agent B]
+    A[Agent A] <-->|"WebSocket over TLS"| RP[Reverse proxy or CDN]
+    RP <-->|"WebSocket"| B[Agent B]
 ```
 
-WebSocket runs over TCP as an HTTP upgrade to the listener's path. It is the only transport that:
-
-- **Dials through an HTTP proxy.** Set `proxy` (and optionally `proxy_auth`) on the peer entry.
-- **Can sit behind a reverse proxy or CDN that terminates TLS.** Set `plaintext: true` on the listener and bind it to a local address that only the reverse proxy can reach.
+WebSocket runs over TCP as an HTTP upgrade to the listener's path. It is the only transport that can sit behind a reverse proxy or CDN that terminates TLS: set `plaintext: true` on the listener and bind it to a local address that only the reverse proxy can reach.
 
 ```yaml
 peers:
   - id: "auto"
     transport: ws
     address: "wss://relay.example.com:443/mesh"
-    proxy: "http://proxy.example.com:8080"
 ```
+
+:::note Outbound HTTP proxies
+Peer entries accept `proxy` and `proxy_auth`, but the current release does not apply them when dialing, and the WebSocket dialer does not read `HTTPS_PROXY` either. An agent in a network that allows outbound traffic only through an HTTP proxy cannot reach peers outside it. See [Peers](/configuration/peers).
+:::
 
 As with HTTP/2, a peer that dials a `host:port` address uses the path `/mesh`; give a `wss://` URL to dial a different path.
 
@@ -95,7 +95,7 @@ Each peer connection uses its own transport, chosen for the network between thos
 flowchart TB
     A[Agent A<br/>Ingress] -->|QUIC<br/>direct LAN| C[Agent C<br/>Transit]
     A -->|HTTP/2<br/>UDP blocked| B[Agent B<br/>Transit]
-    C -->|WebSocket<br/>through proxy| D[Agent D<br/>Exit]
+    C -->|WebSocket<br/>via reverse proxy| D[Agent D<br/>Exit]
     D -->|QUIC<br/>cloud| B
 ```
 
@@ -108,7 +108,6 @@ An agent can also run several listeners with different transports at once, so pe
 | Home or office network | Cloud server | QUIC; HTTP/2 if UDP is blocked |
 | Cloud server | Cloud server | QUIC |
 | Network with UDP blocked, direct TCP allowed | Anywhere | HTTP/2 or WebSocket |
-| Network with only an HTTP proxy for outbound traffic | Anywhere | WebSocket with `proxy` |
 | Anywhere | Agent behind a TLS-terminating reverse proxy or CDN | WebSocket (`plaintext: true` on the listener) |
 
 When unsure, start with QUIC, and change the link to HTTP/2 or WebSocket if it cannot connect. `muti-metroo probe` tests whether a listener is reachable with a given transport before you configure the peer.

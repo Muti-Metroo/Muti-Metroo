@@ -98,7 +98,7 @@ flowchart LR
 
 1. The ingress agent receives the SOCKS request and looks up a route for the destination (domain routes first, then CIDR routes).
 2. It opens a stream along the path to the exit agent that advertised the matching route.
-3. Transit agents relay the stream without being able to decrypt it.
+3. Transit agents relay the encrypted stream without holding its session keys.
 4. The exit agent checks the destination against its own routes and opens the real connection.
 5. Data flows in both directions until either side closes the connection.
 
@@ -126,7 +126,7 @@ See [Routing](/concepts/routing) for route selection and expiry.
 | ----- | ---------- |
 | Peer connections | TLS 1.3 on every transport. Certificates are self-signed and generated at startup unless you configure a CA; CA verification and mutual TLS are optional. |
 | Peer identity | A peer entry's `id` can pin the expected agent ID of the remote agent; `id: "auto"` accepts any agent. |
-| Stream payload | End-to-end encryption between ingress and exit with X25519 key exchange and ChaCha20-Poly1305. Transit agents cannot read the payload. |
+| Stream payload | End-to-end encryption between ingress and exit with X25519 key exchange and ChaCha20-Poly1305. Transit agents relay the payload without the session keys; see [the limits](/security/e2e-encryption#limits-of-the-protection). |
 | SOCKS clients | Optional username/password authentication. |
 | HTTP API | Optional bearer token (`http.token_hash`). |
 | Privileged operations | Shell, file transfer, and dynamic configuration changes require requests signed with the management signing key. Sleep and wake require a signature on agents that have the signing public key configured. |

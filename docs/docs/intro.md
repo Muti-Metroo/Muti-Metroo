@@ -34,7 +34,7 @@ flowchart LR
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | **Multi-hop routing**    | Agents form chains, trees, or a full mesh. Routes propagate between agents automatically.                         |
 | **End-to-end encryption** | X25519 key exchange and ChaCha20-Poly1305. Transit agents relay payloads without holding the session keys. See [limits](/security/e2e-encryption#limits-of-the-protection). |
-| **Multiple transports**  | QUIC over UDP, HTTP/2 and WebSocket over TCP. WebSocket can also run behind a TLS-terminating reverse proxy and dial through an HTTP proxy. |
+| **Multiple transports**  | QUIC over UDP, HTTP/2 and WebSocket over TCP. WebSocket can also run behind a TLS-terminating reverse proxy or CDN. |
 | **SOCKS proxy ingress**  | SOCKS4, SOCKS4a, and SOCKS5 with optional username/password authentication. SOCKS5 UDP ASSOCIATE is supported.     |
 | **Exit routing**         | CIDR routes (DNS resolved at the ingress) and domain routes (DNS resolved at the exit).                           |
 | **Port forwarding**      | Expose a service behind one agent as a listening port on another.                                                 |

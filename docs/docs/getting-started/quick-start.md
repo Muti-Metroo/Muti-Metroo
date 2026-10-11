@@ -149,7 +149,7 @@ socks5:
   address: "127.0.0.1:1080"
 ```
 
-`id: "auto"` accepts whatever agent ID the peer presents. Set it to the exit agent's 32-character ID to refuse any other agent. The peer address and port must match a listener on the exit agent. See [Peers](/configuration/peers) for TLS and proxy options.
+`id: "auto"` accepts whatever agent ID the peer presents. Set it to the exit agent's 32-character ID to refuse any other agent. The peer address and port must match a listener on the exit agent. See [Peers](/configuration/peers) for TLS options.
 
 ## Route all traffic without proxy settings
 

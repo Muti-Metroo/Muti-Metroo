@@ -17,7 +17,7 @@ Each scenario on this page is a complete topology with the configuration for eve
 | Reach an internal network from anywhere | [Remote access to an office network](#remote-access-to-an-office-network) |
 | Connect several sites | [Site-to-site connectivity](#site-to-site-connectivity) |
 | Send internet traffic out through a remote host | [Internet egress through a remote exit](#internet-egress-through-a-remote-exit) |
-| Connect out of a network that only allows web traffic | [Firewall traversal through an HTTP proxy](#firewall-traversal-through-an-http-proxy) |
+| Connect out of a network that only allows web traffic | [Firewall traversal on port 443](#firewall-traversal-on-port-443) |
 | Survive the loss of an agent | [High Availability](/deployment/high-availability) |
 
 The examples use `id: "auto"` for peers so they work before the agent IDs are known. Replace each `auto` with the peer's real agent ID (printed at startup and stored in `agent_id` in its data directory) so that a connection to the wrong agent is rejected.
@@ -232,16 +232,16 @@ curl -x socks5h://127.0.0.1:1080 https://example.com/
 
 With `socks5h`, the local agent resolves host names with its own system resolver before choosing a route. To resolve names at the exit instead, add the domains to the exit's `domain_routes`.
 
-## Firewall traversal through an HTTP proxy
+## Firewall traversal on port 443
 
-The corporate network allows outbound traffic only through an HTTP proxy. The inside agent connects to a WebSocket listener on port 443 of a cloud agent, through the proxy.
+The corporate firewall blocks UDP and every outbound TCP port except 443. The inside agent connects to a WebSocket listener on port 443 of a cloud agent, so the link looks like ordinary HTTPS.
 
 ```mermaid
 flowchart LR
     subgraph Corp[Corporate network]
-        Agent[Inside agent] --> Proxy[HTTP proxy]
+        Agent[Inside agent] --> FW[Firewall]
     end
-    Proxy -->|WebSocket over HTTPS, port 443| Cloud[Cloud agent<br/>cloud.example.com]
+    FW -->|WebSocket over HTTPS, port 443| Cloud[Cloud agent<br/>cloud.example.com]
 ```
 
 **Cloud agent:**
@@ -278,17 +278,17 @@ peers:
   - id: "auto"
     transport: ws
     address: "wss://cloud.example.com:443/mesh"
-    proxy: "http://proxy.corp.example.com:8080"
-    proxy_auth:
-      username: "${PROXY_USER}"
-      password: "${PROXY_PASS}"
 
 socks5:
   enabled: true
   address: "127.0.0.1:1080"
 ```
 
-The proxy must allow `CONNECT` to `cloud.example.com:443`. Proxies that inspect TLS replace the server certificate, which works with the default (non-strict) certificate handling.
+HTTP/2 (`transport: h2`, address `cloud.example.com:443`) works the same way. Firewalls that inspect TLS replace the server certificate, which works with the default (non-strict) certificate handling.
+
+:::note Networks that allow only an HTTP proxy
+If outbound traffic must go through an HTTP proxy, the inside agent cannot reach the cloud agent in the current release: peer entries accept `proxy` and `proxy_auth`, but they are not applied when dialing. See [Peers](/configuration/peers).
+:::
 
 ## Rollout checklist
 

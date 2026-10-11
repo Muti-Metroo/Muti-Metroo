@@ -75,13 +75,7 @@ Then check, in order:
 
 ### Through an HTTP proxy
 
-For WebSocket peers that use `proxy`, the proxy must allow `CONNECT` to the peer's host and port. Test the proxy separately:
-
-```bash
-curl -v --proxy http://proxy.corp.example.com:8080 https://relay.example.com/
-```
-
-A `407` response means `proxy_auth` is missing or wrong.
+The current release does not dial peers through an HTTP proxy: `proxy` and `proxy_auth` on a peer entry are accepted but not applied, and the agent connects to the peer address directly. If the network allows outbound traffic only through a proxy, the connection fails. See [Peers](/configuration/peers).
 
 ### Peers that disconnect repeatedly
 

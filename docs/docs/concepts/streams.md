@@ -46,7 +46,7 @@ sequenceDiagram
 
 ## End-to-end encryption
 
-Each stream is encrypted between the ingress and exit agents with a key that only those two agents know. Transit agents relay the encrypted data and cannot read or modify it. This is on top of the TLS that protects every peer connection.
+Each stream is encrypted between the ingress and exit agents with a session key the two agents agree on when the stream opens. Transit agents relay the encrypted data without that key, and a modified frame fails authentication and is rejected. This is on top of the TLS that protects every peer connection. The key exchange itself is not authenticated, so a transit agent under an attacker's control can intercept a session; see [the limits](/security/e2e-encryption#limits-of-the-protection).
 
 ```mermaid
 flowchart LR

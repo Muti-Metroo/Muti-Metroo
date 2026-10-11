@@ -118,7 +118,7 @@ At the ingress, with its system resolver, unless the name matches a domain route
 
 ### How is traffic protected?
 
-Each link between agents uses TLS 1.3. In addition, every stream is encrypted end to end between the ingress and the exit with X25519 key exchange and ChaCha20-Poly1305, so transit agents cannot read the payload. See [End-to-End Encryption](/security/e2e-encryption).
+Each link between agents uses TLS 1.3. In addition, every stream is encrypted end to end between the ingress and the exit with X25519 key exchange and ChaCha20-Poly1305, so transit agents relay the payload without the session keys. The key exchange is not authenticated; see [End-to-End Encryption](/security/e2e-encryption) for what that means for a compromised transit agent.
 
 ### Is mTLS required?
 
