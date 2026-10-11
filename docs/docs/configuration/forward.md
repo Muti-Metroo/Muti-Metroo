@@ -51,7 +51,7 @@ forward:
 
 The endpoint's key is advertised with the agent's routes, on the [`routing.advertise_interval`](/configuration/routing) schedule. It does not require `exit.enabled`. Connections to the target close after [`connections.idle_threshold`](/configuration/connections) without traffic, and count toward [`limits.max_streams_total`](/configuration/limits).
 
-If several agents advertise the same key, listeners use the one with the lowest metric. Path length is not compared, so with equal metrics which endpoint is used is not defined.
+If several agents advertise the same key, listeners use the one with the lowest metric. Path length is not compared; with equal metrics the endpoint advertised by the agent with the lower agent ID is used.
 
 ## Listeners
 

@@ -2362,7 +2362,8 @@ internal/sleep/
 │  the destination IP, Lookup() selects the one with the lowest Metric. On a  │
 │  metric tie, selection falls back to the lowest OriginAgent ID so the       │
 │  result is deterministic across process restarts (Go map iteration order    │
-│  is otherwise randomised).                                                  │
+│  is otherwise randomised). The same OriginAgent tiebreak orders routes      │
+│  from multiple exits advertising the same CIDR with equal metrics.          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

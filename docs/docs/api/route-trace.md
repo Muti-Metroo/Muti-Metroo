@@ -185,7 +185,7 @@ Candidate fields:
 | `hop_count` | Hops to the origin; `0` for routes this agent originates |
 | `last_update` | When the route was last refreshed (UTC) |
 | `winner` | `true` for the selected route; exactly one candidate per address is the winner |
-| `reason` | Why a candidate lost: `shorter prefix`, `higher metric`, or `lost origin tiebreaker`. For two routes to the same network with equal metrics, the trace picks the lower origin agent ID, but a real connection may use either route |
+| `reason` | Why a candidate lost: `shorter prefix`, `higher metric`, or `lost origin tiebreaker`. For two routes to the same network with equal metrics, the route with the lower origin agent ID wins, matching real route selection |
 | `comment` | Route comment, when set |
 
 `domain` fields when `matched` is `true`: `pattern`, `is_wildcard`, `metric`, `origin`, `origin_name`, `next_hop`, `next_hop_name`, and `hop_count`, with the same meanings.

@@ -203,11 +203,16 @@ func (t *DomainTable) AddRoute(route *DomainRoute) bool {
 	return true
 }
 
-// sortRoutesInMap sorts routes for a key by metric (lowest first).
+// sortRoutesInMap sorts routes for a key by metric (lowest first), breaking
+// ties on origin agent ID (lowest first) so equal-metric routes resolve
+// deterministically.
 func (t *DomainTable) sortRoutesInMap(routeMap map[string][]*DomainRoute, key string) {
 	routes := routeMap[key]
 	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].Metric < routes[j].Metric
+		if routes[i].Metric != routes[j].Metric {
+			return routes[i].Metric < routes[j].Metric
+		}
+		return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
 	})
 }
 

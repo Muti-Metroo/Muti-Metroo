@@ -157,7 +157,7 @@ If SOCKS authentication is enabled, configure the same users on every ingress.
 
 ## Pattern 4: Redundant sites
 
-Combine the patterns across regions: each region has its own ingress, transit, and exits, and the regions peer with each other. Route selection does not prefer closer exits, so if both regions' exits advertise the same CIDR with the same metric, either region's exit may be used from anywhere. Have each region's exits advertise that region's own CIDRs, or give one region's exits a higher metric so they act as backups for the whole mesh.
+Combine the patterns across regions: each region has its own ingress, transit, and exits, and the regions peer with each other. Route selection does not prefer closer exits, so if both regions' exits advertise the same CIDR with the same metric, the exit with the lower origin agent ID is used from everywhere, regardless of region. Have each region's exits advertise that region's own CIDRs, or give one region's exits a higher metric so they act as backups for the whole mesh.
 
 ```mermaid
 flowchart TB

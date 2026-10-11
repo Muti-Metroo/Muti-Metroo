@@ -136,11 +136,16 @@ func (t *ForwardTable) AddRoute(route *ForwardRoute) bool {
 	return true
 }
 
-// sortRoutes sorts routes for a key by metric (lowest first).
+// sortRoutes sorts routes for a key by metric (lowest first), breaking
+// ties on origin agent ID (lowest first) so equal-metric routes resolve
+// deterministically.
 func (t *ForwardTable) sortRoutes(key string) {
 	routes := t.routes[key]
 	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].Metric < routes[j].Metric
+		if routes[i].Metric != routes[j].Metric {
+			return routes[i].Metric < routes[j].Metric
+		}
+		return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
 	})
 }
 

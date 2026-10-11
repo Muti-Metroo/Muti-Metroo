@@ -147,11 +147,17 @@ func (t *Table) AddRoute(route *Route) bool {
 	return true
 }
 
-// sortRoutes sorts routes for a key by metric (lowest first).
+// sortRoutes sorts routes for a key by metric (lowest first), breaking
+// ties on origin agent ID (lowest first) so equal-metric routes for the
+// same CIDR resolve deterministically. This matches the winner that route
+// trace reports ("lost origin tiebreaker").
 func (t *Table) sortRoutes(key string) {
 	routes := t.routes[key]
 	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].Metric < routes[j].Metric
+		if routes[i].Metric != routes[j].Metric {
+			return routes[i].Metric < routes[j].Metric
+		}
+		return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
 	})
 }
 
@@ -323,14 +329,18 @@ func (t *Table) LookupAll(ip net.IP) []*Route {
 		matches = append(matches, first.Clone())
 	}
 
-	// Sort by prefix length (longest first), then by metric
+	// Sort by prefix length (longest first), then by metric, then by
+	// origin agent ID so equal-metric matches resolve deterministically.
 	sort.Slice(matches, func(i, j int) bool {
 		onesI, _ := matches[i].Network.Mask.Size()
 		onesJ, _ := matches[j].Network.Mask.Size()
 		if onesI != onesJ {
 			return onesI > onesJ
 		}
-		return matches[i].Metric < matches[j].Metric
+		if matches[i].Metric != matches[j].Metric {
+			return matches[i].Metric < matches[j].Metric
+		}
+		return matches[i].OriginAgent.Compare(matches[j].OriginAgent) < 0
 	})
 
 	return matches

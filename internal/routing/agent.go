@@ -130,11 +130,19 @@ func (t *AgentTable) AddRoute(route *AgentRoute) bool {
 	return true
 }
 
-// sortRoutes sorts routes for an agent by metric (lowest first).
+// sortRoutes sorts routes for an agent by metric (lowest first), breaking
+// ties on origin agent ID and then next hop (lowest first) so equal-metric
+// routes resolve deterministically.
 func (t *AgentTable) sortRoutes(key identity.AgentID) {
 	routes := t.routes[key]
 	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].Metric < routes[j].Metric
+		if routes[i].Metric != routes[j].Metric {
+			return routes[i].Metric < routes[j].Metric
+		}
+		if routes[i].OriginAgent != routes[j].OriginAgent {
+			return routes[i].OriginAgent.Compare(routes[j].OriginAgent) < 0
+		}
+		return routes[i].NextHop.Compare(routes[j].NextHop) < 0
 	})
 }
 
