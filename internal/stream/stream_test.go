@@ -540,6 +540,56 @@ func TestManager_OpenStream_Timeout(t *testing.T) {
 	}
 }
 
+// TestManager_OpenStream_MaxLimitIncludesPending verifies that MaxStreamsTotal
+// is enforced during open bursts: pending opens sit in pendingRequests until
+// their ACK arrives, and must count against the limit alongside established
+// streams.
+func TestManager_OpenStream_MaxLimitIncludesPending(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	remoteID, _ := identity.NewAgentID()
+	cfg := DefaultManagerConfig()
+	cfg.MaxStreamsTotal = 2
+
+	m := NewManager(cfg, localID)
+
+	// Two opens stay pending (no ACK arrives), occupying the whole limit.
+	p1 := m.OpenStream(1, remoteID, "10.0.0.1", 80, time.Minute)
+	m.OpenStream(2, remoteID, "10.0.0.2", 80, time.Minute)
+
+	// The first open has no result yet: it is pending, not established.
+	select {
+	case r := <-p1.ResultCh:
+		t.Fatalf("first open should still be pending, got %+v", r)
+	default:
+	}
+
+	// A third open must be rejected even though no stream is established yet.
+	p3 := m.OpenStream(3, remoteID, "10.0.0.3", 80, time.Minute)
+	select {
+	case r := <-p3.ResultCh:
+		if r.Error == nil {
+			t.Fatal("expected max streams error for open beyond the pending limit")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("open beyond the pending limit should fail immediately")
+	}
+
+	// Once a pending open resolves and its stream goes away, a new open fits
+	// under the limit again.
+	var remoteEphemeral [crypto.KeySize]byte
+	if _, err := m.HandleStreamOpenAck(remoteID, p1.RequestID, nil, 0, remoteEphemeral); err != nil {
+		t.Fatalf("HandleStreamOpenAck() error = %v", err)
+	}
+	m.RemoveStream(remoteID, 1)
+
+	p4 := m.OpenStream(4, remoteID, "10.0.0.4", 80, time.Minute)
+	select {
+	case r := <-p4.ResultCh:
+		t.Fatalf("open after resolving a pending one should be pending again, got %+v", r)
+	default:
+	}
+}
+
 func TestManager_OpenStream_Success(t *testing.T) {
 	localID, _ := identity.NewAgentID()
 	remoteID, _ := identity.NewAgentID()

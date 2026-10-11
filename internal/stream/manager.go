@@ -410,8 +410,10 @@ func (m *Manager) OpenStream(streamID uint64, remoteID identity.AgentID, destAdd
 	stream.DestPort = destPort
 
 	m.mu.Lock()
-	// Check limits
-	if len(m.streams) >= m.cfg.MaxStreamsTotal {
+	// Check limits. Pending opens count too: a stream only enters m.streams
+	// when its ACK arrives, so a burst of concurrent opens would otherwise
+	// exceed the limit while waiting in pendingRequests.
+	if len(m.streams)+len(m.pendingRequests) >= m.cfg.MaxStreamsTotal {
 		m.mu.Unlock()
 		resultCh <- &StreamOpenResult{Error: fmt.Errorf("max streams limit reached")}
 		return &OpenStreamPending{ResultCh: resultCh, RequestID: requestID}
