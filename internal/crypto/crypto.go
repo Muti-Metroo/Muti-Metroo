@@ -84,12 +84,13 @@ func ComputeECDH(privateKey, remotePublicKey [KeySize]byte) ([KeySize]byte, erro
 		return sharedSecret, fmt.Errorf("invalid remote public key: zero key")
 	}
 
-	curve25519.ScalarMult(&sharedSecret, &privateKey, &remotePublicKey)
-
-	// Check for low-order result (shared secret should not be all zeros)
-	if sharedSecret == zeroKey {
-		return sharedSecret, fmt.Errorf("invalid ECDH result: low-order point")
+	// X25519 (unlike raw ScalarMult) rejects low-order points with an error
+	// instead of silently returning an all-zero shared secret.
+	secret, err := curve25519.X25519(privateKey[:], remotePublicKey[:])
+	if err != nil {
+		return sharedSecret, fmt.Errorf("invalid ECDH result: %w", err)
 	}
+	copy(sharedSecret[:], secret)
 
 	return sharedSecret, nil
 }

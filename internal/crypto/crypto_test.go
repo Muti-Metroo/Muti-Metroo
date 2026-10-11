@@ -86,6 +86,21 @@ func TestComputeECDH_ZeroKey(t *testing.T) {
 	}
 }
 
+func TestComputeECDH_LowOrderPoint(t *testing.T) {
+	priv, _, err := GenerateEphemeralKeypair()
+	if err != nil {
+		t.Fatalf("GenerateEphemeralKeypair() error = %v", err)
+	}
+
+	// 01 00 ... 00 is a known low-order point: X25519 with it yields an
+	// all-zero shared secret, which must be rejected, not accepted.
+	var lowOrder [KeySize]byte
+	lowOrder[0] = 1
+	if _, err = ComputeECDH(priv, lowOrder); err == nil {
+		t.Error("ComputeECDH with low-order public key should fail")
+	}
+}
+
 func TestDeriveSessionKey(t *testing.T) {
 	privA, pubA, _ := GenerateEphemeralKeypair()
 	privB, pubB, _ := GenerateEphemeralKeypair()
