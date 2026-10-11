@@ -2,9 +2,9 @@
 # Regenerate every documentation screenshot from a throwaway fixture mesh.
 #
 # What it does, end to end:
-#   1. Builds a Linux muti-metroo binary from this checkout and
-#      muti-metroo-manager from a sibling checkout (MANAGER_REPO, default
-#      ../Muti-Metroo-Manager next to this repository).
+#   1. Builds a Linux muti-metroo binary from this repository's committed
+#      HEAD (uncommitted changes are ignored) and downloads the latest
+#      Muti Metroo Manager release binary for this host.
 #   2. Starts a four-agent fixture mesh in Docker containers with fixed
 #      agent IDs, display names, hostnames, and IP addresses:
 #
@@ -34,7 +34,7 @@
 #   docs/scripts/capture-screenshots.sh
 #
 # Environment:
-#   MANAGER_REPO   path to a Muti-Metroo-Manager checkout
+#   MANAGER_BIN    use this Manager binary instead of the latest release
 #   PORT_BASE      first port of the host port block (default 27100)
 #   KEEP_RUNNING=1 leave the mesh and Manager up after capturing
 #   HEADED=1       show the browser while capturing
@@ -43,7 +43,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-MANAGER_REPO="${MANAGER_REPO:-$REPO_ROOT/../Muti-Metroo-Manager}"
 PORT_BASE="${PORT_BASE:-27100}"
 CACHE_DIR="$SCRIPT_DIR/.cache"
 IMAGE="mm-docs-shots-agent:1"
@@ -130,24 +129,39 @@ docker network rm "$NETWORK" >/dev/null 2>&1 || true
 # --- Build -------------------------------------------------------------------
 
 DOCKER_ARCH="$(docker version --format '{{.Server.Arch}}')"
-log "Building muti-metroo (linux/$DOCKER_ARCH and host)"
-mkdir -p "$WORK/bin"
-# Stamp the latest release version so the UI shows what readers run, not a
-# dev build string.
-VERSION="$(cd "$REPO_ROOT" && git describe --tags --abbrev=0 --match 'muti-metroo-v*' | sed 's/^muti-metroo-v//')"
+# Build from committed HEAD, not the working tree, so uncommitted work in
+# progress never shows up in the screenshots. Stamp the latest release
+# version so the UI shows what readers run, not a dev build string.
+log "Building muti-metroo from HEAD (linux/$DOCKER_ARCH and host)"
+mkdir -p "$WORK/bin" "$WORK/src"
+git -C "$REPO_ROOT" archive HEAD | tar -x -C "$WORK/src"
+VERSION="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 --match 'muti-metroo-v*' | sed 's/^muti-metroo-v//')"
 LDFLAGS="-s -w -X main.Version=$VERSION"
-(cd "$REPO_ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$DOCKER_ARCH" \
+(cd "$WORK/src" && CGO_ENABLED=0 GOOS=linux GOARCH="$DOCKER_ARCH" \
   go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/bin/muti-metroo-linux" ./cmd/muti-metroo)
 MM="$WORK/bin/muti-metroo"
-(cd "$REPO_ROOT" && go build -ldflags "$LDFLAGS" -o "$MM" ./cmd/muti-metroo)
+(cd "$WORK/src" && go build -trimpath -ldflags "$LDFLAGS" -o "$MM" ./cmd/muti-metroo)
 
-log "Building muti-metroo-manager from $MANAGER_REPO"
-if [ ! -d "$MANAGER_REPO" ]; then
-  echo "Manager checkout not found at $MANAGER_REPO (set MANAGER_REPO)." >&2
-  exit 1
+# Muti Metroo Manager: the latest release binary for this host, cached by
+# tag. MANAGER_BIN points at another build instead (for example to capture
+# an unreleased Manager on purpose).
+if [ -n "${MANAGER_BIN:-}" ]; then
+  MANAGER="$MANAGER_BIN"
+else
+  case "$(uname -s)" in Darwin) host_os=darwin ;; Linux) host_os=linux ;; *) echo "Unsupported host OS" >&2; exit 1 ;; esac
+  case "$(uname -m)" in arm64|aarch64) host_arch=arm64 ;; x86_64|amd64) host_arch=amd64 ;; *) echo "Unsupported host arch" >&2; exit 1 ;; esac
+  mgr_tag="$(gh release view --repo postalsys/Muti-Metroo-Manager --json tagName --jq .tagName)"
+  MANAGER="$CACHE_DIR/$mgr_tag/metroo-manager-$host_os-$host_arch"
+  if [ ! -x "$MANAGER" ]; then
+    log "Downloading Muti Metroo Manager $mgr_tag"
+    mkdir -p "$CACHE_DIR/$mgr_tag"
+    gh release download "$mgr_tag" --repo postalsys/Muti-Metroo-Manager --dir "$CACHE_DIR/$mgr_tag" \
+      --pattern "metroo-manager-$host_os-$host_arch" --clobber
+    chmod +x "$MANAGER"
+    xattr -d com.apple.quarantine "$MANAGER" 2>/dev/null || true
+  fi
 fi
-(cd "$MANAGER_REPO" && make build >/dev/null 2>&1)
-MANAGER="$MANAGER_REPO/build/muti-metroo-manager"
+log "Using Muti Metroo Manager: $("$MANAGER" version 2>/dev/null | head -1)"
 
 if [ ! -d "$SCRIPT_DIR/node_modules/playwright" ]; then
   log "Installing Playwright"

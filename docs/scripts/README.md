@@ -19,9 +19,10 @@ Chromium are installed on the first run.
 
 The script is self-contained:
 
-1. Builds a Linux `muti-metroo` from this checkout, stamped with the latest
-   release version, and `muti-metroo-manager` from a sibling checkout
-   (`MANAGER_REPO`, default `../Muti-Metroo-Manager`).
+1. Builds a Linux `muti-metroo` from this repository's committed `HEAD`
+   (uncommitted changes are ignored), stamped with the latest release
+   version, and downloads the latest Muti Metroo Manager release binary for
+   the host, cached in `docs/scripts/.cache/` by tag.
 2. Starts a four-agent fixture mesh in Docker containers on a private
    network (`10.99.0.0/24`), with fixed agent IDs, display names, hostnames,
    and addresses:
@@ -79,14 +80,14 @@ required; the run fails if one is skipped.
 
 | Variable         | Default                   | Effect                                         |
 | ---------------- | ------------------------- | ---------------------------------------------- |
-| `MANAGER_REPO`   | `../Muti-Metroo-Manager`  | Manager checkout to build                      |
+| `MANAGER_BIN`    | latest release            | Manager binary to use instead of the release   |
 | `PORT_BASE`      | `27100`                   | Host ports used: `PORT_BASE+20` (agent API), `PORT_BASE+30` (Manager) |
 | `KEEP_RUNNING=1` | unset                     | Leave the mesh and Manager running afterwards  |
 | `HEADED=1`       | unset                     | Show the browser while capturing               |
 
 ## Determinism
 
-Two consecutive runs write byte-identical files. What makes that hold:
+Every run writes byte-identical files, with no tolerance applied. What makes that hold:
 
 - **Fixed fixture.** Agent IDs, names, hostnames, IP addresses, link delays,
   file timestamps, and the bundle timestamp never change. Key pairs are
@@ -108,11 +109,12 @@ Two consecutive runs write byte-identical files. What makes that hold:
 - **Settled rendering.** Every shot opens in a fresh page, tabs are opened
   by URL, and a shot is taken only after three consecutive screenshots 1.2 s
   apart are identical.
-- **Noise guard.** Chromium can still rasterize a few anti-aliased edge
-  pixels a few color levels apart. When a new capture differs from the file
-  on disk only by such noise (at most 200 pixels differ, none by more than 16
-  levels in any channel), the file is left untouched. Any real change, even
-  a subtle color shift across a component, exceeds that and replaces it.
+- **Fixed inputs.** The agent is built from committed `HEAD` and the
+  Manager is the latest release binary, so work in progress in either
+  repository never changes a shot.
+- **Full-tile rasterization.** Chromium runs with partial raster disabled,
+  so anti-aliased edges (rounded corners, dialog borders) are drawn the same
+  way on every run.
 
 To capture only some shots, set `ONLY` to a comma-separated list of names,
 for example `ONLY=07-routes-table,08-port-forwarding`. It needs a running

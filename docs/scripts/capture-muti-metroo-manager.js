@@ -97,6 +97,11 @@ async function main() {
       // One raster thread: tiles rasterize in a fixed order, so
       // anti-aliased edges come out identical.
       "--num-raster-threads=1",
+      // Re-rasterize whole tiles instead of only their invalidated part.
+      // Partial raster leaves anti-aliased edges (rounded corners, dialog
+      // borders) in one of two states depending on what was redrawn last.
+      "--disable-partial-raster",
+      "--disable-zero-copy",
     ],
   });
   const context = await browser.newContext({
@@ -228,63 +233,12 @@ async function main() {
     instrumentScreenshot(page);
   }
 
-  // Let the page settle before every shot: web fonts loaded, two frames
-  // painted, and a short pause for late layout (table rows, sticky
-  // headers). Without it a shot can land between layout passes and differ
-  // in a few anti-aliased pixels from the previous run.
   // Wait for the rendering to settle before writing a shot. Chromium
   // re-rasterizes anti-aliased edges (map stations, rounded table frames)
   // a second or two after the page loads or the layout changes, and the
   // timing varies, so a fixed delay cannot guarantee the same pixels. Take
   // screenshots until three in a row are byte-identical, then write that
   // one.
-  // Even with all of the above, Chromium occasionally rasterizes a few
-  // anti-aliased edge pixels a few color levels apart between runs. When
-  // the new capture differs from the existing file only by such noise (same
-  // size, at most 200 pixels differ, none by more than 16 levels in any
-  // channel), keep the existing file, so
-  // re-running the script leaves unchanged shots byte-identical. Any real
-  // visual change is far above this threshold and replaces the file.
-  async function onlyRasterNoise(existingPath, fresh) {
-    let existing;
-    try {
-      existing = await fs.readFile(existingPath);
-    } catch {
-      return false;
-    }
-    if (existing.equals(fresh)) return true;
-    const probe = await context.newPage();
-    try {
-      return await probe.evaluate(
-        async ([a, b]) => {
-          const load = async (b64) =>
-            createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
-          const [ia, ib] = await Promise.all([load(a), load(b)]);
-          if (ia.width !== ib.width || ia.height !== ib.height) return false;
-          const pixels = (img) => {
-            const canvas = new OffscreenCanvas(img.width, img.height);
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0);
-            return ctx.getImageData(0, 0, img.width, img.height).data;
-          };
-          const pa = pixels(ia);
-          const pb = pixels(ib);
-          let differing = 0;
-          for (let i = 0; i < pa.length; i += 4) {
-            let delta = 0;
-            for (let c = 0; c < 4; c++) delta = Math.max(delta, Math.abs(pa[i + c] - pb[i + c]));
-            if (delta > 16) return false;
-            if (delta > 0 && ++differing > 200) return false;
-          }
-          return true;
-        },
-        [existing.toString("base64"), fresh.toString("base64")],
-      );
-    } finally {
-      await probe.close();
-    }
-  }
-
   function instrumentScreenshot(p) {
     const rawScreenshot = p.screenshot.bind(p);
     p.screenshot = async (options = {}) => {
@@ -299,16 +253,7 @@ async function main() {
         previous = current;
       }
       if (stable < 3) throw new Error("rendering did not settle");
-      if (outPath) {
-        const existing = await fs.readFile(outPath).catch(() => null);
-        if (existing && existing.equals(previous)) {
-          // Identical to the file on disk.
-        } else if (existing && (await onlyRasterNoise(outPath, previous))) {
-          console.log(`  kept ${path.basename(outPath)}: new capture differs only by anti-aliasing noise`);
-        } else {
-          await fs.writeFile(outPath, previous);
-        }
-      }
+      if (outPath) await fs.writeFile(outPath, previous);
       return previous;
     };
   }
