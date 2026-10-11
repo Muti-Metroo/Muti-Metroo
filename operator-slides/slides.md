@@ -4,7 +4,7 @@ theme: default
 size: 16:9
 paginate: true
 title: Muti Metroo for Operators
-author: Postal Systems OÜ
+author: Team Muti Metroo
 description: Quick-start slides for new operators
 style: |
   section {

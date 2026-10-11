@@ -226,7 +226,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Postal Systems OÜ. All rights reserved.`,
+      copyright: `Copyright ${new Date().getFullYear()} Team Muti Metroo`,
     },
     prism: {
       theme: prismThemes.github,

@@ -8,7 +8,7 @@ sidebar_position: 100
 
 **Last Updated: January 2026**
 
-These Terms of Service ("Terms") govern your download and use of pre-built Muti Metroo binaries ("Binaries") provided by Postal Systems OÜ ("Company", "we", "us", or "our").
+These Terms of Service ("Terms") govern your download and use of pre-built Muti Metroo binaries ("Binaries") provided by Team Muti Metroo ("we", "us", or "our").
 
 :::info Source Code License
 The Muti Metroo source code is available under the [MIT License](https://github.com/postalsys/Muti-Metroo/blob/master/LICENSE). These Terms do not apply to the source code; you may use, modify, and distribute the source code according to the MIT License terms.
@@ -71,7 +71,7 @@ We do not warrant that the Binaries will meet your requirements, operate without
 
 ## 6. Limitation of Liability
 
-**TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, Postal Systems OÜ AND ITS OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, AND AFFILIATES SHALL NOT BE LIABLE FOR:**
+**TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, TEAM MUTI METROO AND ITS MEMBERS, CONTRIBUTORS, AGENTS, AND AFFILIATES SHALL NOT BE LIABLE FOR:**
 
 - Any indirect, incidental, special, consequential, or punitive damages
 - Any loss of profits, data, use, goodwill, or other intangible losses
@@ -85,7 +85,7 @@ In jurisdictions that do not allow the exclusion or limitation of liability for 
 
 ## 7. Indemnification
 
-You agree to indemnify, defend, and hold harmless Postal Systems OÜ and its officers, directors, employees, agents, and affiliates from and against any and all claims, damages, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to:
+You agree to indemnify, defend, and hold harmless Team Muti Metroo and its members, contributors, agents, and affiliates from and against any and all claims, damages, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to:
 
 - Your use or misuse of the Binaries
 - Your violation of these Terms
@@ -108,8 +108,7 @@ If any provision of these Terms is found to be unenforceable or invalid, that pr
 
 For questions about these Terms of Service, please contact:
 
-**Postal Systems OÜ** \
-Russia \
+**Team Muti Metroo** \
 Email: info@muti-metroo.com
 
 ---

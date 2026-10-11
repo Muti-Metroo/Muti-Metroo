@@ -234,7 +234,7 @@ for (const file of pages(docsDir).sort()) {
 
   const fm = text.match(/^---\n([\s\S]*?)\n---/);
   if (!fm || !/^title:/m.test(fm[1]) || !/^description:/m.test(fm[1])) problems.push("frontmatter needs title and description");
-  if (/[^\x00-\x7F]/.test(text.replace(/OÜ/g, ""))) problems.push("non-ASCII characters");
+  if (/[^\x00-\x7F]/.test(text)) problems.push("non-ASCII characters");
   let inCode = false;
   for (const line of text.split("\n")) {
     if (line.startsWith("```")) inCode = !inCode;
