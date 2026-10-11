@@ -313,6 +313,27 @@ func (a *Agent) handleICMPOpenErr(peerID identity.AgentID, frame *protocol.Frame
 	wsSession.closePendingOpenWS(fmt.Errorf("ICMP open failed: %s (code %d)", errMsg.Message, errMsg.ErrorCode))
 }
 
+// failICMPRelay handles a failed echo relay forward: the relay entry is
+// removed and both ends receive an ICMP_CLOSE so neither session keeps
+// sending into a dead entry until the idle timeout reaps it.
+func (a *Agent) failICMPRelay(relay *relayEntry, cause error) {
+	a.icmpRelay.Delete(relay)
+	a.logger.Debug("icmp relay forward failed, closing session both ways",
+		"upstream_peer", relay.UpstreamPeer.ShortString(),
+		logging.KeyStreamID, relay.UpstreamID,
+		"downstream_peer", relay.DownstreamPeer.ShortString(),
+		"downstream_stream_id", relay.DownstreamID,
+		logging.KeyError, cause)
+	a.peerMgr.SendToPeer(relay.UpstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameICMPClose,
+		StreamID: relay.UpstreamID,
+	})
+	a.peerMgr.SendToPeer(relay.DownstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameICMPClose,
+		StreamID: relay.DownstreamID,
+	})
+}
+
 // handleICMPEcho processes an ICMP_ECHO frame.
 func (a *Agent) handleICMPEcho(peerID identity.AgentID, frame *protocol.Frame) {
 	// Check if this is for our ICMP handler (exit node receiving from mesh)
@@ -431,7 +452,9 @@ func (a *Agent) handleICMPEcho(peerID identity.AgentID, frame *protocol.Frame) {
 			StreamID: relayUp.DownstreamID,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(relayUp.DownstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(relayUp.DownstreamPeer, fwdFrame); err != nil {
+			a.failICMPRelay(relayUp, err)
+		}
 		return
 	}
 
@@ -442,7 +465,9 @@ func (a *Agent) handleICMPEcho(peerID identity.AgentID, frame *protocol.Frame) {
 			StreamID: relayDown.UpstreamID,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(relayDown.UpstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(relayDown.UpstreamPeer, fwdFrame); err != nil {
+			a.failICMPRelay(relayDown, err)
+		}
 	}
 }
 

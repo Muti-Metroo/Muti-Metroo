@@ -4027,6 +4027,32 @@ func (a *Agent) handleStreamOpenErr(peerID identity.AgentID, frame *protocol.Fra
 	a.streamMgr.HandleStreamOpenErr(peerID, errPayload.RequestID, errPayload.ErrorCode, errPayload.Message)
 }
 
+// failTCPRelay handles a failed relay forward: the relay entry is removed and
+// both ends receive a STREAM_RESET so neither endpoint keeps writing into a
+// hole. Without this the surviving frames would still decrypt (the E2E
+// high-water mark tolerates gaps) and the proxied byte stream would lose a
+// chunk with nothing downstream able to detect it.
+func (a *Agent) failTCPRelay(relay *relayEntry, cause error) {
+	a.tcpRelay.Delete(relay)
+	a.logger.Debug("relay forward failed, resetting stream both ways",
+		"upstream_peer", relay.UpstreamPeer.ShortString(),
+		logging.KeyStreamID, relay.UpstreamID,
+		"downstream_peer", relay.DownstreamPeer.ShortString(),
+		"downstream_stream_id", relay.DownstreamID,
+		logging.KeyError, cause)
+	payload := (&protocol.StreamReset{ErrorCode: protocol.ErrWriteFailed}).Encode()
+	a.peerMgr.SendToPeer(relay.UpstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameStreamReset,
+		StreamID: relay.UpstreamID,
+		Payload:  payload,
+	})
+	a.peerMgr.SendToPeer(relay.DownstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameStreamReset,
+		StreamID: relay.DownstreamID,
+		Payload:  payload,
+	})
+}
+
 // handleStreamData processes stream data.
 func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame) {
 	// Check if this is a relay stream - could be from upstream or downstream.
@@ -4045,7 +4071,9 @@ func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame)
 			Flags:    frame.Flags,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(upRelay.DownstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(upRelay.DownstreamPeer, fwdFrame); err != nil {
+			a.failTCPRelay(upRelay, err)
+		}
 		return
 	}
 
@@ -4058,7 +4086,9 @@ func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame)
 			Flags:    frame.Flags,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(downRelay.UpstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(downRelay.UpstreamPeer, fwdFrame); err != nil {
+			a.failTCPRelay(downRelay, err)
+		}
 		return
 	}
 
@@ -4118,7 +4148,15 @@ func (a *Agent) handleStreamClose(peerID identity.AgentID, frame *protocol.Frame
 			// full close by the time it reaches the far end.
 			Flags: frame.Flags,
 		}
-		a.peerMgr.SendToPeer(dstPeer, fwdFrame)
+		// The entry is already popped and the originator has closed its side;
+		// if the forward fails the far end is unreachable and will time out on
+		// its own. Log so the dropped close is at least visible.
+		if err := a.peerMgr.SendToPeer(dstPeer, fwdFrame); err != nil {
+			a.logger.Debug("failed to forward stream close",
+				logging.KeyPeerID, dstPeer.ShortString(),
+				logging.KeyStreamID, dstID,
+				logging.KeyError, err)
+		}
 		return
 	}
 
@@ -4174,7 +4212,15 @@ func (a *Agent) handleStreamReset(peerID identity.AgentID, frame *protocol.Frame
 			StreamID: dstID,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(dstPeer, fwdFrame)
+		// Same shape as the close forward above: the entry is already popped
+		// and the originator has torn down its side, so a failed forward only
+		// needs to be visible in the logs.
+		if err := a.peerMgr.SendToPeer(dstPeer, fwdFrame); err != nil {
+			a.logger.Debug("failed to forward stream reset",
+				logging.KeyPeerID, dstPeer.ShortString(),
+				logging.KeyStreamID, dstID,
+				logging.KeyError, err)
+		}
 		return
 	}
 
@@ -5490,7 +5536,7 @@ func (c *meshConn) Read(b []byte) (int, error) {
 		return 0, fmt.Errorf("no session key for stream %d", c.streamID)
 	}
 
-	plaintext, err := sessionKey.Decrypt(data)
+	plaintext, err := sessionKey.DecryptStrict(data)
 	if err != nil {
 		return 0, fmt.Errorf("decrypt: %w", err)
 	}
@@ -6291,7 +6337,7 @@ func (a *Agent) handleFileTransferStreamData(peerID identity.AgentID, streamID u
 		return
 	}
 
-	plaintext, err := sessionKey.Decrypt(data)
+	plaintext, err := sessionKey.DecryptStrict(data)
 	if err != nil {
 		a.logger.Error("failed to decrypt file transfer data",
 			logging.KeyStreamID, streamID,
@@ -6816,7 +6862,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 		responseData, readErr := s.ReadWithTimeout(200 * time.Millisecond)
 		if readErr == nil && len(responseData) > 0 {
 			// Got response data - check if it's an error
-			decryptedResponse, decErr := sessionKey.Decrypt(responseData)
+			decryptedResponse, decErr := sessionKey.DecryptStrict(responseData)
 			if decErr == nil {
 				responseMeta, parseErr := filetransfer.ParseMetadata(decryptedResponse)
 				if parseErr == nil && responseMeta.Error != "" {
@@ -6934,7 +6980,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 			if readErr != nil || len(respData) == 0 {
 				break
 			}
-			decrypted, decErr := sessionKey.Decrypt(respData)
+			decrypted, decErr := sessionKey.DecryptStrict(respData)
 			if decErr != nil {
 				continue
 			}
@@ -7066,7 +7112,7 @@ func (a *Agent) DownloadFile(ctx context.Context, targetID identity.AgentID, rem
 		return fmt.Errorf("read response metadata: %w", err)
 	}
 
-	decryptedResponse, err := sessionKey.Decrypt(responseData)
+	decryptedResponse, err := sessionKey.DecryptStrict(responseData)
 	if err != nil {
 		return fmt.Errorf("decrypt response metadata: %w", err)
 	}
@@ -7231,7 +7277,7 @@ func (a *Agent) DownloadFileStream(ctx context.Context, targetID identity.AgentI
 		return nil, fmt.Errorf("read response metadata: %w", err)
 	}
 
-	decryptedResponse, err := sessionKey.Decrypt(responseData)
+	decryptedResponse, err := sessionKey.DecryptStrict(responseData)
 	if err != nil {
 		a.WriteStreamClose(nextHop, streamID)
 		return nil, fmt.Errorf("decrypt response metadata: %w", err)
@@ -7324,7 +7370,7 @@ func (r *streamReader) Read(p []byte) (int, error) {
 
 	// Decrypt data using E2E session key
 	if r.sessionKey != nil {
-		plaintext, decErr := r.sessionKey.Decrypt(data)
+		plaintext, decErr := r.sessionKey.DecryptStrict(data)
 		if decErr != nil {
 			return 0, fmt.Errorf("decrypt stream data: %w", decErr)
 		}
@@ -7355,7 +7401,7 @@ func (r *streamReader) Read(p []byte) (int, error) {
 				}
 				// Decrypt chunk using E2E session key
 				if r.sessionKey != nil {
-					plaintext, decErr := r.sessionKey.Decrypt(chunk)
+					plaintext, decErr := r.sessionKey.DecryptStrict(chunk)
 					if decErr != nil {
 						pw.CloseWithError(fmt.Errorf("decrypt stream chunk: %w", decErr))
 						return
@@ -7526,7 +7572,7 @@ func (a *Agent) receiveEncryptedStreamData(ctx context.Context, s *stream.Stream
 				for {
 					select {
 					case remaining := <-s.ReadBuffer():
-						plaintext, decErr := sessionKey.Decrypt(remaining)
+						plaintext, decErr := sessionKey.DecryptStrict(remaining)
 						if decErr != nil {
 							return &dataBuf, totalReceived, fmt.Errorf("decrypt remaining data: %w", decErr)
 						}
@@ -7544,7 +7590,7 @@ func (a *Agent) receiveEncryptedStreamData(ctx context.Context, s *stream.Stream
 			continue
 		}
 
-		plaintext, decErr := sessionKey.Decrypt(data)
+		plaintext, decErr := sessionKey.DecryptStrict(data)
 		if decErr != nil {
 			return &dataBuf, totalReceived, fmt.Errorf("decrypt data: %w", decErr)
 		}
@@ -7851,7 +7897,7 @@ func (a *Agent) handleShellClientData(peerID identity.AgentID, streamID uint64, 
 		return false
 	}
 
-	plaintext, err := sessionKey.Decrypt(data)
+	plaintext, err := sessionKey.DecryptStrict(data)
 	if err != nil {
 		a.logger.Error("handleShellClientData: decryption failed",
 			logging.KeyStreamID, streamID,

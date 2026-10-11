@@ -784,3 +784,103 @@ func TestDeriveSessionKey_DifferentPublicKeyOrder(t *testing.T) {
 		t.Error("Different public key order should produce different session keys")
 	}
 }
+
+// ============================================================================
+// Strict (ordered-lane) decrypt tests
+// ============================================================================
+
+// strictTestKeys returns an initiator/responder SessionKey pair for one
+// stream, mirroring the derivation the other tests use.
+func strictTestKeys(t *testing.T, streamID uint64) (skA, skB *SessionKey) {
+	t.Helper()
+	privA, pubA, _ := GenerateEphemeralKeypair()
+	privB, pubB, _ := GenerateEphemeralKeypair()
+	secretA, _ := ComputeECDH(privA, pubB)
+	secretB, _ := ComputeECDH(privB, pubA)
+	return DeriveSessionKey(secretA, streamID, pubA, pubB, true),
+		DeriveSessionKey(secretB, streamID, pubA, pubB, false)
+}
+
+func TestDecryptStrict_InOrder(t *testing.T) {
+	skA, skB := strictTestKeys(t, 901)
+
+	for i := 0; i < 5; i++ {
+		msg := []byte(fmt.Sprintf("chunk-%d", i))
+		enc, err := skA.Encrypt(msg)
+		if err != nil {
+			t.Fatalf("Encrypt() error = %v", err)
+		}
+		dec, err := skB.DecryptStrict(enc)
+		if err != nil {
+			t.Fatalf("DecryptStrict(chunk %d) error = %v", i, err)
+		}
+		if !bytes.Equal(dec, msg) {
+			t.Errorf("chunk %d: got %q, want %q", i, dec, msg)
+		}
+	}
+}
+
+func TestDecryptStrict_RejectsGap(t *testing.T) {
+	skA, skB := strictTestKeys(t, 902)
+
+	enc0, _ := skA.Encrypt([]byte("chunk-0"))
+	enc1, _ := skA.Encrypt([]byte("chunk-1"))
+	enc2, _ := skA.Encrypt([]byte("chunk-2"))
+
+	if _, err := skB.DecryptStrict(enc0); err != nil {
+		t.Fatalf("DecryptStrict(enc0) error = %v", err)
+	}
+
+	// A dropped frame (enc1) must not be skippable: enc2 carries nonce 2 while
+	// the next expected counter is 1.
+	if _, err := skB.DecryptStrict(enc2); err == nil {
+		t.Fatal("DecryptStrict(enc2) should reject the nonce gap left by enc1")
+	}
+
+	// The failed decrypt must not have advanced the counter: the missing
+	// frame itself still decrypts.
+	dec, err := skB.DecryptStrict(enc1)
+	if err != nil {
+		t.Fatalf("DecryptStrict(enc1) after gap rejection error = %v", err)
+	}
+	if !bytes.Equal(dec, []byte("chunk-1")) {
+		t.Errorf("got %q, want %q", dec, "chunk-1")
+	}
+	if _, err := skB.DecryptStrict(enc2); err != nil {
+		t.Fatalf("DecryptStrict(enc2) after catching up error = %v", err)
+	}
+}
+
+func TestDecryptStrict_RejectsReplay(t *testing.T) {
+	skA, skB := strictTestKeys(t, 903)
+
+	enc0, _ := skA.Encrypt([]byte("chunk-0"))
+	if _, err := skB.DecryptStrict(enc0); err != nil {
+		t.Fatalf("DecryptStrict(enc0) error = %v", err)
+	}
+	if _, err := skB.DecryptStrict(enc0); err == nil {
+		t.Error("DecryptStrict should reject a replayed frame")
+	}
+}
+
+// TestDecrypt_GapStillTolerant pins the unordered-lane contract: Decrypt (the
+// UDP/ICMP fast lane) keeps accepting nonces above the high-water mark.
+func TestDecrypt_GapStillTolerant(t *testing.T) {
+	skA, skB := strictTestKeys(t, 904)
+
+	enc0, _ := skA.Encrypt([]byte("dgram-0"))
+	_, _ = skA.Encrypt([]byte("dgram-1")) // "lost"
+	enc2, _ := skA.Encrypt([]byte("dgram-2"))
+
+	if _, err := skB.Decrypt(enc0); err != nil {
+		t.Fatalf("Decrypt(enc0) error = %v", err)
+	}
+	// The gap left by the lost datagram is tolerated on the unordered lane.
+	if _, err := skB.Decrypt(enc2); err != nil {
+		t.Fatalf("Decrypt(enc2) should tolerate the gap, got %v", err)
+	}
+	// But old nonces are still rejected.
+	if _, err := skB.Decrypt(enc0); err == nil {
+		t.Error("Decrypt should reject a replay below the high-water mark")
+	}
+}

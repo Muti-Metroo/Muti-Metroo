@@ -422,7 +422,7 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 			return fmt.Errorf("no session key for stream %d", streamID)
 		}
 
-		plaintext, err := ac.sessionKey.Decrypt(data)
+		plaintext, err := ac.sessionKey.DecryptStrict(data)
 		if err != nil {
 			h.closeConnection(peerID, streamID, err)
 			return fmt.Errorf("decrypt: %w", err)

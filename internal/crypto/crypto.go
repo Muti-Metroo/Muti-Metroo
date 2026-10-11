@@ -160,7 +160,27 @@ func (s *SessionKey) Encrypt(plaintext []byte) ([]byte, error) {
 // Decrypt decrypts ciphertext that was encrypted with Encrypt.
 // The ciphertext must include the prepended nonce.
 // Returns an error if the ciphertext is too short or authentication fails.
+//
+// The anti-replay check is gap-tolerant: any nonce at or above the high-water
+// mark advances it. That suits the unordered fast lanes (UDP datagrams, ICMP
+// echoes), where reorder and loss are expected. Ordered-lane (stream) traffic
+// must use DecryptStrict instead.
 func (s *SessionKey) Decrypt(ciphertext []byte) ([]byte, error) {
+	return s.decrypt(ciphertext, false)
+}
+
+// DecryptStrict is Decrypt for ordered-lane (stream) traffic: the nonce
+// counter must be exactly the next expected value. A gap on an ordered lane
+// means a relay dropped a frame, and accepting it would deliver a byte stream
+// with an undetectable hole. A rejected frame does not advance the counter,
+// so a single failure wedges the stream -- callers treat a strict decrypt
+// error as fatal for the stream, which is the intent: after a gap the stream
+// is unrecoverable anyway.
+func (s *SessionKey) DecryptStrict(ciphertext []byte) ([]byte, error) {
+	return s.decrypt(ciphertext, true)
+}
+
+func (s *SessionKey) decrypt(ciphertext []byte, strict bool) ([]byte, error) {
 	if len(ciphertext) < EncryptionOverhead {
 		return nil, fmt.Errorf("ciphertext too short: %d bytes", len(ciphertext))
 	}
@@ -189,13 +209,21 @@ func (s *SessionKey) Decrypt(ciphertext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("nonce direction mismatch: got %08x, expected %08x", gotDirection, wantDirection)
 	}
 
-	// Anti-replay high-water mark. Note this is strict: anything below the
-	// mark is dropped, so reordered datagrams on the UDP and ICMP lanes are
-	// discarded rather than buffered.
+	// Anti-replay high-water mark. In gap-tolerant mode anything at or above
+	// the mark is accepted and moves the mark (anything below is dropped, so
+	// reordered datagrams on the UDP and ICMP lanes are discarded rather than
+	// buffered). In strict mode (ordered stream lane) the counter must be
+	// exactly the next expected value: a gap is stream corruption, not
+	// reorder.
 	// expectedNonce carries s.recvNonce in its counter half, so compare
 	// against s.recvNonce directly rather than decoding it back out.
 	nonceValue := binary.BigEndian.Uint64(nonce[4:])
-	if nonceValue < s.recvNonce {
+	if strict {
+		if nonceValue != s.recvNonce {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("nonce gap on ordered lane: received %d, expected %d", nonceValue, s.recvNonce)
+		}
+	} else if nonceValue < s.recvNonce {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("nonce too old: received %d, expected >= %d", nonceValue, s.recvNonce)
 	}

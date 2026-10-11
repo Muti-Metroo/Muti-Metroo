@@ -628,6 +628,27 @@ func (a *Agent) handleUDPOpenErr(peerID identity.AgentID, frame *protocol.Frame)
 	a.udpIngressMu.Unlock()
 }
 
+// failUDPRelay handles a failed datagram relay forward: the relay entry is
+// removed and both ends receive a UDP_CLOSE so neither association keeps
+// sending into a dead entry until the idle timeout reaps it.
+func (a *Agent) failUDPRelay(relay *relayEntry, cause error) {
+	a.udpRelay.Delete(relay)
+	a.logger.Debug("udp relay forward failed, closing association both ways",
+		"upstream_peer", relay.UpstreamPeer.ShortString(),
+		logging.KeyStreamID, relay.UpstreamID,
+		"downstream_peer", relay.DownstreamPeer.ShortString(),
+		"downstream_stream_id", relay.DownstreamID,
+		logging.KeyError, cause)
+	a.peerMgr.SendToPeer(relay.UpstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameUDPClose,
+		StreamID: relay.UpstreamID,
+	})
+	a.peerMgr.SendToPeer(relay.DownstreamPeer, &protocol.Frame{
+		Type:     protocol.FrameUDPClose,
+		StreamID: relay.DownstreamID,
+	})
+}
+
 // handleUDPDatagram processes a UDP_DATAGRAM frame.
 func (a *Agent) handleUDPDatagram(peerID identity.AgentID, frame *protocol.Frame) {
 	// Check if this is for our UDP handler (exit node receiving from mesh)
@@ -703,7 +724,9 @@ func (a *Agent) handleUDPDatagram(peerID identity.AgentID, frame *protocol.Frame
 			StreamID: relayUp.DownstreamID,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(relayUp.DownstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(relayUp.DownstreamPeer, fwdFrame); err != nil {
+			a.failUDPRelay(relayUp, err)
+		}
 		return
 	}
 
@@ -714,7 +737,9 @@ func (a *Agent) handleUDPDatagram(peerID identity.AgentID, frame *protocol.Frame
 			StreamID: relayDown.UpstreamID,
 			Payload:  frame.Payload,
 		}
-		a.peerMgr.SendToPeer(relayDown.UpstreamPeer, fwdFrame)
+		if err := a.peerMgr.SendToPeer(relayDown.UpstreamPeer, fwdFrame); err != nil {
+			a.failUDPRelay(relayDown, err)
+		}
 	}
 }
 

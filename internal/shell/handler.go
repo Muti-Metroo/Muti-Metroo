@@ -189,7 +189,7 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 		return
 	}
 
-	plaintext, err := sessionKey.Decrypt(data)
+	plaintext, err := sessionKey.DecryptStrict(data)
 	if err != nil {
 		h.logger.Error("failed to decrypt shell data",
 			logging.KeyStreamID, streamID,

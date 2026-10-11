@@ -1018,6 +1018,13 @@ All communication uses a consistent framing protocol:
 │   before the counter also stops a rejected frame from advancing the         │
 │   anti-replay high-water mark and starving legitimate traffic.              │
 │                                                                             │
+│   On the ordered stream lane the counter check is strict (DecryptStrict):   │
+│   the counter must be exactly the next expected value. A gap means a        │
+│   transit relay dropped a frame; tolerating it would deliver the byte       │
+│   stream with an undetectable hole. The unordered UDP/ICMP lanes use the    │
+│   gap-tolerant Decrypt instead, because datagram reorder and loss are       │
+│   expected there.                                                           │
+│                                                                             │
 │   Encryption overhead: 28 bytes per frame (12 nonce + 16 tag)               │
 │                                                                             │
 │   Flags:                                                                    │
@@ -2850,6 +2857,10 @@ Both use the same `socks5.auth.users` configuration. Compatible clients (like Mu
 │              entry.LocalConn.Write(frame.Payload)  // Exit                  │
 │          else:                                                              │
 │              forward(entry.OutgoingPeer, frame)    // Transit               │
+│              // On transit write failure: pop the relay entry and send      │
+│              // STREAM_RESET (UDP_CLOSE / ICMP_CLOSE for those lanes) to    │
+│              // BOTH ends, so endpoints see a failure instead of silently   │
+│              // losing frames into a dead relay entry.                      │
 │                                                                             │
 │      case STREAM_CLOSE:                                                     │
 │          handleStreamClose(peer, frame)                                     │
