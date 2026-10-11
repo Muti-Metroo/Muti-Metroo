@@ -10,7 +10,7 @@ sidebar_position: 16
 
 # Dashboard Endpoints
 
-The `/api/` endpoints return JSON for dashboards and other integrations. The agent does not serve a web interface itself; [Muti Metroo Manager](/muti-metroo-manager) is a web dashboard that reads these endpoints, and Mutiauk reads `/api/dashboard` for routes and mesh hostnames.
+The `/api/` endpoints return JSON for dashboards and other integrations. The agent does not serve a web interface itself; [Muti Metroo Manager](/muti-metroo-manager) is a web dashboard that reads these endpoints. Mutiauk does not use them; it receives routes and mesh hostnames over the agent's SOCKS5 listener.
 
 The endpoints belong to the dashboard group (`http.dashboard`, enabled by default). When the group is disabled, every `/api/` path returns `404`.
 

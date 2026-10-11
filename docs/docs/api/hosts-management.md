@@ -6,7 +6,7 @@ sidebar_position: 10
 
 # Hosts Management Endpoints
 
-The mesh hostname registry maps names such as `db.mesh` to in-mesh addresses. The agent uses it to resolve names for SOCKS connections and route trace, and Mutiauk reads it from [`GET /api/dashboard`](/api/dashboard#get-apidashboard) to answer DNS queries. These endpoints change the registry and the set of allowed suffixes at runtime. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
+The mesh hostname registry maps names such as `db.mesh` to in-mesh addresses. The agent uses it to resolve names for SOCKS connections and route trace, and Mutiauk receives it over the agent's SOCKS5 listener to answer DNS queries. [`GET /api/dashboard`](/api/dashboard#get-apidashboard) also includes it. These endpoints change the registry and the set of allowed suffixes at runtime. They belong to the remote API group (`http.remote_api`, enabled by default) and accept only `POST`.
 
 | Endpoint | Description |
 | -------- | ----------- |

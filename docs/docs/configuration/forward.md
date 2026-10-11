@@ -51,7 +51,7 @@ forward:
 
 The endpoint's key is advertised with the agent's routes, on the [`routing.advertise_interval`](/configuration/routing) schedule. It does not require `exit.enabled`. Connections to the target close after [`connections.idle_threshold`](/configuration/connections) without traffic, and count toward [`limits.max_streams_total`](/configuration/limits).
 
-If several agents advertise the same key, listeners use the one with the lowest metric, which is the fewest hops away.
+If several agents advertise the same key, listeners use the one with the lowest metric. Path length is not compared, so with equal metrics which endpoint is used is not defined.
 
 ## Listeners
 
@@ -62,7 +62,7 @@ forward:
       address: "127.0.0.1:3000"
 ```
 
-Each accepted connection is routed to the agent that advertises the key with the lowest metric (fewest hops). Bind to `127.0.0.1` when only local clients should use the listener, and to `0.0.0.0` or an interface address to accept clients from the network.
+Each accepted connection is routed to the agent that advertises the key with the lowest metric. Bind to `127.0.0.1` when only local clients should use the listener, and to `0.0.0.0` or an interface address to accept clients from the network.
 
 ## Runtime management
 

@@ -10,7 +10,7 @@ sidebar_position: 16
 
 # HTTP API
 
-The `http` section starts the agent's HTTP server. It serves health checks, the dashboard API used by Muti Metroo Manager and Mutiauk, the management API that the `muti-metroo` CLI talks to, and optional Go profiling endpoints.
+The `http` section starts the agent's HTTP server. It serves health checks, the dashboard API used by Muti Metroo Manager, the management API that the `muti-metroo` CLI talks to, and optional Go profiling endpoints.
 
 ## Configuration
 

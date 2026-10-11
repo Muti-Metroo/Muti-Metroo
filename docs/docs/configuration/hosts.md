@@ -15,7 +15,7 @@ The top-level `mesh_hosts` and `mesh_hosts_suffixes` keys define a registry of h
 The registry is used in two places:
 
 - **SOCKS ingress on this agent.** A registered name sent by a SOCKS client resolves to its configured address without asking the system resolver. Domain routes still take precedence; see [SOCKS hostname resolution](/configuration/socks5#hostname-resolution).
-- **Mutiauk.** Mutiauk reads the registry from the agent's `/api/dashboard` endpoint and answers DNS queries for the registered suffixes. See [Mutiauk mesh hostnames](/mutiauk#mesh-hostnames).
+- **Mutiauk.** Mutiauk receives the registry from the agent over the agent's SOCKS5 listener and answers DNS queries for the registered suffixes. See [Mutiauk mesh hostnames](/mutiauk#mesh-hostnames).
 
 The registry only translates names. The address must still be reachable through an exit route.
 
@@ -109,4 +109,4 @@ mesh_hosts:
 - [Hosts Management API](/api/hosts-management) for the HTTP endpoints
 - [Mutiauk](/mutiauk#mesh-hostnames) for resolving registered names on a client host
 - [SOCKS Proxy](/configuration/socks5#hostname-resolution) for where the registry fits in SOCKS name resolution
-- [Dashboard API](/api/dashboard) for the `mesh_hosts` data Mutiauk reads
+- [Dashboard API](/api/dashboard) for the `mesh_hosts` data in the dashboard response
