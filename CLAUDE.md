@@ -50,11 +50,16 @@ The project documentation is built with Docusaurus and lives in the `docs/` fold
 
 To work with documentation locally: `cd docs && npm install && npm start` (dev server at http://localhost:3000). Production build: `npm run build`.
 
-### Docusaurus Dependency Policy
+### Docs Toolchain Dependency Policy
 
-Docusaurus produces a fully static site (HTML/CSS/JS) with no user-controlled input. Dependabot alerts on `docs/package-lock.json` and `user-manual/package-lock.json` are **out of scope**. We **intentionally hold back** Docusaurus and plugin updates because newer versions can break existing plugins and themes.
-
-**Do not**: propose npm dependency upgrades for `docs/` or `user-manual/`, run `npm audit fix`, gate releases on these alerts, or flag them as production risks. When reviewing Dependabot alerts, only Go module (`gomod`) alerts are relevant.
+Docusaurus produces a fully static site (HTML/CSS/JS) with no user-controlled
+input, and the PDF manuals are build-time tooling. Dependabot alerts on the
+npm lockfiles (`docs/`, `user-manual/`, `operator-manual/`, `operator-slides/`)
+are **lower risk than the gomod ones**, but they are not ignored: when alerts
+accumulate, update deliberately (`npm audit fix`, direct-dependency upgrades,
+targeted `overrides`) and re-run each project's build to confirm nothing
+broke. Go module (`gomod`) alerts are always in scope and should be fixed
+promptly.
 
 ### PDF Manuals
 
@@ -202,16 +207,10 @@ The live coverage matrix is in `internal/integration/coverage.csv` -- it tracks 
 
 - **ASCII only**: Do not use emojis or non-ASCII characters in code, comments, documentation, commit messages, or any other text files.
 
-### Localization (CLI)
+### English-only CLI
 
-The CLI supports translated output via `internal/i18n`. Russian (`ru`) and English (`en`) ship today. Translation keys live in `internal/i18n/locales/{en,ru}.toml`; CI fails if the two files drift (see `internal/i18n/i18n_test.go`).
-
-- **Translate at the display layer only.** Wrap user-facing strings in `i18n.T("scope.key")` at the point they are printed or set on a `*cobra.Command` field. Do not translate `fmt.Errorf(... %w ...)` wrapping -- error chains stay English so `errors.Is` and slog logs remain stable.
-- **Do not localize JSON output, HTTP API responses, slog lines, wire-protocol strings, or config keys.**
-- **Key naming.** Use dot-separated scopes: `cmd.<name>.short`, `cmd.<name>.long`, `flag.<name>.help`, `err.<id>`, `status.<area>.<msg>`, `confirm.<action>`, `wizard.<step>.<msg>`, `table.<area>.col.<name>`, `humanize.<unit>`, `cobra.<part>`, `group.<id>`, `prompt.<id>`. Adding a key in `en.toml` requires adding the same key in `ru.toml`; for plural keys include all four Russian CLDR categories (`one`/`few`/`many`/`other`).
-- **Confirmation prompts** translate the prompt text but keep input parsing English (`y`/`yes`/`n`/`no`).
-- **Tabular output** uses byte-counted `%-Ns` width specifiers, which break alignment for Cyrillic. Table column headers stay English until a runewidth-aware printer lands.
-- **Cobra's own error strings** (`unknown command`, `unknown flag`) are not localized -- they are inside cobra and not patchable without forking.
+The CLI is English-only (the former `internal/i18n` localization was
+removed). Keep all user-facing output, comments, and docs in English.
 
 ## Architecture
 
