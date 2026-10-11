@@ -222,7 +222,7 @@ socks5:
   address: "127.0.0.1:1080"
 ```
 
-Without `tls` settings, the exit generates a self-signed certificate at startup and the local agent does not verify it; the peer ID check and [end-to-end encryption](/security/e2e-encryption) protect the connection. Add a CA and mTLS as in the first scenario to restrict who can peer with the exit.
+Without `tls` settings, the exit generates a self-signed certificate at startup and the local agent does not verify it. Stream payloads are still [end-to-end encrypted](/security/e2e-encryption), but an attacker who can intercept the link can sit in the middle of it. Add a CA with strict verification and mTLS, as in the first scenario, to protect the link and restrict who can peer with the exit.
 
 Point the browser or application at `127.0.0.1:1080`, or test with:
 

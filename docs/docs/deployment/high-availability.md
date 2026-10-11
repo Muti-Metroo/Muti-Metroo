@@ -82,7 +82,7 @@ socks5:
   address: "127.0.0.1:1080"
 ```
 
-Both paths have the same hop count, so the ingress uses whichever path delivered the exit's advertisement first. If that transit fails, the ingress drops the route and learns the path through the other transit on the next advertisement. There is no preferred transit; to prefer one, make the other path longer.
+The ingress uses whichever path delivered the exit's latest advertisement first. If that transit fails, the ingress drops the route and learns the path through the other transit on the next advertisement. There is no setting to prefer one transit over the other.
 
 ## Pattern 2: Multiple exits
 
@@ -155,7 +155,7 @@ If SOCKS authentication is enabled, configure the same users on every ingress.
 
 ## Pattern 4: Redundant sites
 
-Combine the patterns across regions: each region has its own ingress, transit, and exits, and the regions peer with each other. Routes from the other region carry more hops, so local exits win while they are reachable and the other region's exits take over when they are not.
+Combine the patterns across regions: each region has its own ingress, transit, and exits, and the regions peer with each other. Route selection does not prefer closer exits, so if both regions' exits advertise the same CIDR with the same metric, either region's exit may be used from anywhere. Have each region's exits advertise that region's own CIDRs, or give one region's exits a higher metric so they act as backups for the whole mesh.
 
 ```mermaid
 flowchart TB
