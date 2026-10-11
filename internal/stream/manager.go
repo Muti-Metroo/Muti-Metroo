@@ -643,6 +643,53 @@ func (m *Manager) HandleStreamReset(peer identity.AgentID, streamID uint64, erro
 	}
 }
 
+// CloseStreamsForPeer closes every stream opened through the given peer and
+// fails its pending stream-open requests. Called when the peer connection
+// dies: the streams' next hop is gone, so without this their readers (e.g.
+// ingress SOCKS5 clients) would block until their own timeout, and the
+// peer's stream IDs restart at 1 on reconnect and collide with the stale
+// entries. No STREAM_CLOSE is sent -- the peer is gone anyway.
+func (m *Manager) CloseStreamsForPeer(peer identity.AgentID) int {
+	m.mu.Lock()
+	var closing []*Stream
+	for key, stream := range m.streams {
+		if key.peer != peer {
+			continue
+		}
+		delete(m.streams, key)
+		closing = append(closing, stream)
+	}
+	var pending []*PendingRequest
+	for requestID, preq := range m.pendingRequests {
+		if preq.Stream.RemoteID != peer {
+			continue
+		}
+		delete(m.pendingRequests, requestID)
+		preq.Timer.Stop()
+		pending = append(pending, preq)
+	}
+	m.mu.Unlock()
+
+	// Close outside the lock: Close fires no callbacks but readers wake up,
+	// and onStreamClose may call back into the manager.
+	for _, stream := range closing {
+		stream.Close()
+		if m.onStreamClose != nil {
+			m.onStreamClose(stream, fmt.Errorf("peer %s disconnected", peer.ShortString()))
+		}
+	}
+	for _, preq := range pending {
+		crypto.ZeroKey(&preq.EphemeralPrivate)
+		if preq.Result != nil {
+			preq.Result <- &StreamOpenResult{
+				Error:     fmt.Errorf("peer %s disconnected", peer.ShortString()),
+				ErrorCode: protocol.ErrHostUnreachable,
+			}
+		}
+	}
+	return len(closing)
+}
+
 // StreamCount returns the number of active streams.
 func (m *Manager) StreamCount() int {
 	m.mu.RLock()

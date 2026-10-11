@@ -4860,6 +4860,14 @@ func (a *Agent) handlePeerDisconnect(conn *peer.Connection, err error) {
 	// Clean up relay streams involving this peer
 	a.cleanupRelaysForPeer(peerID)
 
+	// Close this agent's own streams opened through the dead peer, so
+	// ingress consumers (SOCKS5 clients, file transfers) get an error
+	// instead of hanging on a next hop that no longer exists.
+	if n := a.streamMgr.CloseStreamsForPeer(peerID); n > 0 {
+		a.logger.Debug("closed streams for disconnected peer",
+			logging.KeyPeerID, peerID.ShortString(), logging.KeyCount, n)
+	}
+
 	// Clean up routes learned from this peer
 	removedCIDR := a.routeMgr.HandlePeerDisconnect(peerID)
 	removedDomain := a.routeMgr.HandlePeerDisconnectDomain(peerID)
@@ -4951,9 +4959,23 @@ func (a *Agent) closeShellClientStreamsForPeer(peerID identity.AgentID) {
 }
 
 // cleanupRelaysForPeer removes all relay entries involving the specified peer.
+// TCP, UDP, and ICMP share the relay table type; leaving UDP/ICMP entries
+// behind would leak them until a UDP_CLOSE/ICMP_CLOSE that can no longer
+// arrive, and the peer's stream IDs restart at 1 on reconnect, colliding with
+// the stale entries.
 func (a *Agent) cleanupRelaysForPeer(peerID identity.AgentID) {
 	if cleaned := a.tcpRelay.DeleteByPeer(peerID); cleaned > 0 {
 		a.logger.Debug("cleaned up relay streams",
+			logging.KeyPeerID, peerID.ShortString(),
+			logging.KeyCount, cleaned)
+	}
+	if cleaned := a.udpRelay.DeleteByPeer(peerID); cleaned > 0 {
+		a.logger.Debug("cleaned up udp relay entries",
+			logging.KeyPeerID, peerID.ShortString(),
+			logging.KeyCount, cleaned)
+	}
+	if cleaned := a.icmpRelay.DeleteByPeer(peerID); cleaned > 0 {
+		a.logger.Debug("cleaned up icmp relay entries",
 			logging.KeyPeerID, peerID.ShortString(),
 			logging.KeyCount, cleaned)
 	}

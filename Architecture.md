@@ -2385,6 +2385,8 @@ internal/sleep/
 │    origin's identity and learned sequence, so remote agents prune           │
 │    them immediately; routes still reachable via another next hop            │
 │    are not withdrawn                                                        │
+│  • Close local streams and pending opens through the peer, and              │
+│    remove its TCP/UDP/ICMP relay entries                                    │
 │  • Don't wait for expiration                                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘

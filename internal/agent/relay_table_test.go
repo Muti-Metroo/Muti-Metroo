@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/postalsys/muti-metroo/internal/identity"
+	"github.com/postalsys/muti-metroo/internal/logging"
 )
 
 // Stream IDs are allocated per peer connection, so two upstream peers relaying
@@ -109,5 +110,42 @@ func TestRelayTable_PopDownstreamIsolatesPeers(t *testing.T) {
 	}
 	if len(rt.byUpstream) != 0 || len(rt.byDownstream) != 0 {
 		t.Error("entry not removed from both indices")
+	}
+}
+
+// handlePeerDisconnect must clean the UDP and ICMP relay tables as well as
+// TCP: their entries have no transit-side idle expiry, so a dead peer would
+// leak them until a UDP_CLOSE/ICMP_CLOSE that can no longer arrive, and the
+// peer's stream IDs restart at 1 on reconnect and collide with the stale
+// entries.
+func TestCleanupRelaysForPeer_AllProtocols(t *testing.T) {
+	dead, _ := identity.NewAgentID()
+	other, _ := identity.NewAgentID()
+	nextHop, _ := identity.NewAgentID()
+
+	a := &Agent{
+		logger:    logging.NopLogger(),
+		tcpRelay:  newRelayTable(),
+		udpRelay:  newRelayTable(),
+		icmpRelay: newRelayTable(),
+	}
+
+	for _, rt := range []*relayTable{a.tcpRelay, a.udpRelay, a.icmpRelay} {
+		rt.Insert(&relayEntry{UpstreamPeer: dead, UpstreamID: 1, DownstreamPeer: nextHop, DownstreamID: 100})
+		rt.Insert(&relayEntry{UpstreamPeer: other, UpstreamID: 2, DownstreamPeer: nextHop, DownstreamID: 102})
+	}
+	// A reverse-direction entry: the dead peer is the downstream side.
+	a.udpRelay.Insert(&relayEntry{UpstreamPeer: other, UpstreamID: 3, DownstreamPeer: dead, DownstreamID: 104})
+
+	a.cleanupRelaysForPeer(dead)
+
+	if n := len(a.tcpRelay.byUpstream); n != 1 {
+		t.Errorf("tcp relay entries left = %d, want 1", n)
+	}
+	if n := len(a.udpRelay.byUpstream); n != 1 {
+		t.Errorf("udp relay entries left = %d, want 1 (both dead-peer entries removed)", n)
+	}
+	if n := len(a.icmpRelay.byUpstream); n != 1 {
+		t.Errorf("icmp relay entries left = %d, want 1", n)
 	}
 }

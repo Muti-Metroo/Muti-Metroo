@@ -990,3 +990,80 @@ func TestManager_OpenErrRejectsWrongPeer(t *testing.T) {
 		t.Fatalf("intended peer could not fail its own request: %v", err)
 	}
 }
+
+// When a peer dies, every stream opened through it must be closed so local
+// readers (e.g. ingress SOCKS5 clients) get an error instead of hanging, and
+// pending opens to that peer must fail immediately rather than wait out the
+// open timeout.
+func TestManager_CloseStreamsForPeer(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	deadPeer, _ := identity.NewAgentID()
+	otherPeer, _ := identity.NewAgentID()
+	cfg := DefaultManagerConfig()
+
+	m := NewManager(cfg, localID)
+	m.AcceptStream(1, 100, deadPeer, "10.0.0.1", 80)
+	m.AcceptStream(2, 101, deadPeer, "10.0.0.2", 80)
+	m.AcceptStream(1, 102, otherPeer, "10.0.0.3", 80)
+
+	pending := m.OpenStream(3, deadPeer, "10.0.0.4", 80, time.Minute)
+
+	n := m.CloseStreamsForPeer(deadPeer)
+	if n != 2 {
+		t.Errorf("CloseStreamsForPeer closed %d streams, want 2", n)
+	}
+
+	// Streams toward the dead peer are gone and closed.
+	for _, id := range []uint64{1, 2} {
+		if s := m.GetStream(deadPeer, id); s != nil {
+			t.Errorf("stream %d still tracked after peer teardown", id)
+		}
+	}
+
+	// The other peer's stream survives.
+	if s := m.GetStream(otherPeer, 1); s == nil || s.IsClosed() {
+		t.Error("unrelated peer's stream was closed")
+	}
+
+	// The pending open to the dead peer fails immediately.
+	select {
+	case res := <-pending.ResultCh:
+		if res.Error == nil {
+			t.Error("pending open to dead peer returned nil error")
+		}
+	case <-time.After(time.Second):
+		t.Error("pending open to dead peer was not failed")
+	}
+	if m.PendingCount() != 0 {
+		t.Errorf("PendingCount = %d, want 0", m.PendingCount())
+	}
+}
+
+// A reader blocked in Read must wake with EOF when the stream is torn down by
+// CloseStreamsForPeer.
+func TestManager_CloseStreamsForPeer_UnblocksReader(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	deadPeer, _ := identity.NewAgentID()
+	cfg := DefaultManagerConfig()
+
+	m := NewManager(cfg, localID)
+	m.AcceptStream(1, 100, deadPeer, "10.0.0.1", 80)
+	s := m.GetStream(deadPeer, 1)
+
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := s.Read(context.Background())
+		readErr <- err
+	}()
+
+	m.CloseStreamsForPeer(deadPeer)
+
+	select {
+	case err := <-readErr:
+		if err == nil {
+			t.Error("Read returned nil error after peer teardown")
+		}
+	case <-time.After(time.Second):
+		t.Error("Read still blocked after peer teardown")
+	}
+}
