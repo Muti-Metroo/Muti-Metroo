@@ -2057,3 +2057,275 @@ func TestFlooder_RejectsAdvertisementClaimingLocalOrigin(t *testing.T) {
 		t.Error("forged self-origin route was installed in the routing table")
 	}
 }
+
+// A withdraw carrying the same (origin, sequence) pair as the advertisement
+// it revokes must still be processed: the seen cache namespaces withdraws
+// separately from advertisements. Without the split, a neighbour re-flooding
+// an origin's withdraw after the origin's link died would be swallowed by the
+// earlier advertisement's seen-cache entry.
+func TestFlooder_HandleRouteWithdraw_SameSequenceAsAdvertise(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	routes := []protocol.Route{{
+		AddressFamily: protocol.AddrFamilyIPv4,
+		PrefixLength:  8,
+		Prefix:        []byte{10, 0, 0, 0},
+		Metric:        10,
+	}}
+
+	if !f.HandleRouteAdvertise(peerID, peerID, "", 5, routes, nil, nil, nil) {
+		t.Fatal("advertisement should be accepted")
+	}
+	if routeMgr.Size() != 1 {
+		t.Fatalf("Size after advertise = %d, want 1", routeMgr.Size())
+	}
+
+	// Same origin and sequence as the advertisement.
+	if !f.HandleRouteWithdraw(peerID, peerID, 5, routes, nil) {
+		t.Error("withdraw with the advertisement's sequence should be accepted")
+	}
+	if routeMgr.Size() != 0 {
+		t.Errorf("Size after withdraw = %d, want 0", routeMgr.Size())
+	}
+}
+
+// A withdraw older than the installed route's sequence must not remove the
+// route (a stale withdraw traveling a slow path would otherwise kill a fresh
+// re-advertisement), though it is still a new frame worth re-flooding.
+func TestFlooder_HandleRouteWithdraw_StaleSequence(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	routes := []protocol.Route{{
+		AddressFamily: protocol.AddrFamilyIPv4,
+		PrefixLength:  8,
+		Prefix:        []byte{10, 0, 0, 0},
+		Metric:        10,
+	}}
+
+	if !f.HandleRouteAdvertise(peerID, peerID, "", 5, routes, nil, nil, nil) {
+		t.Fatal("advertisement should be accepted")
+	}
+
+	// Stale withdraw: sequence 4 < installed 5.
+	if !f.HandleRouteWithdraw(peerID, peerID, 4, routes, nil) {
+		t.Error("stale withdraw is still a new frame and should be accepted for flooding")
+	}
+	if routeMgr.Size() != 1 {
+		t.Errorf("Size after stale withdraw = %d, want 1 (route must survive)", routeMgr.Size())
+	}
+
+	// Fresh withdraw removes it.
+	f.HandleRouteWithdraw(peerID, peerID, 6, routes, nil)
+	if routeMgr.Size() != 0 {
+		t.Errorf("Size after fresh withdraw = %d, want 0", routeMgr.Size())
+	}
+}
+
+// Agent presence routes must be withdrawable like any other family.
+func TestFlooder_HandleRouteWithdraw_AgentPresence(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	originID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	routes := []protocol.Route{{
+		AddressFamily: protocol.AddrFamilyAgent,
+		PrefixLength:  0,
+		Prefix:        protocol.EncodeAgentPrefix(originID),
+		Metric:        0,
+	}}
+
+	if !f.HandleRouteAdvertise(peerID, originID, "", 3, routes, nil, nil, nil) {
+		t.Fatal("advertisement should be accepted")
+	}
+	if routeMgr.LookupAgent(originID) == nil {
+		t.Fatal("agent presence route should be installed")
+	}
+
+	if !f.HandleRouteWithdraw(peerID, originID, 3, routes, nil) {
+		t.Error("agent presence withdraw should be accepted")
+	}
+	if routeMgr.LookupAgent(originID) != nil {
+		t.Error("agent presence route should be removed after withdraw")
+	}
+}
+
+// Graceful shutdown withdraws every local route family, including the agent
+// presence record, so peers drop this agent immediately instead of waiting
+// for route TTL expiry.
+func TestFlooder_WithdrawLocalRoutes_AllFamilies(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+	sender.AddPeer(peerID)
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	routeMgr.AddLocalRoute(routing.MustParseCIDR("10.0.0.0/8"), 10, "")
+	routeMgr.AddLocalDomainRoute("example.com", 5)
+	routeMgr.AddLocalForwardRoute("ssh", "10.0.0.1:22", 5)
+
+	f.WithdrawLocalRoutes()
+
+	msgs := sender.GetMessages(peerID)
+	if len(msgs) != 1 {
+		t.Fatalf("Should send 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Type != protocol.FrameRouteWithdraw {
+		t.Fatalf("Frame type = 0x%02x, want ROUTE_WITHDRAW", msgs[0].Type)
+	}
+
+	withdraw, err := protocol.DecodeRouteWithdraw(msgs[0].Payload)
+	if err != nil {
+		t.Fatalf("DecodeRouteWithdraw: %v", err)
+	}
+	if withdraw.OriginAgent != localID {
+		t.Error("withdraw origin should be the local agent")
+	}
+
+	families := make(map[uint8]bool)
+	for _, r := range withdraw.Routes {
+		families[r.AddressFamily] = true
+	}
+	for _, fam := range []uint8{
+		protocol.AddrFamilyIPv4,
+		protocol.AddrFamilyDomain,
+		protocol.AddrFamilyForward,
+		protocol.AddrFamilyAgent,
+	} {
+		if !families[fam] {
+			t.Errorf("withdraw missing address family 0x%02x", fam)
+		}
+	}
+
+	// The presence record must name this agent.
+	foundPresence := false
+	for _, r := range withdraw.Routes {
+		if r.AddressFamily == protocol.AddrFamilyAgent &&
+			protocol.DecodeAgentPrefix(r.Prefix) == localID {
+			foundPresence = true
+		}
+	}
+	if !foundPresence {
+		t.Error("withdraw missing agent presence record for local agent")
+	}
+}
+
+// When a peer disconnects, the routes that died with it are re-flooded as
+// withdrawals under the origin's own identity and the sequence they were
+// learned under, so receivers drop them immediately.
+func TestFlooder_FloodWithdrawnRoutes(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	deadPeer, _ := identity.NewAgentID()
+	receiver, _ := identity.NewAgentID()
+	originID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+	sender.AddPeer(receiver)
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	path := []identity.AgentID{deadPeer, originID}
+	routeMgr.ProcessRouteAdvertise(deadPeer, originID, 7,
+		[]routing.RouteEntry{{Network: routing.MustParseCIDR("10.0.0.0/8"), Metric: 1}}, path, nil)
+	routeMgr.ProcessDomainRouteAdvertise(deadPeer, originID, 7,
+		[]routing.DomainRouteEntry{{Pattern: "example.com"}}, path, nil)
+	routeMgr.ProcessForwardRouteAdvertise(deadPeer, originID, 7,
+		[]routing.ForwardRouteEntry{{Key: "ssh", Target: "10.0.0.1:22"}}, path, nil)
+	routeMgr.ProcessAgentRouteAdvertise(deadPeer, originID, 7, originID, path, nil, 1)
+
+	removedCIDR := routeMgr.HandlePeerDisconnect(deadPeer)
+	removedDomain := routeMgr.HandlePeerDisconnectDomain(deadPeer)
+	removedForward := routeMgr.HandlePeerDisconnectForward(deadPeer)
+	removedAgent := routeMgr.HandlePeerDisconnectAgent(deadPeer)
+
+	f.FloodWithdrawnRoutes(removedCIDR, removedDomain, removedForward, removedAgent)
+
+	msgs := sender.GetMessages(receiver)
+	if len(msgs) != 1 {
+		t.Fatalf("Should send 1 withdraw (single origin+sequence group), got %d", len(msgs))
+	}
+	if msgs[0].Type != protocol.FrameRouteWithdraw {
+		t.Fatalf("Frame type = 0x%02x, want ROUTE_WITHDRAW", msgs[0].Type)
+	}
+
+	withdraw, err := protocol.DecodeRouteWithdraw(msgs[0].Payload)
+	if err != nil {
+		t.Fatalf("DecodeRouteWithdraw: %v", err)
+	}
+	if withdraw.OriginAgent != originID {
+		t.Error("withdraw must carry the route origin's identity, not ours")
+	}
+	if withdraw.Sequence != 7 {
+		t.Errorf("withdraw sequence = %d, want 7 (the sequence the routes were learned under)", withdraw.Sequence)
+	}
+
+	families := make(map[uint8]bool)
+	for _, r := range withdraw.Routes {
+		families[r.AddressFamily] = true
+	}
+	for _, fam := range []uint8{
+		protocol.AddrFamilyIPv4,
+		protocol.AddrFamilyDomain,
+		protocol.AddrFamilyForward,
+		protocol.AddrFamilyAgent,
+	} {
+		if !families[fam] {
+			t.Errorf("withdraw missing address family 0x%02x", fam)
+		}
+	}
+}
+
+// Routes still reachable through another next hop must not be withdrawn:
+// receivers would drop a route that is still usable via us.
+func TestFlooder_FloodWithdrawnRoutes_SkipsReachable(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	deadPeer, _ := identity.NewAgentID()
+	otherPeer, _ := identity.NewAgentID()
+	receiver, _ := identity.NewAgentID()
+	originID, _ := identity.NewAgentID()
+	routeMgr := routing.NewManager(localID)
+	sender := newMockPeerSender()
+	sender.AddPeer(receiver)
+
+	f := NewFlooder(DefaultFloodConfig(), localID, routeMgr, sender)
+	defer f.Stop()
+
+	// The agent table holds one entry per (origin, next hop): originID's
+	// presence route arrives via both peers, and only the dead peer's entry
+	// is removed on disconnect.
+	routeMgr.ProcessAgentRouteAdvertise(deadPeer, originID, 7, originID,
+		[]identity.AgentID{deadPeer, originID}, nil, 1)
+	routeMgr.ProcessAgentRouteAdvertise(otherPeer, originID, 7, originID,
+		[]identity.AgentID{otherPeer, originID}, nil, 2)
+
+	removedAgent := routeMgr.HandlePeerDisconnectAgent(deadPeer)
+	if len(removedAgent) != 1 {
+		t.Fatalf("HandlePeerDisconnectAgent removed %d routes, want 1", len(removedAgent))
+	}
+
+	f.FloodWithdrawnRoutes(nil, nil, nil, removedAgent)
+
+	if msgs := sender.GetMessages(receiver); len(msgs) != 0 {
+		t.Errorf("no withdraw expected for a still-reachable route, got %d frames", len(msgs))
+	}
+}

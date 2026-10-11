@@ -292,9 +292,9 @@ func TestTable_RemoveRoutesFromPeer(t *testing.T) {
 	})
 
 	// Remove all routes from peer1
-	count := table.RemoveRoutesFromPeer(peer1)
-	if count != 2 {
-		t.Errorf("RemoveRoutesFromPeer removed %d routes, want 2", count)
+	removed := table.RemoveRoutesFromPeer(peer1)
+	if len(removed) != 2 {
+		t.Errorf("RemoveRoutesFromPeer removed %d routes, want 2", len(removed))
 	}
 	if table.Size() != 1 {
 		t.Errorf("Size = %d, want 1", table.Size())
@@ -520,7 +520,7 @@ func TestManager_ProcessRouteWithdraw(t *testing.T) {
 	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
 
 	// Withdraw
-	removed := mgr.ProcessRouteWithdraw(peerID, entries)
+	removed := mgr.ProcessRouteWithdraw(peerID, 1, entries)
 	if !removed {
 		t.Error("ProcessRouteWithdraw should return true")
 	}
@@ -544,7 +544,7 @@ func TestManager_ProcessForwardRouteWithdraw(t *testing.T) {
 	}
 
 	// Origin-mismatch: withdraw from a different origin must not drop originA's row.
-	if mgr.ProcessForwardRouteWithdraw(originB, []ForwardRouteEntry{{Key: "k"}}) {
+	if mgr.ProcessForwardRouteWithdraw(originB, 1, []ForwardRouteEntry{{Key: "k"}}) {
 		t.Error("withdraw from wrong origin should return false")
 	}
 	if !mgr.ForwardTable().HasRoute("k", originA) {
@@ -552,7 +552,7 @@ func TestManager_ProcessForwardRouteWithdraw(t *testing.T) {
 	}
 
 	// Correct origin removes the row.
-	if !mgr.ProcessForwardRouteWithdraw(originA, []ForwardRouteEntry{{Key: "k"}}) {
+	if !mgr.ProcessForwardRouteWithdraw(originA, 1, []ForwardRouteEntry{{Key: "k"}}) {
 		t.Error("withdraw should report removed=true")
 	}
 	if mgr.ForwardTable().HasRoute("k", originA) {
@@ -560,7 +560,7 @@ func TestManager_ProcessForwardRouteWithdraw(t *testing.T) {
 	}
 
 	// Negative: withdrawing an unknown key returns false.
-	if mgr.ProcessForwardRouteWithdraw(originA, []ForwardRouteEntry{{Key: "missing"}}) {
+	if mgr.ProcessForwardRouteWithdraw(originA, 1, []ForwardRouteEntry{{Key: "missing"}}) {
 		t.Error("withdraw of unknown key should return false")
 	}
 }
@@ -578,21 +578,21 @@ func TestManager_ProcessDomainRouteWithdraw(t *testing.T) {
 		t.Fatal("setup: expected domain route to exist")
 	}
 
-	if mgr.ProcessDomainRouteWithdraw(originB, []DomainRouteEntry{{Pattern: "*.example.com"}}) {
+	if mgr.ProcessDomainRouteWithdraw(originB, 1, []DomainRouteEntry{{Pattern: "*.example.com"}}) {
 		t.Error("withdraw from wrong origin should return false")
 	}
 	if !mgr.DomainTable().HasRoute("*.example.com", originA) {
 		t.Error("originA's row was dropped by a different origin's withdraw")
 	}
 
-	if !mgr.ProcessDomainRouteWithdraw(originA, []DomainRouteEntry{{Pattern: "*.example.com"}}) {
+	if !mgr.ProcessDomainRouteWithdraw(originA, 1, []DomainRouteEntry{{Pattern: "*.example.com"}}) {
 		t.Error("withdraw should report removed=true")
 	}
 	if mgr.DomainTable().HasRoute("*.example.com", originA) {
 		t.Error("domain route still present after withdraw")
 	}
 
-	if mgr.ProcessDomainRouteWithdraw(originA, []DomainRouteEntry{{Pattern: "missing.com"}}) {
+	if mgr.ProcessDomainRouteWithdraw(originA, 1, []DomainRouteEntry{{Pattern: "missing.com"}}) {
 		t.Error("withdraw of unknown pattern should return false")
 	}
 }
@@ -609,9 +609,9 @@ func TestManager_HandlePeerDisconnect(t *testing.T) {
 	}
 	mgr.ProcessRouteAdvertise(peerID, peerID, 1, entries, nil, nil)
 
-	count := mgr.HandlePeerDisconnect(peerID)
-	if count != 2 {
-		t.Errorf("HandlePeerDisconnect removed %d routes, want 2", count)
+	removed := mgr.HandlePeerDisconnect(peerID)
+	if len(removed) != 2 {
+		t.Errorf("HandlePeerDisconnect removed %d routes, want 2", len(removed))
 	}
 }
 
@@ -1223,5 +1223,98 @@ func TestTable_AddRoute_SameSequenceCommentRefresh(t *testing.T) {
 	// Sequence and metric unchanged.
 	if got.Sequence != 1 || got.Metric != 5 {
 		t.Errorf("metric/sequence drift: got Sequence=%d Metric=%d", got.Sequence, got.Metric)
+	}
+}
+
+// A withdraw carrying a sequence older than the installed route's sequence
+// must be rejected per route; one at or above the installed sequence applies.
+func TestManager_ProcessRouteWithdraw_SequenceGuard(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	mgr := NewManager(localID)
+
+	entries := []RouteEntry{{Network: MustParseCIDR("10.0.0.0/8"), Metric: 10}}
+	mgr.ProcessRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+
+	if mgr.ProcessRouteWithdraw(peerID, 4, entries) {
+		t.Error("stale withdraw (seq 4 < installed 5) should not remove the route")
+	}
+	if mgr.Size() != 1 {
+		t.Fatal("route was removed by a stale withdraw")
+	}
+
+	if !mgr.ProcessRouteWithdraw(peerID, 5, entries) {
+		t.Error("withdraw at the installed sequence should remove the route")
+	}
+	if mgr.Size() != 0 {
+		t.Error("route still present after in-sequence withdraw")
+	}
+}
+
+func TestManager_ProcessDomainRouteWithdraw_SequenceGuard(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	mgr := NewManager(localID)
+
+	entries := []DomainRouteEntry{{Pattern: "example.com"}}
+	mgr.ProcessDomainRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+
+	if mgr.ProcessDomainRouteWithdraw(peerID, 4, entries) {
+		t.Error("stale withdraw should not remove the domain route")
+	}
+	if !mgr.DomainTable().HasRoute("example.com", peerID) {
+		t.Fatal("domain route was removed by a stale withdraw")
+	}
+
+	if !mgr.ProcessDomainRouteWithdraw(peerID, 6, entries) {
+		t.Error("newer withdraw should remove the domain route")
+	}
+}
+
+func TestManager_ProcessForwardRouteWithdraw_SequenceGuard(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	mgr := NewManager(localID)
+
+	entries := []ForwardRouteEntry{{Key: "ssh", Target: "10.0.0.1:22"}}
+	mgr.ProcessForwardRouteAdvertise(peerID, peerID, 5, entries, nil, nil)
+
+	if mgr.ProcessForwardRouteWithdraw(peerID, 4, entries) {
+		t.Error("stale withdraw should not remove the forward route")
+	}
+	if !mgr.ForwardTable().HasRoute("ssh", peerID) {
+		t.Fatal("forward route was removed by a stale withdraw")
+	}
+
+	if !mgr.ProcessForwardRouteWithdraw(peerID, 5, entries) {
+		t.Error("in-sequence withdraw should remove the forward route")
+	}
+}
+
+func TestManager_ProcessAgentRouteWithdraw_SequenceGuard(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	originID, _ := identity.NewAgentID()
+	mgr := NewManager(localID)
+
+	mgr.ProcessAgentRouteAdvertise(peerID, originID, 5, originID, []identity.AgentID{peerID, originID}, nil, 1)
+
+	if mgr.ProcessAgentRouteWithdraw(originID, 4, originID) {
+		t.Error("stale withdraw should not remove the agent route")
+	}
+	if mgr.LookupAgent(originID) == nil {
+		t.Fatal("agent route was removed by a stale withdraw")
+	}
+
+	if !mgr.ProcessAgentRouteWithdraw(originID, 5, originID) {
+		t.Error("in-sequence withdraw should remove the agent route")
+	}
+	if mgr.LookupAgent(originID) != nil {
+		t.Error("agent route still present after in-sequence withdraw")
+	}
+
+	// Withdrawing an unknown agent returns false.
+	if mgr.ProcessAgentRouteWithdraw(originID, 9, originID) {
+		t.Error("withdraw of unknown agent route should return false")
 	}
 }

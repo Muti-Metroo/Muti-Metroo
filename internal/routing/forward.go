@@ -146,6 +146,17 @@ func (t *ForwardTable) sortRoutes(key string) {
 
 // RemoveRoute removes a port forward route from a specific origin.
 func (t *ForwardTable) RemoveRoute(key string, originAgent identity.AgentID) bool {
+	return t.removeRoute(key, originAgent, 0, false)
+}
+
+// RemoveRouteWithSeq removes a port forward route from a specific origin, but
+// only when the installed route's sequence is not newer than seq. Guards
+// against a stale ROUTE_WITHDRAW deleting a fresher re-advertised route.
+func (t *ForwardTable) RemoveRouteWithSeq(key string, originAgent identity.AgentID, seq uint64) bool {
+	return t.removeRoute(key, originAgent, seq, true)
+}
+
+func (t *ForwardTable) removeRoute(key string, originAgent identity.AgentID, seq uint64, checkSeq bool) bool {
 	if key == "" {
 		return false
 	}
@@ -156,6 +167,9 @@ func (t *ForwardTable) RemoveRoute(key string, originAgent identity.AgentID) boo
 	routes := t.routes[key]
 	for i, r := range routes {
 		if r.OriginAgent == originAgent {
+			if checkSeq && r.Sequence > seq {
+				return false // Stale withdraw; installed route is newer
+			}
 			t.routes[key] = append(routes[:i], routes[i+1:]...)
 			if len(t.routes[key]) == 0 {
 				delete(t.routes, key)
@@ -167,18 +181,19 @@ func (t *ForwardTable) RemoveRoute(key string, originAgent identity.AgentID) boo
 }
 
 // RemoveRoutesFromPeer removes all port forward routes learned from a specific peer.
-func (t *ForwardTable) RemoveRoutesFromPeer(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (t *ForwardTable) RemoveRoutesFromPeer(peerID identity.AgentID) []*ForwardRoute {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	count := 0
+	var removed []*ForwardRoute
 	for key, routes := range t.routes {
 		filtered := routes[:0]
 		for _, r := range routes {
 			if r.NextHop != peerID {
 				filtered = append(filtered, r)
 			} else {
-				count++
+				removed = append(removed, r)
 			}
 		}
 		if len(filtered) == 0 {
@@ -187,7 +202,7 @@ func (t *ForwardTable) RemoveRoutesFromPeer(peerID identity.AgentID) int {
 			t.routes[key] = filtered
 		}
 	}
-	return count
+	return removed
 }
 
 // Lookup finds the best port forward route for a routing key.

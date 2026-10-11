@@ -185,10 +185,36 @@ func (t *Table) RemoveRoute(network *net.IPNet, originAgent identity.AgentID) bo
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	return t.removeRouteUnlocked(key, originAgent, 0, false)
+}
+
+// RemoveRouteWithSeq removes a route from a specific origin, but only when the
+// installed route's sequence is not newer than seq. A ROUTE_WITHDRAW traveling
+// a slow path can arrive after a newer re-advertise from the same origin;
+// without this guard the stale withdraw would delete the fresh route.
+func (t *Table) RemoveRouteWithSeq(network *net.IPNet, originAgent identity.AgentID, seq uint64) bool {
+	if network == nil {
+		return false
+	}
+
+	key := network.String()
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.removeRouteUnlocked(key, originAgent, seq, true)
+}
+
+// removeRouteUnlocked removes the route for key from originAgent. When
+// checkSeq is set, removal happens only if the installed route's sequence is
+// less than or equal to seq. Caller must hold t.mu.
+func (t *Table) removeRouteUnlocked(key string, originAgent identity.AgentID, seq uint64, checkSeq bool) bool {
 	routes := t.routes[key]
 	for i, r := range routes {
 		if r.OriginAgent == originAgent {
-			// Remove this route
+			if checkSeq && r.Sequence > seq {
+				return false // Stale withdraw; installed route is newer
+			}
 			t.routes[key] = append(routes[:i], routes[i+1:]...)
 			if len(t.routes[key]) == 0 {
 				delete(t.routes, key)
@@ -200,18 +226,19 @@ func (t *Table) RemoveRoute(network *net.IPNet, originAgent identity.AgentID) bo
 }
 
 // RemoveRoutesFromPeer removes all routes learned from a specific peer.
-func (t *Table) RemoveRoutesFromPeer(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (t *Table) RemoveRoutesFromPeer(peerID identity.AgentID) []*Route {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	count := 0
+	var removed []*Route
 	for key, routes := range t.routes {
 		filtered := routes[:0]
 		for _, r := range routes {
 			if r.NextHop != peerID {
 				filtered = append(filtered, r)
 			} else {
-				count++
+				removed = append(removed, r)
 			}
 		}
 		if len(filtered) == 0 {
@@ -220,7 +247,7 @@ func (t *Table) RemoveRoutesFromPeer(peerID identity.AgentID) int {
 			t.routes[key] = filtered
 		}
 	}
-	return count
+	return removed
 }
 
 // Lookup finds the best route for an IP address using longest-prefix match.

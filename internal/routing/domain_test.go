@@ -367,8 +367,8 @@ func TestDomainTable_RemoveRoutesFromPeer(t *testing.T) {
 
 	// Remove routes from peer1
 	removed := table.RemoveRoutesFromPeer(peer1)
-	if removed != 1 {
-		t.Errorf("Expected 1 route removed, got %d", removed)
+	if len(removed) != 1 {
+		t.Errorf("Expected 1 route removed, got %d", len(removed))
 	}
 
 	// peer2's route should still exist

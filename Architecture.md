@@ -739,7 +739,7 @@ All communication uses a consistent framing protocol:
 │  │ Type │ Name               │ Direction   │ Purpose                     │  │
 │  ├──────┼────────────────────┼─────────────┼─────────────────────────────┤  │
 │  │ 0x10 │ ROUTE_ADVERTISE    │ Flood       │ Announce CIDR/domain/forward│  │
-│  │ 0x11 │ ROUTE_WITHDRAW     │ Flood       │ Remove CIDR/domain/forward  │  │
+│  │ 0x11 │ ROUTE_WITHDRAW     │ Flood       │ Remove routes (any family)  │  │
 │  │ 0x12 │ NODE_INFO_ADVERTISE│ Flood       │ Announce node metadata      │  │
 │  └──────┴────────────────────┴─────────────┴─────────────────────────────┘  │
 │                                                                             │
@@ -781,6 +781,15 @@ All communication uses a consistent framing protocol:
 │  Withdrawal is per-route: removing a single dynamic CIDR, domain, forward,  │
 │  or expose-attached route floods exactly that prefix so peers prune their   │
 │  tables immediately rather than waiting for the route_ttl to expire.        │
+│  Withdrawals are sequence-guarded: a withdraw carrying a sequence           │
+│  older than the installed route's is rejected per route, so a stale         │
+│  withdraw arriving late cannot delete a fresher re-advertisement.           │
+│  Withdraws dedupe in the seen cache separately from advertisements:         │
+│  a withdraw often carries the same (origin, sequence) pair as the           │
+│  advertisement it revokes, e.g. when a neighbour re-floods an               │
+│  origin's routes after the origin's link dies.                              │
+│  Graceful shutdown withdraws all four families (CIDR, domain,               │
+│  forward, agent presence) in one ROUTE_WITHDRAW.                            │
 │                                                                             │
 │  ROUTE_ADVERTISE envelope structure:                                        │
 │  • OriginAgent (16), OriginDisplayName (1+N), Sequence (8)                  │
@@ -2372,6 +2381,10 @@ internal/sleep/
 │                                                                             │
 │  On peer disconnect:                                                        │
 │  • Immediately remove all routes where NextHop = disconnected peer          │
+│  • Flood ROUTE_WITHDRAW for routes lost with the peer, under the            │
+│    origin's identity and learned sequence, so remote agents prune           │
+│    them immediately; routes still reachable via another next hop            │
+│    are not withdrawn                                                        │
 │  • Don't wait for expiration                                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -4249,7 +4262,7 @@ docker run --rm muti-metroo-test
 | 0x05 | STREAM_CLOSE        | Graceful close                      |
 | 0x06 | STREAM_RESET        | Abort stream                        |
 | 0x10 | ROUTE_ADVERTISE     | Announce CIDR/domain/forward routes |
-| 0x11 | ROUTE_WITHDRAW      | Remove CIDR/domain/forward routes   |
+| 0x11 | ROUTE_WITHDRAW      | Remove routes (any family)          |
 | 0x12 | NODE_INFO_ADVERTISE | Announce node metadata              |
 | 0x20 | PEER_HELLO          | Handshake                           |
 | 0x21 | PEER_HELLO_ACK      | Handshake response                  |

@@ -117,16 +117,17 @@ func (t *DomainTable) allRouteMaps() []map[string][]*DomainRoute {
 	return []map[string][]*DomainRoute{t.exactRoutes, t.wildcardBase}
 }
 
-// filterRoutesFromPeer removes routes from a peer in a single map and returns the count removed.
-func filterRoutesFromPeer(routeMap map[string][]*DomainRoute, peerID identity.AgentID) int {
-	count := 0
+// filterRoutesFromPeer removes routes from a peer in a single map and returns
+// the removed routes.
+func filterRoutesFromPeer(routeMap map[string][]*DomainRoute, peerID identity.AgentID) []*DomainRoute {
+	var removed []*DomainRoute
 	for key, routes := range routeMap {
 		filtered := routes[:0]
 		for _, r := range routes {
 			if r.NextHop != peerID {
 				filtered = append(filtered, r)
 			} else {
-				count++
+				removed = append(removed, r)
 			}
 		}
 		if len(filtered) == 0 {
@@ -135,7 +136,7 @@ func filterRoutesFromPeer(routeMap map[string][]*DomainRoute, peerID identity.Ag
 			routeMap[key] = filtered
 		}
 	}
-	return count
+	return removed
 }
 
 // cleanupStaleRoutesInMap removes stale routes from a map and returns the count removed.
@@ -212,6 +213,17 @@ func (t *DomainTable) sortRoutesInMap(routeMap map[string][]*DomainRoute, key st
 
 // RemoveRoute removes a domain route from a specific origin.
 func (t *DomainTable) RemoveRoute(pattern string, originAgent identity.AgentID) bool {
+	return t.removeRoute(pattern, originAgent, 0, false)
+}
+
+// RemoveRouteWithSeq removes a domain route from a specific origin, but only
+// when the installed route's sequence is not newer than seq. Guards against a
+// stale ROUTE_WITHDRAW deleting a fresher re-advertised route.
+func (t *DomainTable) RemoveRouteWithSeq(pattern string, originAgent identity.AgentID, seq uint64) bool {
+	return t.removeRoute(pattern, originAgent, seq, true)
+}
+
+func (t *DomainTable) removeRoute(pattern string, originAgent identity.AgentID, seq uint64, checkSeq bool) bool {
 	if pattern == "" {
 		return false
 	}
@@ -226,6 +238,9 @@ func (t *DomainTable) RemoveRoute(pattern string, originAgent identity.AgentID) 
 	routes := targetMap[key]
 	for i, r := range routes {
 		if r.OriginAgent == originAgent {
+			if checkSeq && r.Sequence > seq {
+				return false // Stale withdraw; installed route is newer
+			}
 			targetMap[key] = append(routes[:i], routes[i+1:]...)
 			if len(targetMap[key]) == 0 {
 				delete(targetMap, key)
@@ -237,15 +252,16 @@ func (t *DomainTable) RemoveRoute(pattern string, originAgent identity.AgentID) 
 }
 
 // RemoveRoutesFromPeer removes all domain routes learned from a specific peer.
-func (t *DomainTable) RemoveRoutesFromPeer(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (t *DomainTable) RemoveRoutesFromPeer(peerID identity.AgentID) []*DomainRoute {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	count := 0
+	var removed []*DomainRoute
 	for _, routeMap := range t.allRouteMaps() {
-		count += filterRoutesFromPeer(routeMap, peerID)
+		removed = append(removed, filterRoutesFromPeer(routeMap, peerID)...)
 	}
-	return count
+	return removed
 }
 
 // Lookup finds the best domain route for a domain name.

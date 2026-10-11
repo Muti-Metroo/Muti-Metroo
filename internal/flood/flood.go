@@ -20,9 +20,15 @@ import (
 )
 
 // AdvertisementKey uniquely identifies a route advertisement for dedup.
+// Withdraw separates ROUTE_WITHDRAW dedup from ROUTE_ADVERTISE dedup: a
+// withdraw legitimately carries the same (origin, sequence) pair as the
+// advertisement it revokes (e.g. when a neighbour re-floods an origin's
+// routes after the origin's link dies), and sharing one namespace would make
+// the earlier advertisement swallow the withdraw.
 type AdvertisementKey struct {
 	OriginAgent identity.AgentID
 	Sequence    uint64
+	Withdraw    bool
 }
 
 // SeenAdvertisement tracks a seen advertisement for loop prevention.
@@ -450,6 +456,7 @@ func (f *Flooder) HandleRouteWithdraw(
 	key := AdvertisementKey{
 		OriginAgent: originAgent,
 		Sequence:    sequence,
+		Withdraw:    true,
 	}
 
 	// Check if we've seen this
@@ -497,17 +504,21 @@ func (f *Flooder) HandleRouteWithdraw(
 					IsWildcard: r.PrefixLength == 1,
 				})
 			}
+		case protocol.AddrFamilyAgent:
+			if agentID := protocol.DecodeAgentPrefix(r.Prefix); agentID != (identity.AgentID{}) {
+				f.routeMgr.ProcessAgentRouteWithdraw(originAgent, sequence, agentID)
+			}
 		}
 	}
 
 	if len(cidrEntries) > 0 {
-		f.routeMgr.ProcessRouteWithdraw(originAgent, cidrEntries)
+		f.routeMgr.ProcessRouteWithdraw(originAgent, sequence, cidrEntries)
 	}
 	if len(fwdEntries) > 0 {
-		f.routeMgr.ProcessForwardRouteWithdraw(originAgent, fwdEntries)
+		f.routeMgr.ProcessForwardRouteWithdraw(originAgent, sequence, fwdEntries)
 	}
 	if len(domEntries) > 0 {
-		f.routeMgr.ProcessDomainRouteWithdraw(originAgent, domEntries)
+		f.routeMgr.ProcessDomainRouteWithdraw(originAgent, sequence, domEntries)
 	}
 
 	// Flood withdrawal to other peers
@@ -752,19 +763,49 @@ func (f *Flooder) AnnounceLocalRoutes() {
 	}
 }
 
-// WithdrawLocalRoutes floods withdrawal of all local routes.
+// WithdrawLocalRoutes floods withdrawal of all local routes: CIDR, domain,
+// forward, and the agent presence record. Used on graceful shutdown so peers
+// drop this agent's routes immediately instead of waiting for route TTL
+// expiry.
 func (f *Flooder) WithdrawLocalRoutes() {
 	localRoutes := f.routeMgr.GetLocalRoutes()
-	if len(localRoutes) == 0 {
-		return
-	}
+	localDomainRoutes := f.routeMgr.GetLocalDomainRoutes()
+	localForwardRoutes := f.routeMgr.GetLocalForwardRoutes()
 
-	seq := f.routeMgr.IncrementSequence()
-
-	routes := make([]protocol.Route, 0, len(localRoutes))
+	routes := make([]protocol.Route, 0, len(localRoutes)+len(localDomainRoutes)+len(localForwardRoutes)+1)
 	for _, lr := range localRoutes {
 		routes = append(routes, ipNetToProtocolRoute(lr.Network, lr.Metric))
 	}
+	for _, dr := range localDomainRoutes {
+		prefixLen := uint8(0) // 0 = exact match
+		if dr.IsWildcard {
+			prefixLen = 1 // 1 = wildcard
+		}
+		routes = append(routes, protocol.Route{
+			AddressFamily: protocol.AddrFamilyDomain,
+			PrefixLength:  prefixLen,
+			Prefix:        protocol.EncodeDomainPrefix(dr.Pattern),
+			Metric:        dr.Metric,
+		})
+	}
+	for _, tr := range localForwardRoutes {
+		routes = append(routes, protocol.Route{
+			AddressFamily: protocol.AddrFamilyForward,
+			PrefixLength:  0, // Not used for forward routes
+			Prefix:        protocol.EncodeForwardKeyWithTarget(tr.Key, tr.Target),
+			Metric:        tr.Metric,
+		})
+	}
+
+	// Always withdraw the agent presence route too.
+	routes = append(routes, protocol.Route{
+		AddressFamily: protocol.AddrFamilyAgent,
+		PrefixLength:  0,
+		Prefix:        protocol.EncodeAgentPrefix(f.localID),
+		Metric:        0,
+	})
+
+	seq := f.routeMgr.IncrementSequence()
 
 	// Split when the route count would overflow the single-byte wire count.
 	// Each chunk needs its own sequence, or the receiver's
@@ -841,6 +882,125 @@ func (f *Flooder) WithdrawLocalDomainRoute(pattern string, isWildcard bool) {
 // CIDR route.
 func (f *Flooder) WithdrawLocalCIDRRoute(network *net.IPNet, metric uint16) {
 	f.withdrawSingle(ipNetToProtocolRoute(network, metric))
+}
+
+// WithdrawLocalAgentRoute floods withdrawal of this agent's presence route.
+func (f *Flooder) WithdrawLocalAgentRoute() {
+	f.withdrawSingle(protocol.Route{
+		AddressFamily: protocol.AddrFamilyAgent,
+		Prefix:        protocol.EncodeAgentPrefix(f.localID),
+	})
+}
+
+// FloodWithdrawnRoutes re-floods withdrawals for routes that were removed
+// because the next-hop peer disconnected. Each withdraw carries the origin's
+// own identity and the sequence the route was learned under -- minting a
+// local sequence would make the withdraw look newer than any re-advertise the
+// origin sends after recovering, and the receiver-side sequence guard would
+// then be unable to reject this stale copy. Routes this agent can still reach
+// through another next hop are skipped: withdrawing them would tell receivers
+// to drop a route that is still usable via us.
+func (f *Flooder) FloodWithdrawnRoutes(
+	cidrRoutes []*routing.Route,
+	domainRoutes []*routing.DomainRoute,
+	forwardRoutes []*routing.ForwardRoute,
+	agentRoutes []*routing.AgentRoute,
+) {
+	// Group by origin and by the sequence each route was learned under; the
+	// wire format carries one sequence per message.
+	groups := make(map[identity.AgentID]map[uint64]*[]protocol.Route)
+	add := func(origin identity.AgentID, seq uint64, r protocol.Route) {
+		bySeq := groups[origin]
+		if bySeq == nil {
+			bySeq = make(map[uint64]*[]protocol.Route)
+			groups[origin] = bySeq
+		}
+		list := bySeq[seq]
+		if list == nil {
+			list = &[]protocol.Route{}
+			bySeq[seq] = list
+		}
+		*list = append(*list, r)
+	}
+
+	for _, r := range cidrRoutes {
+		if r.OriginAgent == f.localID {
+			continue // Our own routes are not affected by a peer loss
+		}
+		if f.routeMgr.Table().HasRoute(r.Network, r.OriginAgent) {
+			continue // Still reachable via another next hop
+		}
+		add(r.OriginAgent, r.Sequence, routeToProtocol(r))
+	}
+	for _, r := range domainRoutes {
+		if r.OriginAgent == f.localID {
+			continue
+		}
+		if f.routeMgr.DomainTable().HasRoute(r.Pattern, r.OriginAgent) {
+			continue
+		}
+		prefixLen := uint8(0)
+		if r.IsWildcard {
+			prefixLen = 1
+		}
+		add(r.OriginAgent, r.Sequence, protocol.Route{
+			AddressFamily: protocol.AddrFamilyDomain,
+			PrefixLength:  prefixLen,
+			Prefix:        protocol.EncodeDomainPrefix(r.Pattern),
+			Metric:        r.Metric,
+		})
+	}
+	for _, r := range forwardRoutes {
+		if r.OriginAgent == f.localID {
+			continue
+		}
+		if f.routeMgr.ForwardTable().HasRoute(r.Key, r.OriginAgent) {
+			continue
+		}
+		add(r.OriginAgent, r.Sequence, protocol.Route{
+			AddressFamily: protocol.AddrFamilyForward,
+			PrefixLength:  0,
+			Prefix:        protocol.EncodeForwardKeyWithTarget(r.Key, r.Target),
+			Metric:        r.Metric,
+		})
+	}
+	for _, r := range agentRoutes {
+		if r.OriginAgent == f.localID {
+			continue
+		}
+		if agentRouteReachable(f.routeMgr.AgentTable(), r) {
+			continue
+		}
+		add(r.OriginAgent, r.Sequence, protocol.Route{
+			AddressFamily: protocol.AddrFamilyAgent,
+			PrefixLength:  0,
+			Prefix:        protocol.EncodeAgentPrefix(r.AgentID),
+			Metric:        r.Metric,
+		})
+	}
+
+	for origin, bySeq := range groups {
+		for seq, routes := range bySeq {
+			f.floodWithdrawal(
+				identity.AgentID{},
+				origin,
+				seq,
+				*routes,
+				[]identity.AgentID{f.localID},
+			)
+		}
+	}
+}
+
+// agentRouteReachable reports whether the agent table still holds a route for
+// r.AgentID from r.OriginAgent (i.e. via a surviving next hop).
+func agentRouteReachable(t *routing.AgentTable, r *routing.AgentRoute) bool {
+	for _, other := range t.GetRoutesForAgent(r.AgentID) {
+		if other.OriginAgent == r.OriginAgent {
+			return true
+		}
+	}
+	return false
 }
 
 // routeChunks returns [start, end) index pairs covering n routes in groups of

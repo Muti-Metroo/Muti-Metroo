@@ -156,19 +156,50 @@ func (t *AgentTable) RemoveRoute(agentID, originAgent identity.AgentID) bool {
 	return false
 }
 
-// RemoveRoutesFromPeer removes all agent routes learned from a specific peer.
-func (t *AgentTable) RemoveRoutesFromPeer(peerID identity.AgentID) int {
+// RemoveRouteWithSeq removes agent presence routes from a specific origin, but
+// only when the installed route's sequence is not newer than seq. Guards
+// against a stale ROUTE_WITHDRAW deleting a fresher re-advertised route.
+// Unlike the other tables, an agent can hold several entries per origin (one
+// per next hop), so all entries passing the guard are removed.
+func (t *AgentTable) RemoveRouteWithSeq(agentID, originAgent identity.AgentID, seq uint64) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	count := 0
+	routes := t.routes[agentID]
+	removed := false
+	filtered := routes[:0]
+	for _, r := range routes {
+		if r.OriginAgent == originAgent && r.Sequence <= seq {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	if !removed {
+		return false
+	}
+	if len(filtered) == 0 {
+		delete(t.routes, agentID)
+	} else {
+		t.routes[agentID] = filtered
+	}
+	return true
+}
+
+// RemoveRoutesFromPeer removes all agent routes learned from a specific peer.
+// Returns the removed routes so the caller can propagate withdrawals.
+func (t *AgentTable) RemoveRoutesFromPeer(peerID identity.AgentID) []*AgentRoute {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	var removed []*AgentRoute
 	for agentID, routes := range t.routes {
 		filtered := routes[:0]
 		for _, r := range routes {
 			if r.NextHop != peerID {
 				filtered = append(filtered, r)
 			} else {
-				count++
+				removed = append(removed, r)
 			}
 		}
 		if len(filtered) == 0 {
@@ -177,7 +208,7 @@ func (t *AgentTable) RemoveRoutesFromPeer(peerID identity.AgentID) int {
 			t.routes[agentID] = filtered
 		}
 	}
-	return count
+	return removed
 }
 
 // Lookup finds the best agent presence route for a target agent.

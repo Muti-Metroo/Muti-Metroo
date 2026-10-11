@@ -581,15 +581,19 @@ func (m *Manager) ProcessRouteAdvertise(
 }
 
 // ProcessRouteWithdraw processes an incoming ROUTE_WITHDRAW.
+// Routes whose installed sequence is newer than the withdraw's sequence are
+// kept: a withdraw traveling a slow path must not delete a fresher
+// re-advertisement from the same origin.
 // Returns true if any routes were removed.
 func (m *Manager) ProcessRouteWithdraw(
 	originAgent identity.AgentID,
+	sequence uint64,
 	routes []RouteEntry,
 ) bool {
 	removed := false
 
 	for _, entry := range routes {
-		if m.table.RemoveRoute(entry.Network, originAgent) {
+		if m.table.RemoveRouteWithSeq(entry.Network, originAgent, sequence) {
 			removed = true
 			m.notifyChange(RouteChange{
 				Type: RouteRemoved,
@@ -605,7 +609,8 @@ func (m *Manager) ProcessRouteWithdraw(
 }
 
 // HandlePeerDisconnect removes all routes learned from a disconnected peer.
-func (m *Manager) HandlePeerDisconnect(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (m *Manager) HandlePeerDisconnect(peerID identity.AgentID) []*Route {
 	return m.table.RemoveRoutesFromPeer(peerID)
 }
 
@@ -905,14 +910,16 @@ func (m *Manager) ProcessDomainRouteAdvertise(
 }
 
 // ProcessDomainRouteWithdraw removes domain routes from the given origin.
-// Returns true if any routes were removed.
+// Routes whose installed sequence is newer than the withdraw's sequence are
+// kept. Returns true if any routes were removed.
 func (m *Manager) ProcessDomainRouteWithdraw(
 	originAgent identity.AgentID,
+	sequence uint64,
 	entries []DomainRouteEntry,
 ) bool {
 	removed := false
 	for _, e := range entries {
-		if m.domainTable.RemoveRoute(e.Pattern, originAgent) {
+		if m.domainTable.RemoveRouteWithSeq(e.Pattern, originAgent, sequence) {
 			removed = true
 		}
 	}
@@ -920,7 +927,8 @@ func (m *Manager) ProcessDomainRouteWithdraw(
 }
 
 // HandlePeerDisconnectDomain removes all domain routes learned from a disconnected peer.
-func (m *Manager) HandlePeerDisconnectDomain(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (m *Manager) HandlePeerDisconnectDomain(peerID identity.AgentID) []*DomainRoute {
 	return m.domainTable.RemoveRoutesFromPeer(peerID)
 }
 
@@ -1055,14 +1063,16 @@ func (m *Manager) ProcessForwardRouteAdvertise(
 }
 
 // ProcessForwardRouteWithdraw removes port forward routes from the given origin.
-// Returns true if any routes were removed.
+// Routes whose installed sequence is newer than the withdraw's sequence are
+// kept. Returns true if any routes were removed.
 func (m *Manager) ProcessForwardRouteWithdraw(
 	originAgent identity.AgentID,
+	sequence uint64,
 	entries []ForwardRouteEntry,
 ) bool {
 	removed := false
 	for _, e := range entries {
-		if m.forwardTable.RemoveRoute(e.Key, originAgent) {
+		if m.forwardTable.RemoveRouteWithSeq(e.Key, originAgent, sequence) {
 			removed = true
 		}
 	}
@@ -1070,7 +1080,8 @@ func (m *Manager) ProcessForwardRouteWithdraw(
 }
 
 // HandlePeerDisconnectForward removes all port forward routes learned from a disconnected peer.
-func (m *Manager) HandlePeerDisconnectForward(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (m *Manager) HandlePeerDisconnectForward(peerID identity.AgentID) []*ForwardRoute {
 	return m.forwardTable.RemoveRoutesFromPeer(peerID)
 }
 
@@ -1123,8 +1134,20 @@ func (m *Manager) ProcessAgentRouteAdvertise(
 	return m.agentTable.AddRoute(route)
 }
 
+// ProcessAgentRouteWithdraw processes an agent presence route withdrawal.
+// The route is kept when its installed sequence is newer than the withdraw's
+// sequence. Returns true if a route was removed.
+func (m *Manager) ProcessAgentRouteWithdraw(
+	originAgent identity.AgentID,
+	sequence uint64,
+	agentID identity.AgentID,
+) bool {
+	return m.agentTable.RemoveRouteWithSeq(agentID, originAgent, sequence)
+}
+
 // HandlePeerDisconnectAgent removes all agent routes learned from a disconnected peer.
-func (m *Manager) HandlePeerDisconnectAgent(peerID identity.AgentID) int {
+// Returns the removed routes so the caller can propagate withdrawals.
+func (m *Manager) HandlePeerDisconnectAgent(peerID identity.AgentID) []*AgentRoute {
 	return m.agentTable.RemoveRoutesFromPeer(peerID)
 }
 

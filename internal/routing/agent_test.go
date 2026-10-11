@@ -285,8 +285,8 @@ func TestAgentTable_RemoveRoutesFromPeer(t *testing.T) {
 	})
 
 	removed := table.RemoveRoutesFromPeer(peerC)
-	if removed != 2 {
-		t.Errorf("RemoveRoutesFromPeer = %d, want 2", removed)
+	if len(removed) != 2 {
+		t.Errorf("RemoveRoutesFromPeer = %d, want 2", len(removed))
 	}
 
 	// agentA should still be reachable via peerD
@@ -599,8 +599,8 @@ func TestManager_ProcessAgentRouteAdvertise(t *testing.T) {
 
 	// Verify HandlePeerDisconnectAgent
 	removed := mgr.HandlePeerDisconnectAgent(peerB)
-	if removed != 1 {
-		t.Errorf("HandlePeerDisconnectAgent = %d, want 1", removed)
+	if len(removed) != 1 {
+		t.Errorf("HandlePeerDisconnectAgent = %d, want 1", len(removed))
 	}
 	if mgr.LookupAgent(agentA) != nil {
 		t.Error("LookupAgent should return nil after peer disconnect")

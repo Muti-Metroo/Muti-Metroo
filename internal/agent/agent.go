@@ -1429,10 +1429,11 @@ func (a *Agent) Stop() error {
 		a.running.Store(false)
 		close(a.stopCh)
 
-		// Withdraw routes before shutdown
-		if a.cfg.Exit.Enabled || len(a.cfg.Forward.Endpoints) > 0 {
-			a.flooder.WithdrawLocalRoutes()
-		}
+		// Withdraw routes before shutdown. Unconditional: even an agent with
+		// no exit routes or forwards still originates its agent presence
+		// record, which WithdrawLocalRoutes now carries, so peers drop it
+		// immediately instead of waiting for route TTL expiry.
+		a.flooder.WithdrawLocalRoutes()
 
 		// Stop components in reverse order
 		if a.healthServer != nil {
@@ -4860,16 +4861,27 @@ func (a *Agent) handlePeerDisconnect(conn *peer.Connection, err error) {
 	a.cleanupRelaysForPeer(peerID)
 
 	// Clean up routes learned from this peer
-	a.routeMgr.HandlePeerDisconnect(peerID)
-	a.routeMgr.HandlePeerDisconnectDomain(peerID)
-	a.routeMgr.HandlePeerDisconnectForward(peerID)
-	a.routeMgr.HandlePeerDisconnectAgent(peerID)
+	removedCIDR := a.routeMgr.HandlePeerDisconnect(peerID)
+	removedDomain := a.routeMgr.HandlePeerDisconnectDomain(peerID)
+	removedForward := a.routeMgr.HandlePeerDisconnectForward(peerID)
+	removedAgent := a.routeMgr.HandlePeerDisconnectAgent(peerID)
 
 	// Clear seen cache entries for this peer so re-advertisements
 	// after reconnection are not rejected as duplicates.
 	if a.flooder != nil {
 		a.flooder.ClearSeenCacheForOrigin(peerID)
 		a.flooder.RemoveAdvertiseLimiter(peerID)
+
+		// Flood withdrawals for the routes that died with this peer so
+		// remote agents drop them now instead of blackholing traffic until
+		// route TTL expiry. Routes still reachable via another next hop are
+		// left alone.
+		if total := len(removedCIDR) + len(removedDomain) + len(removedForward) + len(removedAgent); total > 0 {
+			a.logger.Debug("flooding withdrawals for routes lost with peer",
+				logging.KeyPeerID, peerID.ShortString(),
+				logging.KeyCount, total)
+			a.flooder.FloodWithdrawnRoutes(removedCIDR, removedDomain, removedForward, removedAgent)
+		}
 	}
 
 	// Tear down any shell client adapters routed through the lost peer.
