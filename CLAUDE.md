@@ -22,7 +22,7 @@ Muti Metroo is part of a three-component suite: **Muti Metroo** (mesh agent), **
 
 ## Related Projects
 
-Both are sibling directories; each has its own `VERSION` file (used by `publish.sh` for download URLs). You may explore their codebases when updating docs.
+Both are sibling directories. You may explore their codebases when updating docs. Download links in the docs point at each repo's `releases/latest/download/<asset>` URL, so asset names must match the release assets exactly.
 
 - **Mutiauk** (`../Mutiauk/`): Cross-platform TUN interface tool (Linux/macOS/Windows; requires root/CAP_NET_ADMIN on Linux and macOS, Administrator on Windows). Provides transparent Layer 3 traffic interception, forwarding through Muti Metroo's SOCKS5 proxy. Docs: `docs/docs/mutiauk.mdx`. **Build it with `GOTOOLCHAIN=go1.25.5`** (the Makefile targets and the `golang:1.25` Docker image already pin this) -- its gVisor dependency does not compile under Go 1.26.
 - **Muti Metroo Manager** (`../Muti-Metroo-Manager/`): Cross-platform single Go binary with embedded React SPA. Browser-based UI that reverse-proxies an agent's HTTP API (topology visualization, real-time stats, route management, management commands, file transfer, mesh testing, sleep/wake). Docs: `docs/docs/muti-metroo-manager.mdx`.
@@ -47,6 +47,8 @@ The project documentation is built with Docusaurus and lives in the `docs/` fold
 5. **Protocol/internals changes**: Update `Architecture.md` only (not Docusaurus)
 
 **Blend new material in; do not emphasize it.** A new feature sits at the same level of importance as its peers, not above them. Find the section(s) where sibling features are already documented and extend those in the same tone, length, and depth. Do not hoist a minor addition into top-level summaries, overview paragraphs, or feature taglines where it does not belong. Before writing, read how a comparable existing feature is documented and match it: same heading depth, same level of detail, same placement relative to the rest of the page.
+
+The site is deployed to GitHub Pages (custom domain `mutimetroo.com`, set by `docs/static/CNAME`) by `.github/workflows/docs.yml` on every push to `master` that touches `docs/`.
 
 To work with documentation locally: `cd docs && npm install && npm start` (dev server at http://localhost:3000). Production build: `npm run build`.
 

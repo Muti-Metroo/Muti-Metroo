@@ -42,7 +42,7 @@ Three-component suite (sibling checkouts):
 - `docker-compose.yml` (root) — 5-agent mixed-transport chain for local dev
 - `Architecture.md` — protocol internals (developer docs; keep wire-format
   details out of `docs/`)
-- `release.sh`, `publish.sh` — GitHub release + docs-site publishing helpers
+- `release.sh` — GitHub release helper (the docs site deploys to GitHub Pages via `.github/workflows/docs.yml`)
 - `VERSION` — current release version (4.10.x); release-please manages it
 
 ## Build & Test

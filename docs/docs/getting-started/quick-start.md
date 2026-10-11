@@ -163,7 +163,7 @@ Mutiauk requires Linux and root privileges to create the TUN interface.
 ### Install Mutiauk
 
 ```bash
-curl -L -o mutiauk __MUTIAUK_RELEASE__/mutiauk-linux-amd64
+curl -L -o mutiauk https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64
 chmod +x mutiauk
 sudo mv mutiauk /usr/local/bin/
 ```

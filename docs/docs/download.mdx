@@ -80,7 +80,7 @@ Binaries are provided for convenience; building from source is recommended for r
 ### Apple Silicon (M-series)
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-darwin-arm64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-arm64" primary>
     Download Binary (Apple Silicon)
   </DownloadButton>
 </DownloadButtonGroup>
@@ -88,7 +88,7 @@ Binaries are provided for convenience; building from source is recommended for r
 ### Intel
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-darwin-amd64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-amd64" primary>
     Download Binary (Intel)
   </DownloadButton>
 </DownloadButtonGroup>
@@ -97,7 +97,7 @@ Binaries are provided for convenience; building from source is recommended for r
 
 ```bash
 # Download for your architecture (example: Apple Silicon)
-curl -L -o muti-metroo __MUTI_METROO_RELEASE__/muti-metroo-darwin-arm64
+curl -L -o muti-metroo https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-darwin-arm64
 
 # Make executable and install
 chmod +x muti-metroo
@@ -119,7 +119,7 @@ On first run, macOS may show a security warning because the binary is not signed
 ### x86_64 (amd64)
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-linux-amd64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64" primary>
     Download Binary (x86_64)
   </DownloadButton>
 </DownloadButtonGroup>
@@ -127,7 +127,7 @@ On first run, macOS may show a security warning because the binary is not signed
 ### ARM64 (aarch64)
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-linux-arm64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-arm64" primary>
     Download Binary (ARM64)
   </DownloadButton>
 </DownloadButtonGroup>
@@ -136,7 +136,7 @@ On first run, macOS may show a security warning because the binary is not signed
 
 ```bash
 # Download for your architecture (example: amd64)
-curl -L -o muti-metroo __MUTI_METROO_RELEASE__/muti-metroo-linux-amd64
+curl -L -o muti-metroo https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-linux-amd64
 
 # Make executable and install
 chmod +x muti-metroo
@@ -152,10 +152,10 @@ muti-metroo --version
 ### x86_64 (amd64)
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.exe" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-amd64.exe" primary>
     Download (.exe)
   </DownloadButton>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.dll">
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-amd64.dll">
     Download DLL
   </DownloadButton>
 </DownloadButtonGroup>
@@ -163,10 +163,10 @@ muti-metroo --version
 ### ARM64
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-arm64.exe" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-arm64.exe" primary>
     Download ARM64 (.exe)
   </DownloadButton>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-windows-arm64.dll">
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-arm64.dll">
     Download ARM64 DLL
   </DownloadButton>
 </DownloadButtonGroup>
@@ -179,7 +179,7 @@ The DLL variant runs via `rundll32.exe` without a console window. Use `.exe` for
 
 ```powershell
 # Download for your architecture (example: amd64)
-curl.exe -L -o muti-metroo.exe __MUTI_METROO_RELEASE__/muti-metroo-windows-amd64.exe
+curl.exe -L -o muti-metroo.exe https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-windows-amd64.exe
 
 # Move to Program Files (run as Administrator)
 mkdir "C:\Program Files\muti-metroo" -ErrorAction SilentlyContinue
@@ -201,7 +201,7 @@ muti-metroo.exe --version
 Verify your download with SHA256 checksums:
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/checksums.txt">Download Checksums</DownloadButton>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/checksums.txt">Download Checksums</DownloadButton>
 </DownloadButtonGroup>
 
 <Tabs groupId="verify-os">
@@ -209,7 +209,7 @@ Verify your download with SHA256 checksums:
 
 ```bash
 # Download checksums
-curl -L -o checksums.txt __MUTI_METROO_RELEASE__/checksums.txt
+curl -L -o checksums.txt https://github.com/postalsys/Muti-Metroo/releases/latest/download/checksums.txt
 
 # Verify (example for linux-amd64)
 sha256sum -c checksums.txt --ignore-missing
@@ -239,7 +239,7 @@ if ($expected -eq $actual) { "OK" } else { "MISMATCH" }
 A comprehensive PDF manual is available for offline use and printing:
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTI_METROO_RELEASE__/muti-metroo-user-manual.pdf" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo/releases/latest/download/muti-metroo-user-manual.pdf" primary>
     Download User Manual (PDF)
   </DownloadButton>
 </DownloadButtonGroup>
@@ -251,10 +251,10 @@ The user manual covers installation, configuration, features, and deployment in 
 A Linux-only TUN interface tool that transparently routes Layer 3 traffic through Muti Metroo's SOCKS5 proxy. Requires root. See the full [Mutiauk guide](/mutiauk) for details.
 
 <DownloadButtonGroup>
-  <DownloadButton href="__MUTIAUK_RELEASE__/mutiauk-linux-amd64" primary>
+  <DownloadButton href="https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-amd64" primary>
     x86_64 (amd64)
   </DownloadButton>
-  <DownloadButton href="__MUTIAUK_RELEASE__/mutiauk-linux-arm64">
+  <DownloadButton href="https://github.com/postalsys/Mutiauk/releases/latest/download/mutiauk-linux-arm64">
     ARM64
   </DownloadButton>
 </DownloadButtonGroup>
@@ -267,10 +267,10 @@ A web dashboard for managing and monitoring your Muti Metroo mesh network. See t
   <TabItem value="macos" label="macOS" default>
 
 <DownloadButtonGroup>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-darwin-arm64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-darwin-arm64" primary>
     Apple Silicon
   </DownloadButton>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-darwin-amd64">
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-darwin-amd64">
     Intel
   </DownloadButton>
 </DownloadButtonGroup>
@@ -279,10 +279,10 @@ A web dashboard for managing and monitoring your Muti Metroo mesh network. See t
   <TabItem value="linux" label="Linux">
 
 <DownloadButtonGroup>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-linux-amd64" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-linux-amd64" primary>
     x86_64 (amd64)
   </DownloadButton>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-linux-arm64">
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-linux-arm64">
     ARM64
   </DownloadButton>
 </DownloadButtonGroup>
@@ -291,10 +291,10 @@ A web dashboard for managing and monitoring your Muti Metroo mesh network. See t
   <TabItem value="windows" label="Windows">
 
 <DownloadButtonGroup>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-windows-amd64.exe" primary>
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-windows-amd64.exe" primary>
     x86_64 (amd64)
   </DownloadButton>
-  <DownloadButton href="__METROO_MANAGER_RELEASE__/muti-metroo-manager-windows-arm64.exe">
+  <DownloadButton href="https://github.com/postalsys/Muti-Metroo-Manager/releases/latest/download/metroo-manager-windows-arm64.exe">
     ARM64
   </DownloadButton>
 </DownloadButtonGroup>

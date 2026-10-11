@@ -642,7 +642,3 @@ echo ""
 echo "=== Release $TAG complete ==="
 echo "URL: ${GITHUB_URL}/${REPO}/releases/tag/${TAG}"
 
-# --- Publish documentation site ---
-echo ""
-echo "=== Publishing documentation site ==="
-"$SCRIPT_DIR/publish.sh"
