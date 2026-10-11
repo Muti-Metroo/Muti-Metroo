@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.7](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.6...muti-metroo-v4.10.7) (2026-10-11)
+
+
+### Bug Fixes
+
+* **health:** declare the agent's 404 page as English ([cd49e17](https://github.com/postalsys/Muti-Metroo/commit/cd49e17dd1d9afbc7d19c325e36f3e6421b1496b))
+
 ## [4.10.6](https://github.com/postalsys/Muti-Metroo/compare/muti-metroo-v4.10.5...muti-metroo-v4.10.6) (2026-10-11)
 
 
