@@ -65,7 +65,7 @@ Each privileged request carries an Ed25519 signature that binds the requesting a
 | Operation                                                      | Signed |
 | -------------------------------------------------------------- | ------ |
 | Management commands ([`shell`](/configuration/shell))          | Always |
-| File upload, download, and browse ([`file_transfer`](/configuration/file-transfer)) | Always |
+| File upload, download, and browse ([`file_transfer`](/configuration/file-transfer)) | Always, except that an agent holding `signing_private_key` signs unsigned browse requests that reach it from other agents; see [Authentication](/security/authentication#how-a-request-is-signed) |
 | Runtime changes to routes, peers, listeners, forwards, mesh hosts, and display name | Always |
 | Sleep and wake commands                                        | When the receiving agent has `signing_public_key` |
 
