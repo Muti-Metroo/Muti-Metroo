@@ -42,7 +42,6 @@ Three-component suite (sibling checkouts):
 - `Architecture.md` — protocol internals (developer docs; keep wire-format
   details out of `docs/`)
 - `.github/workflows/` — `release-please.yml` (releases and assets) and `docs.yml` (docs site to GitHub Pages)
-- `VERSION` — current release version (4.10.x); release-please manages it
 
 ## Build & Test
 
@@ -89,8 +88,7 @@ adding tests.
 - Conventional commits on master; **release-please** (see
   `.github/workflows/release-please.yml`) proposes release PRs.
   `fix:`/`feat:` drive version bumps; `docs:`/`test:`/`chore:` do not.
-- `.github/.release-please-manifest.json` pins the released version;
-  `VERSION` at repo root carries the same number.
+- `.github/.release-please-manifest.json` pins the released version.
 - Merging the release PR creates the tag and GitHub release; CI then builds
   and uploads binaries, DLLs, the user manual PDF, and checksums. Never tag or
   create releases by hand.

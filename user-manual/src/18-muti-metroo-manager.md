@@ -15,24 +15,24 @@ flowchart LR
 
 Get the file matching your platform:
 
-| Platform              | Filename                      |
-| --------------------- | ----------------------------- |
-| macOS (Apple Silicon) | `muti-metroo-manager-darwin-arm64`      |
-| macOS (Intel)         | `muti-metroo-manager-darwin-amd64`      |
-| Linux (amd64)         | `muti-metroo-manager-linux-amd64`       |
-| Linux (arm64)         | `muti-metroo-manager-linux-arm64`       |
-| Windows (amd64)       | `muti-metroo-manager-windows-amd64.exe` |
-| Windows (arm64)       | `muti-metroo-manager-windows-arm64.exe` |
+| Platform              | Filename                           |
+| --------------------- | ---------------------------------- |
+| macOS (Apple Silicon) | `metroo-manager-darwin-arm64`      |
+| macOS (Intel)         | `metroo-manager-darwin-amd64`      |
+| Linux (amd64)         | `metroo-manager-linux-amd64`       |
+| Linux (arm64)         | `metroo-manager-linux-arm64`       |
+| Windows (amd64)       | `metroo-manager-windows-amd64.exe` |
+| Windows (arm64)       | `metroo-manager-windows-arm64.exe` |
 
 ## Quick Start
 
 Once you have the binary in your working directory (example: Linux amd64):
 
 ```bash
-chmod +x muti-metroo-manager-linux-amd64
+chmod +x metroo-manager-linux-amd64
 
 # Launch (connects to local agent on port 8080)
-./muti-metroo-manager-linux-amd64
+./metroo-manager-linux-amd64
 
 # Open http://localhost:3000 in your browser
 ```
