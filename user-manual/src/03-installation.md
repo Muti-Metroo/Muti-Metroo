@@ -17,7 +17,7 @@ Pre-built binaries are available for all major platforms:
 | Windows | x86_64 (DLL) | `muti-metroo-windows-amd64.dll` |
 | Windows | ARM64 (DLL) | `muti-metroo-windows-arm64.dll` |
 
-Obtain the file for your platform from your team's Muti Metroo Manager instance (**Downloads** tab) or whichever distribution channel your team uses.
+Obtain the file for your platform from the distribution channel your team uses.
 
 ### Linux/macOS Installation
 

@@ -44,7 +44,7 @@ flowchart LR
 
 ## Get the Binary
 
-Obtain the Mutiauk binary from your team's Muti Metroo Manager instance (**Downloads** tab) or whichever distribution channel your team uses:
+Obtain the Mutiauk binary from the distribution channel your team uses:
 
 | Platform      | Filename                  |
 | ------------- | ------------------------- |

@@ -4,7 +4,7 @@ Get Muti Metroo running in under 5 minutes using the interactive setup wizard.
 
 ## Get the Binary
 
-Obtain the binary for your platform from your team's Muti Metroo Manager instance (the **Downloads** tab) or whichever distribution channel your team uses. Pick the file that matches your OS and CPU:
+Obtain the binary for your platform from the distribution channel your team uses. Pick the file that matches your OS and CPU:
 
 | Platform              | Filename             |
 | --------------------- | -------------------- |

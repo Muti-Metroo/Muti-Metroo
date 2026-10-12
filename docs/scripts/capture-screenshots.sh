@@ -17,18 +17,16 @@
 #      transit advertise their listeners as dial targets. exit-datacenter
 #      allows management commands and file transfer. Both exits allow ICMP.
 #      Sleep mode is enabled everywhere, so Manager offers Suspend mesh.
-#   3. Stages a Manager downloads bundle from the latest GitHub releases
-#      (cached in docs/scripts/.cache, keyed by release tag).
-#   4. Starts Manager on the host against gateway and runs
+#   3. Starts Manager on the host against gateway and runs
 #      capture-muti-metroo-manager.js.
-#   5. Removes the containers, the Docker network, and the temp directory,
+#   4. Removes the containers, the Docker network, and the temp directory,
 #      also when a step fails.
 #
 # Containers keep the host's name and addresses out of the screenshots, and
 # the fixed identities mean every run photographs the same mesh. Only live
 # values (uptime, RTT, byte counters) differ between runs.
 #
-# Requirements: Go, Docker, Node.js 20+, gh (authenticated), zip.
+# Requirements: Go, Docker, Node.js 20+, gh (authenticated).
 #
 # Usage:
 #   docs/scripts/capture-screenshots.sh
@@ -334,28 +332,12 @@ mesh_converged() {
 wait_for "gateway HTTP API" 30 curl -fsS "http://127.0.0.1:$HTTP_GATEWAY/health"
 wait_for "mesh convergence" 120 mesh_converged
 
-# --- Downloads bundle ----------------------------------------------------------------
-
-mm_tag="$(gh release view --repo Muti-Metroo/Muti-Metroo --json tagName --jq .tagName)"
-ma_tag="$(gh release view --repo Muti-Metroo/Mutiauk --json tagName --jq .tagName)"
-assets="$CACHE_DIR/$mm_tag+$ma_tag"
-if [ ! -f "$assets/.complete" ]; then
-  log "Downloading release assets for the downloads bundle ($mm_tag, $ma_tag)"
-  rm -rf "$assets" && mkdir -p "$assets"
-  gh release download "$mm_tag" --repo Muti-Metroo/Muti-Metroo --dir "$assets" --pattern 'muti-metroo-*'
-  gh release download "$ma_tag" --repo Muti-Metroo/Mutiauk --dir "$assets" --pattern 'mutiauk-*'
-  touch "$assets/.complete"
-fi
-node "$SCRIPT_DIR/make-downloads-bundle.mjs" "$assets" "${mm_tag##*-}" "${ma_tag##*-}" \
-  "$WORK/muti-metroo-downloads-bundle.zip"
-
 # --- Manager + capture -----------------------------------------------------------------
 
 log "Starting Muti Metroo Manager"
 "$MANAGER" -addr "127.0.0.1:$MANAGER_PORT" \
   -agent "http://127.0.0.1:$HTTP_GATEWAY" \
   -data-dir "$WORK/manager" \
-  -downloads-bundle "$WORK/muti-metroo-downloads-bundle.zip" \
   > "$WORK/manager.log" 2>&1 &
 MANAGER_PID=$!
 wait_for "Manager" 30 curl -fsS "http://127.0.0.1:$MANAGER_PORT/"

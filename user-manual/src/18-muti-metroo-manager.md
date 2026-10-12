@@ -13,7 +13,7 @@ flowchart LR
 
 ## Get the Binary
 
-Muti Metroo Manager is the binary that _hosts_ the **Downloads** tab for everyone else, so it has to be brought in out-of-band -- ask whoever set up the shared host (or your release-artifacts source) for the file matching your platform:
+Get the file matching your platform:
 
 | Platform              | Filename                      |
 | --------------------- | ----------------------------- |
@@ -61,8 +61,6 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 | `-agent-token`      |                              | Bearer token. Visible via `/proc`; prefer `-agent-token-file` or the env var.        |
 | `-agent-token-file` |                              | File containing the bearer token (single line, trimmed).                             |
 | `-data-dir`         | OS-specific (see below)      | Directory for `muti-metroo-manager.db` and the instance lock.                                  |
-| `-downloads-bundle` | auto-detect alongside binary | Path to `muti-metroo-downloads-bundle.zip`. An explicit path that does not exist is fatal. |
-| `-no-downloads`     |                              | Disable the Downloads tab regardless of bundle presence.                             |
 | `-log-format`       | `text`                       | Log encoding: `text` (operator) or `json` (SIEM).                                    |
 | `-log-level`        | `info`                       | Minimum severity: `debug`, `info`, `warn`, `error`.                                  |
 | `-metrics-addr`     |                              | `host:port` for the `/metrics` listener; empty disables. Pin to a private interface. |
@@ -95,12 +93,6 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 
 # Bind to all interfaces
 ./muti-metroo-manager -addr 0.0.0.0:3000 -agent http://10.0.0.5:8080
-
-# Mount a downloads bundle from a custom path
-./muti-metroo-manager -downloads-bundle /opt/muti-metroo/muti-metroo-downloads-bundle.zip
-
-# Explicitly disable the Downloads tab
-./muti-metroo-manager -no-downloads
 
 # Production: structured logs, /metrics on a private IP, sounds disabled
 ./muti-metroo-manager -config /etc/muti-metroo-manager/config.toml \
@@ -235,17 +227,9 @@ Connectivity tests between all agents in the mesh. Sends probe messages between 
 
 Trigger mesh-wide sleep or wake commands from the dashboard. Sleep puts agents into a low-power polling mode; wake restores normal operation.
 
-### Downloads
-
-A top-level **Downloads** tab serves the current Muti Metroo and Mutiauk release binaries -- including the Windows DLL -- plus the user, operator, and slides PDFs, grouped by architecture (`amd64` / `arm64`) with SHA256 checksums and capture timestamps. Useful when handing an operator a single URL instead of separate release-page links. The Muti Metroo Manager binary itself is not delivered through this tab; obtain it out-of-band (see "Get the Binary" above).
-
-The contents come from `muti-metroo-downloads-bundle.zip`, an optional file shipped alongside the Muti Metroo Manager binary. With no `-downloads-bundle` flag, the binary auto-detects the zip in the same directory as the executable; the tab appears when found and is hidden otherwise. Pass `-downloads-bundle off` to disable the feature explicitly. Files are served with friendly download names (`muti-metroo`, `muti-metroo.exe`, `muti-metroo.dll`, `mutiauk`, `user-manual.pdf`) via `Content-Disposition`.
-
-Each binary section in the Downloads tab has a **Create config** button next to its arch tabs - clicking it opens the matching Agent or Entry wizard without leaving the tab. The button is shown only on sections that ship a wizard.
-
 ### Config Wizards
 
-The dashboard includes two interactive configuration wizards -- one for the Muti Metroo agent and one for Mutiauk -- reachable from each agent's kebab menu and from the Downloads tab. Both wizards perform inline **management-keypair validation**: the wizard derives the public half of every entered private key and surfaces a mismatch on the same step. X25519 keys are 32-byte (64-hex) scalars; Ed25519 signing keys are 64-byte (128-hex) seed-with-public-tail values per Go's `crypto/ed25519` layout. Mismatches stop the wizard before download, so an operator never ends up with a config that fails to decrypt topology or sign privileged ops at runtime.
+The dashboard includes two interactive configuration wizards -- one for the Muti Metroo agent and one for Mutiauk -- reachable from each agent's kebab menu. Both wizards perform inline **management-keypair validation**: the wizard derives the public half of every entered private key and surfaces a mismatch on the same step. X25519 keys are 32-byte (64-hex) scalars; Ed25519 signing keys are 64-byte (128-hex) seed-with-public-tail values per Go's `crypto/ed25519` layout. Mismatches stop the wizard before download, so an operator never ends up with a config that fails to decrypt topology or sign privileged ops at runtime.
 
 The Muti Metroo agent wizard also pre-populates its peer step from `advertised_listeners` reported on the topology poll, so an operator can pick a known agent rather than typing its address by hand. Each listener step offers an "Advertise this listener" toggle that emits the corresponding `listeners[].advertise: {address, path, transport}` block in the YAML preview, opting into NodeInfo-based discovery for that listener.
 

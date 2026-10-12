@@ -173,7 +173,7 @@ When the Manager has no token and the agent answers `401`, the browser shows an 
 ### Layout
 
 - **Header**: the connected agent's name and short ID, the main tabs, the actions menu (the vertical dots button), and a light/dark theme toggle. The theme follows the operating system preference until you change it and is remembered per browser.
-- **Main tabs**: **Topology**, **Routes**, **Port Forwarding**, **DNS**, and **Downloads** (only when a [downloads bundle](#downloads) is present).
+- **Main tabs**: **Topology**, **Routes**, **Port Forwarding**, and **DNS**.
 - **Actions menu**: **Mesh connectivity test**, **Generate Muti Metroo agent config...**, **Generate Mutiauk config...**, **Settings...**, **Suspend mesh** or **Resume mesh** (when sleep mode is enabled), and **Sign out** (when the browser holds a token).
 - **Footer**: the most recent topology event, the [mesh health](#mesh-test) summary, and the Manager version.
 
@@ -294,14 +294,6 @@ The **DNS** tab manages the connected agent's [mesh hostnames](/features/mesh-ho
 
 ![TLDs sub-tab of the DNS tab listing the .mesh suffix](/img/screenshots/muti-metroo-manager/17-dns-tlds.png)
 
-### Downloads
-
-The **Downloads** tab offers Muti Metroo and Mutiauk binaries and the documentation PDFs to whoever uses the Manager. Sections are **Documentation**, **Muti Metroo Agent**, **Muti Metroo Agent DLL**, and **Mutiauk**; each binary section has an `amd64`/`arm64` switch and lists the files per operating system with their SHA-256 checksums. Files download under plain names (`muti-metroo`, `muti-metroo.exe`, `muti-metroo.dll`, `mutiauk`, `user-manual.pdf`). The Agent and Mutiauk sections have a **Create config** button that opens the matching [config wizard](#config-wizards).
-
-The tab is shown only when the Manager finds a downloads bundle, `muti-metroo-downloads-bundle.zip`. It looks for the file next to its own binary, or at the path given with `-downloads-bundle`. The bundle is not a release asset; build it from the Manager source tree with `bundle-downloads.sh`, which collects the binaries and the user manual from local Muti Metroo and Mutiauk release builds. `-no-downloads` hides the tab even when a bundle is present.
-
-![Downloads tab with the user manual and the Muti Metroo agent, agent DLL, and Mutiauk binaries with sizes and SHA-256 checksums](/img/screenshots/muti-metroo-manager/14-downloads-tab.png)
-
 ### Mesh test
 
 The Manager runs a mesh connectivity test every 60 seconds and shows the result in the footer as `Mesh: N/M reachable`, highlighted when an agent is unreachable. The browser tab title and icon also indicate degraded agents. **Mesh connectivity test** in the actions menu runs a test immediately and opens a results dialog with one row per agent and its latency. See [mesh-test](/cli/mesh-test) for how the test works.
@@ -323,7 +315,7 @@ Two wizards build configuration files in the browser:
 - **Generate Muti Metroo agent config**: steps for basics, network listeners, TLS, peers, SOCKS5, exit routes, monitoring, shell, file transfer, and management keys, then **Review & download**. The network step can advertise a listener as a public dial target. The peers step lists dial targets that other agents advertise, each with a **Use** button. The management key step checks that pasted private and public keys belong together. The review step shows the YAML and commands to run the agent in the foreground, install it as a service, install it as a user without root on Linux, or run the Windows DLL.
 - **Generate Mutiauk config**: **TUN interface**, **SOCKS5 proxy**, **Routes** (autoroutes on by default), **Admin interface**, and **Review & download**. The review step shows the YAML and the commands to start Mutiauk or install it as a service on Linux, macOS, and Windows.
 
-Open them from the actions menu, from **Create config** on the Downloads tab, or from the empty topology view.
+Open them from the actions menu or from the empty topology view.
 
 ![Agent config wizard on the Review & download step showing the generated YAML for a branch-office agent with a QUIC listener, a peer, SOCKS5, and an exit route](/img/screenshots/muti-metroo-manager/24-agent-wizard-review.png)
 
@@ -350,7 +342,7 @@ Both addresses are labels only; the agent the Manager talks to is set with `-age
 | Ctrl+S, Cmd+S  | Save the agent's notes                                                  |
 | Alt (dragging) | Move a station without snapping to the grid                             |
 
-Each tab has its own URL path (`/topology`, `/routes/active`, `/routes/test`, `/forwards`, `/dns/hosts`, `/dns/tlds`, `/downloads`). Add `?agent=<id>` with a short or full agent ID to open that agent's panel, for example `http://localhost:3000/topology?agent=abc12345`. Older `#/agents/<id>` links are redirected.
+Each tab has its own URL path (`/topology`, `/routes/active`, `/routes/test`, `/forwards`, `/dns/hosts`, `/dns/tlds`). Add `?agent=<id>` with a short or full agent ID to open that agent's panel, for example `http://localhost:3000/topology?agent=abc12345`. Older `#/agents/<id>` links are redirected.
 
 ## Command-line reference
 
@@ -362,7 +354,7 @@ muti-metroo-manager config init [path]     emit a commented TOML config template
 muti-metroo-manager version | -V           print version and build info
 ```
 
-- `check` validates the configuration, the data directory, and the downloads bundle path, and calls the agent's `/healthz`. It exits 0 when all pass and 1 otherwise, without starting the listener.
+- `check` validates the configuration and the data directory and calls the agent's `/healthz`. It exits 0 when all pass and 1 otherwise, without starting the listener.
 - `config show` prints every setting with its source (`default`, `file`, `env`, `flag`, or `token-file`).
 - `config init` writes a commented TOML file with every key; `-force` overwrites an existing file.
 
@@ -378,8 +370,6 @@ These flags apply to `run`, `check`, and `config show`. Flags use a single dash.
 | `-agent-token`      |                          | Bearer token for the agent                                                                          |
 | `-agent-token-file` |                          | File containing the bearer token                                                                    |
 | `-data-dir`         | see [Data directory](#data-directory) | Directory for the database and the instance lock                                       |
-| `-downloads-bundle` | next to the binary       | Path to `muti-metroo-downloads-bundle.zip`                                                          |
-| `-no-downloads`     | `false`                  | Hide the Downloads tab                                                                              |
 | `-log-level`        | `info`                   | `debug`, `info`, `warn`, or `error`                                                                 |
 | `-log-format`       | `text`                   | `text` or `json`                                                                                    |
 | `-metrics-addr`     |                          | Listen address for the [metrics](#metrics) endpoint; empty disables it                              |
@@ -394,8 +384,6 @@ addr = "127.0.0.1:3000"
 agent = "http://127.0.0.1:8080"
 agent_token_file = "/etc/muti-metroo-manager/token"
 data_dir = "/var/lib/muti-metroo-manager"
-downloads_bundle = ""
-no_downloads = false
 log_level = "info"
 log_format = "json"
 metrics_addr = ""

@@ -24,7 +24,6 @@
 //   11-agent-files           agent panel (exit-datacenter): Files tab in /srv/files
 //   12-domains-tab           DNS tab > Hosts (seeds two mesh hosts)
 //   13-routes-test-routing   Routes tab > Test routing (seeded mesh-host trace)
-//   14-downloads-tab         top-level Downloads tab (bundle staged by the rig)
 //   15-mesh-test-modal       Mesh test results dialog
 //   16-agent-ping            agent panel: Ping tab with an active session
 //   17-dns-tlds              DNS tab > TLDs sub-tab
@@ -363,7 +362,6 @@ async function main() {
     "Port Forwarding": "/forwards",
     DNS: "/dns/hosts",
     TLDs: "/dns/tlds",
-    Downloads: "/downloads",
   };
   async function switchMainTab(label) {
     const tabPath = TAB_PATHS[label];
@@ -742,27 +740,6 @@ async function main() {
         height: Math.ceil(box.height) + 8,
       },
     });
-  });
-
-  // 14 - Top-level Downloads tab. Only present when muti-metroo-downloads-bundle.zip
-  // is deployed alongside muti-metroo-manager; the tab is filtered out otherwise. Skip
-  // gracefully if the tab is missing so the script still passes on hosts
-  // without a bundle.
-  await capture("14-downloads-tab", async (out) => {
-    await openTopology();
-    const tab = mainTab("Downloads");
-    if ((await tab.count()) === 0) {
-      throw new Error(
-        "Downloads tab not present (no downloads bundle deployed)",
-      );
-    }
-    await switchMainTab("Downloads");
-    // The downloads listing renders one section per binary group with a
-    // plain table each; wait until at least one artifact row is visible.
-    await page.waitForSelector("main section table tbody tr", {
-      timeout: STEP_TIMEOUT,
-    });
-    await page.screenshot({ path: out });
   });
 
   // 15 - Mesh Connectivity Test results dialog. Triggered from the actions

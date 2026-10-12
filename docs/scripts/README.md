@@ -13,8 +13,8 @@ cannot be regenerated. If a page needs a new screenshot, add a step to
 docs/scripts/capture-screenshots.sh
 ```
 
-Requirements: Go, Docker, Node.js 20+, `zip`, and an authenticated `gh` CLI
-(used to fetch release assets for the Downloads tab). Playwright and its
+Requirements: Go, Docker, Node.js 20+, and an authenticated `gh` CLI
+(used to fetch the Manager release binary). Playwright and its
 Chromium are installed on the first run.
 
 The script is self-contained:
@@ -38,11 +38,9 @@ The script is self-contained:
    targets. `exit-datacenter` allows management commands and file transfer
    under `/srv/files`. Sleep mode is enabled on every agent. Each container
    adds a fixed egress delay with `tc netem`, so links show realistic RTTs.
-3. Builds a Manager downloads bundle from the latest GitHub release assets,
-   cached in `docs/scripts/.cache/` by release tag.
-4. Starts Manager on the host, waits until it reports the whole mesh
+3. Starts Manager on the host, waits until it reports the whole mesh
    reachable, and runs `capture-muti-metroo-manager.js`.
-5. Removes the containers, the network, and all temporary files, also when a
+4. Removes the containers, the network, and all temporary files, also when a
    step fails.
 
 Output goes to `docs/static/img/screenshots/muti-metroo-manager/`. Filenames
@@ -64,7 +62,6 @@ required; the run fails if one is skipped.
 | `11-agent-files`            | Agent panel Files tab in `/srv/files` (exit-datacenter)     |
 | `12-domains-tab`            | DNS tab > Hosts (seeded mesh hosts)                         |
 | `13-routes-test-routing`    | Routes tab > Test routing for a seeded mesh host            |
-| `14-downloads-tab`          | Downloads tab                                               |
 | `15-mesh-test-modal`        | Mesh test results dialog                                    |
 | `16-agent-ping`             | Agent panel Ping tab after a 10-echo session to exit-cloud  |
 | `17-dns-tlds`               | DNS tab > TLDs                                              |
@@ -90,7 +87,7 @@ required; the run fails if one is skipped.
 Every run writes byte-identical files, with no tolerance applied. What makes that hold:
 
 - **Fixed fixture.** Agent IDs, names, hostnames, IP addresses, link delays,
-  file timestamps, and the bundle timestamp never change. Key pairs are
+  and file timestamps never change. Key pairs are
   generated fresh on every run and never stored in the repository.
 - **Fixed browser.** Viewport 1600x900, UTC timezone, en-US locale, light
   color scheme, reduced motion, software rendering with a fixed color
