@@ -77,7 +77,7 @@ make install-deps
 
 ## CI/CD
 
-The `manuals` job in `.github/workflows/release-please.yml` builds the manual
+The `user-manual` job in `.github/workflows/release-please.yml` builds the manual
 and attaches `muti-metroo-user-manual.pdf` to each release when the
 release-please PR is merged. To build it without a release, run `make pdf`
 locally.

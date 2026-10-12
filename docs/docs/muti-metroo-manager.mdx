@@ -298,7 +298,7 @@ The **DNS** tab manages the connected agent's [mesh hostnames](/features/mesh-ho
 
 The **Downloads** tab offers Muti Metroo and Mutiauk binaries and the documentation PDFs to whoever uses the Manager. Sections are **Documentation**, **Muti Metroo Agent**, **Muti Metroo Agent DLL**, and **Mutiauk**; each binary section has an `amd64`/`arm64` switch and lists the files per operating system with their SHA-256 checksums. Files download under plain names (`muti-metroo`, `muti-metroo.exe`, `muti-metroo.dll`, `mutiauk`, `user-manual.pdf`). The Agent and Mutiauk sections have a **Create config** button that opens the matching [config wizard](#config-wizards).
 
-The tab is shown only when the Manager finds a downloads bundle, `muti-metroo-downloads-bundle.zip`. It looks for the file next to its own binary, or at the path given with `-downloads-bundle`. The bundle is not a release asset; build it from the Manager source tree with `bundle-downloads.sh`, which collects the binaries and manuals from local Muti Metroo and Mutiauk release builds. `-no-downloads` hides the tab even when a bundle is present.
+The tab is shown only when the Manager finds a downloads bundle, `muti-metroo-downloads-bundle.zip`. It looks for the file next to its own binary, or at the path given with `-downloads-bundle`. The bundle is not a release asset; build it from the Manager source tree with `bundle-downloads.sh`, which collects the binaries and the user manual from local Muti Metroo and Mutiauk release builds. `-no-downloads` hides the tab even when a bundle is present.
 
 ![Downloads tab with the user manual and the Muti Metroo agent, agent DLL, and Mutiauk binaries with sizes and SHA-256 checksums](/img/screenshots/muti-metroo-manager/14-downloads-tab.png)
 

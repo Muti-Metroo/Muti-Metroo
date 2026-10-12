@@ -57,27 +57,21 @@ To work with documentation locally: `cd docs && npm install && npm start` (dev s
 ### Docs Toolchain Dependency Policy
 
 Docusaurus produces a fully static site (HTML/CSS/JS) with no user-controlled
-input, and the PDF manuals are build-time tooling. Dependabot alerts on the
-npm lockfiles (`docs/`, `user-manual/`, `operator-manual/`, `operator-slides/`)
+input, and the PDF manual is build-time tooling. Dependabot alerts on the
+npm lockfiles (`docs/`, `user-manual/`)
 are **lower risk than the gomod ones**, but they are not ignored: when alerts
 accumulate, update deliberately (`npm audit fix`, direct-dependency upgrades,
 targeted `overrides`) and re-run each project's build to confirm nothing
 broke. Go module (`gomod`) alerts are always in scope and should be fixed
 promptly.
 
-### PDF Manuals
+### PDF Manual
 
-Three PDFs are attached to every release: user manual (feature reference), operator manual (workflow guide), operator slides (5-minute orientation).
-
-- `user-manual/` - `make pdf` (Pandoc + XeLaTeX)
-- `operator-manual/` - `make pdf` (Pandoc + XeLaTeX)
-- `operator-slides/` - `make pdf` (Marp + headless Chromium)
-
-**When to update**: Update the user manual when adding or modifying user-facing features. Update the operator manual when changing the basic deployment workflow. Update the slides only when the high-level shape of the system changes. Routine feature additions usually only need the user manual.
+The user manual PDF is attached to every release. Build it with `make pdf` in `user-manual/` (Pandoc + XeLaTeX). Update it when adding or modifying user-facing features.
 
 ### Making Releases
 
-Releases are fully automated by release-please (`.github/workflows/release-please.yml`). Conventional commits on `master` (`fix:` and `feat:` drive version bumps) make release-please open a release PR; merging it creates the `muti-metroo-vX.Y.Z` tag and GitHub release, then CI builds and uploads the binaries, DLLs, all three PDFs, and `checksums.txt`. Never tag or create releases by hand.
+Releases are fully automated by release-please (`.github/workflows/release-please.yml`). Conventional commits on `master` (`fix:` and `feat:` drive version bumps) make release-please open a release PR; merging it creates the `muti-metroo-vX.Y.Z` tag and GitHub release, then CI builds and uploads the binaries, DLLs, the user manual PDF, and `checksums.txt`. Never tag or create releases by hand.
 
 Build targets: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64, windows/arm64. Linux binaries are UPX-compressed. **Windows EXE binaries must NOT be UPX-compressed** -- the UPX unpacking stub is commonly flagged by antivirus engines as a false positive. The Windows amd64 DLL is still UPX-compressed since DLLs load differently. The arm64 DLL (cross-compiled with llvm-mingw in the `build-dll-arm64` release job) ships uncompressed because UPX cannot pack ARM64 PE files.
 

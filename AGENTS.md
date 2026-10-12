@@ -34,8 +34,7 @@ Three-component suite (sibling checkouts):
   `flood`, `agent`, `socks5`, `exit`, `forward`
 - `configs/example.yaml` — fully commented reference config
 - `docs/` — Docusaurus site (public operator docs)
-- `user-manual/`, `operator-manual/`, `operator-slides/` — PDF sources
-  (Pandoc/XeLaTeX, Marp)
+- `user-manual/` — user manual PDF source (Pandoc/XeLaTeX)
 - `tests/connectivity-tunnel/` — Docker testbed: Mutiauk TUN client ->
   ingress -> transit -> exit -> target (TCP+UDP)
 - `testbed/` — larger Docker fixtures
@@ -69,8 +68,6 @@ Docs sites:
 ```bash
 cd docs && npm ci && npm run build     # Docusaurus (Node 20+)
 cd user-manual && make html            # make pdf needs XeLaTeX
-cd operator-manual && make html
-cd operator-slides && make html        # make pdf needs headless Chromium
 ```
 
 Docker testbeds:
@@ -95,7 +92,7 @@ adding tests.
 - `.github/.release-please-manifest.json` pins the released version;
   `VERSION` at repo root carries the same number.
 - Merging the release PR creates the tag and GitHub release; CI then builds
-  and uploads binaries, DLLs, the three PDFs, and checksums. Never tag or
+  and uploads binaries, DLLs, the user manual PDF, and checksums. Never tag or
   create releases by hand.
 - Windows EXEs are never UPX-compressed (AV false positives); the DLL is.
 
