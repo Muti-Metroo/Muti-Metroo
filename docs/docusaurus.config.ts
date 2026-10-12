@@ -42,7 +42,20 @@ const config: Config = {
         href: "/site.webmanifest",
       },
     },
-    // Analytics removed (no homepage)
+    // Privacy-friendly analytics by Plausible
+    {
+      tagName: "script",
+      attributes: {
+        async: "true",
+        src: "https://plausible.emailengine.dev/js/pa-34qzytG1V-tg-AgaS7bzJ.js",
+      },
+    },
+    {
+      tagName: "script",
+      attributes: {},
+      innerHTML:
+        "window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()",
+    },
   ],
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
