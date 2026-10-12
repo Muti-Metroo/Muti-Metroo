@@ -42,7 +42,7 @@ Three-component suite (sibling checkouts):
 - `docker-compose.yml` (root) — 5-agent mixed-transport chain for local dev
 - `Architecture.md` — protocol internals (developer docs; keep wire-format
   details out of `docs/`)
-- `release.sh` — GitHub release helper (the docs site deploys to GitHub Pages via `.github/workflows/docs.yml`)
+- `.github/workflows/` — `release-please.yml` (releases and assets) and `docs.yml` (docs site to GitHub Pages)
 - `VERSION` — current release version (4.10.x); release-please manages it
 
 ## Build & Test
@@ -94,8 +94,9 @@ adding tests.
   `fix:`/`feat:` drive version bumps; `docs:`/`test:`/`chore:` do not.
 - `.github/.release-please-manifest.json` pins the released version;
   `VERSION` at repo root carries the same number.
-- `./release.sh [patch|minor|major]` is the manual path (GitHub release +
-  artifacts). Never push tags manually without coordinating.
+- Merging the release PR creates the tag and GitHub release; CI then builds
+  and uploads binaries, DLLs, the three PDFs, and checksums. Never tag or
+  create releases by hand.
 - Windows EXEs are never UPX-compressed (AV false positives); the DLL is.
 
 ## House Rules

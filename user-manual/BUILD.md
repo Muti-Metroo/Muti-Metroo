@@ -77,15 +77,10 @@ make install-deps
 
 ## CI/CD
 
-The manual is automatically built and attached to GitHub releases:
-- Triggered on release publication
-- Can also be manually triggered via workflow_dispatch
-- PDF is uploaded as a release asset
-
-To manually trigger a build without creating a release:
-1. Go to Actions > "User Manual" workflow
-2. Click "Run workflow"
-3. Download the artifact from the workflow run
+The `manuals` job in `.github/workflows/release-please.yml` builds the manual
+and attaches `muti-metroo-user-manual.pdf` to each release when the
+release-please PR is merged. To build it without a release, run `make pdf`
+locally.
 
 ## Editing the Manual
 

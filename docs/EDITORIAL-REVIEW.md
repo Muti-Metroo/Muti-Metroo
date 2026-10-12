@@ -995,7 +995,7 @@ Fixes:
 Claims verified:
 
 - Repo Dockerfile layout /usr/local/bin/muti-metroo, WORKDIR /app, CMD run -c /app/config.yaml, no USER (root) -> Dockerfile
-- Release asset name muti-metroo-linux-<arch> -> release.sh:154
+- Release asset name muti-metroo-linux-<arch> -> .github/workflows/release-please.yml:83
 - cert agent output named after CN -> cmd/muti-metroo/main.go:2168
 - /health returns OK -> internal/health/server.go:1205-1206
 
@@ -1095,7 +1095,7 @@ Claims verified:
 - Muti Metroo asset names, DLLs, checksums.txt, muti-metroo-user-manual.pdf -> `gh release view -R Muti-Metroo/Muti-Metroo` (v4.10.6 assets)
 - Manager assets named metroo-manager-* -> `gh release view -R Muti-Metroo/Muti-Metroo-Manager` (metroo-manager-v0.2.39)
 - Mutiauk releases are Linux-only today -> `gh release view -R Muti-Metroo/Mutiauk` (mutiauk-v0.5.2: linux-amd64, linux-arm64)
-- checksums.txt generated over dist/* -> release.sh:489
+- checksums.txt generated over the muti-metroo-* release assets -> .github/workflows/release-please.yml:289
 
 ## `features/exit-routing.md`
 
@@ -1480,7 +1480,7 @@ Claims verified:
 - shell --tty flag and service install -n/--name -> mm-5 shell --help, mm-5 service install --help
 - macOS launchd logs <name>.err.log in the working directory -> internal/service/service_darwin.go:181-184
 - /api/topology and /api/nodes endpoints -> internal/health/server.go:974-976
-- Windows DLL for amd64 and arm64 -> release.sh:239-241 and download.mdx:154-166
+- Windows DLL for amd64 and arm64 -> .github/workflows/release-please.yml:134,194 and download.mdx:154-166
 
 Fixes:
 

@@ -37,11 +37,9 @@ make install-deps
 
 ## Release integration
 
-`release.sh` at the repo root builds the operator manual and attaches
-`muti-metroo-operator-manual.pdf` to each release alongside `muti-metroo-user-manual.pdf`.
-The release script also patches `__MUTI_METROO_RELEASE__`, `__MUTIAUK_RELEASE__`,
-and `__METROO_MANAGER_RELEASE__` placeholders in `src/*.md` so download links resolve
-to the matching tagged binaries.
+The `manuals` job in `.github/workflows/release-please.yml` builds the operator
+manual and attaches `muti-metroo-operator-manual.pdf` to each release alongside
+`muti-metroo-user-manual.pdf`.
 
 ## Editing the manual
 

@@ -29,6 +29,7 @@ belongs in the operator manual instead.
 
 ## Release integration
 
-`release.sh` builds `muti-metroo-operator-slides.pdf` and attaches it to each
-release alongside the user and operator manual PDFs. The file lives next
+The `operator-slides` job in `.github/workflows/release-please.yml` builds
+`muti-metroo-operator-slides.pdf` and attaches it to each release alongside the
+user and operator manual PDFs. The file lives next
 to them in the release archive.

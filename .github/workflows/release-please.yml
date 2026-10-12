@@ -44,9 +44,11 @@ jobs:
           - goos: linux
             goarch: arm64
             upx: true
+          # Windows EXEs are never UPX-compressed: the UPX unpacking stub is
+          # commonly flagged by antivirus engines as a false positive.
           - goos: windows
             goarch: amd64
-            upx: true
+            upx: false
           - goos: windows
             goarch: arm64
             upx: false
@@ -199,10 +201,13 @@ jobs:
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" "muti-metroo-windows-arm64.dll" --clobber
 
-  user-manual:
+  manuals:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        manual: [user-manual, operator-manual]
     steps:
       - uses: actions/checkout@v4
 
@@ -220,11 +225,11 @@ jobs:
           sudo apt-get install -y texlive-xetex texlive-fonts-recommended texlive-fonts-extra
 
       - name: Install npm dependencies
-        working-directory: user-manual
+        working-directory: ${{ matrix.manual }}
         run: npm install
 
       - name: Build PDF
-        working-directory: user-manual
+        working-directory: ${{ matrix.manual }}
         run: |
           VERSION=${{ needs.release-please.outputs.tag_name }}
           VERSION=${VERSION#v}
@@ -236,11 +241,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" \
-            user-manual/build/muti-metroo-user-manual.pdf \
+            ${{ matrix.manual }}/build/muti-metroo-${{ matrix.manual }}.pdf \
+            --clobber
+
+  operator-slides:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install npm dependencies
+        working-directory: operator-slides
+        run: npm install
+
+      - name: Build PDF
+        working-directory: operator-slides
+        run: make pdf
+
+      - name: Upload PDF to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            operator-slides/build/muti-metroo-operator-slides.pdf \
             --clobber
 
   checksums:
-    needs: [release-please, build, build-dll, build-dll-arm64, user-manual]
+    needs: [release-please, build, build-dll, build-dll-arm64, manuals, operator-slides]
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     steps:
