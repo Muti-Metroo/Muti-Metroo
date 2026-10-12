@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.11](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.10...muti-metroo-v4.10.11) (2026-10-12)
+
+
+### Bug Fixes
+
+* **release:** stop UPX-packing the Windows amd64 EXE and ship all PDFs ([0641660](https://github.com/Muti-Metroo/Muti-Metroo/commit/0641660a64c87980ba6a3a6c0a4517cc19114f44))
+
 ## [4.10.10](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.9...muti-metroo-v4.10.10) (2026-10-11)
 
 
