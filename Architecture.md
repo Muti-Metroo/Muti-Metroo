@@ -192,7 +192,7 @@ An agent can serve one or more roles simultaneously:
 │  │  │                │  │                │  │                │           │  │
 │  │  │ • CIDR entries │  │ • Advertise    │  │ • Connections  │           │  │
 │  │  │ • LPM lookup   │  │ • Withdraw     │  │ • Reconnection │           │  │
-│  │  │ • Path cache   │  │ • Loop prevent │  │ • Handshake    │           │  │
+│  │  │ • Route expiry │  │ • Loop prevent │  │ • Handshake    │           │  │
 │  │  └────────────────┘  └────────────────┘  └────────────────┘           │  │
 │  │                                                                       │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -205,7 +205,7 @@ An agent can serve one or more roles simultaneously:
 │  │  │                │  │                │  │                │           │  │
 │  │  │ • Lifecycle    │  │ • Stream map   │  │ • TCP connect  │           │  │
 │  │  │ • Half-close   │  │ • Relay data   │  │ • DNS resolve  │           │  │
-│  │  │ • Fairness     │  │ • Cleanup      │  │ • Error handle │           │  │
+│  │  │ • Stream limit │  │ • Cleanup      │  │ • Error handle │           │  │
 │  │  └────────────────┘  └────────────────┘  └────────────────┘           │  │
 │  │                                                                       │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -217,8 +217,8 @@ An agent can serve one or more roles simultaneously:
 │  │  │     QUIC       │  │    HTTP/2      │  │   WebSocket    │           │  │
 │  │  │    (UDP)       │  │   Streaming    │  │   HTTP/1.1     │           │  │
 │  │  │                │  │                │  │                │           │  │
-│  │  │ • Native mux   │  │ • Single POST  │  │ • Proxy compat │           │  │
-│  │  │ • 0-RTT        │  │ • Bidi stream  │  │ • Upgrade      │           │  │
+│  │  │ • One stream   │  │ • Single POST  │  │ • Proxy compat │           │  │
+│  │  │ • TLS 1.3      │  │ • Bidi stream  │  │ • Upgrade      │           │  │
 │  │  │ • Migration    │  │ • Port 443     │  │ • Binary frame │           │  │
 │  │  └────────────────┘  └────────────────┘  └────────────────┘           │  │
 │  │                                                                       │  │
@@ -374,11 +374,11 @@ Streams are identified by a combination of peer connection and stream ID:
 │                                                                             │
 │  Transport addresses (configuration):                                       │
 │                                                                             │
-│    QUIC:       quic://192.168.1.50:4433                                     │
-│                quic://[2001:db8::1]:4433                                    │
+│    QUIC:       192.168.1.50:4433             (transport: quic, host:port)   │
+│                [2001:db8::1]:4433                                           │
 │                                                                             │
-│    HTTP/2:     h2://192.168.1.50:8443/mesh                                  │
-│                h2://relay.example.com:443/mesh                              │
+│    HTTP/2:     192.168.1.50:8443             (transport: h2, host:port)     │
+│                https://relay.example.com:443  (http:// or https:// URL)     │
 │                                                                             │
 │    WebSocket:  ws://192.168.1.50:8080/mesh                                  │
 │                wss://relay.example.com:443/mesh                             │
@@ -419,8 +419,8 @@ Streams are identified by a combination of peer connection and stream ID:
 │     │      QUIC       │                  │ Direct TCP to   │                │
 │     │                 │                  │ peer possible?  │                │
 │     │ • Best latency  │                  └────────┬────────┘                │
-│     │ • Native mux    │                           │                         │
-│     │ • 0-RTT resume  │              YES          │          NO             │
+│     │ • Single stream │                           │                         │
+│     │ • 1-RTT setup   │              YES          │          NO             │
 │     └─────────────────┘         ┌─────────────────┴─────────────────┐       │
 │                                 │                                   │       │
 │                                 ▼                                   ▼       │
@@ -442,7 +442,7 @@ Streams are identified by a combination of peer connection and stream ID:
 | **Underlying**            | UDP                  | TCP               | TCP                  |
 | **Multiplexing**          | Application-layer (native streams unused; see 5.7) | Application-layer | Application-layer    |
 | **Head-of-line blocking** | Connection-wide (single stream) | TCP level | TCP level            |
-| **Connection setup**      | 1-RTT (0-RTT resume) | TCP + TLS         | TCP + TLS + Upgrade  |
+| **Connection setup**      | 1-RTT                | TCP + TLS         | TCP + TLS + Upgrade  |
 | **Proxy traversal**       | Poor                 | Moderate          | Excellent            |
 | **Firewall friendliness** | Poor                 | Good              | Excellent            |
 | **Best for**              | Performance          | Direct TCP        | Restrictive networks |
@@ -534,25 +534,25 @@ type Stream interface {
 │  │    Agent A    │◄─────────────────────────►│    Agent B    │              │
 │  │               │      QUIC Connection      │               │              │
 │  │  ┌─────────┐  │                           │  ┌─────────┐  │              │
-│  │  │Stream 0 │◄─┼───────────────────────────┼─►│Stream 0 │  │  Control     │
-│  │  ├─────────┤  │                           │  ├─────────┤  │              │
-│  │  │Stream 1 │◄─┼───────────────────────────┼─►│Stream 1 │  │  Data        │
-│  │  ├─────────┤  │                           │  ├─────────┤  │              │
-│  │  │Stream 3 │◄─┼───────────────────────────┼─►│Stream 3 │  │  Data        │
-│  │  ├─────────┤  │                           │  ├─────────┤  │              │
-│  │  │   ...   │  │                           │  │   ...   │  │              │
+│  │  │ One QUIC│◄─┼───────────────────────────┼─►│ One QUIC│  │  All frames  │
+│  │  │ stream  │  │                           │  │ stream  │  │  (StreamID   │
+│  │  │ carrying│  │                           │  │ carrying│  │   in frame   │
+│  │  │ virtual │  │                           │  │ virtual │  │   header;    │
+│  │  │ streams │  │                           │  │ streams │  │   see 5.7)   │
+│  │  │         │  │                           │  │         │  │              │
+│  │  │         │  │                           │  │         │  │              │
 │  │  └─────────┘  │                           │  └─────────┘  │              │
 │  └───────────────┘                           └───────────────┘              │
 │                                                                             │
 │  Implementation: github.com/quic-go/quic-go                                 │
 │                                                                             │
 │  Characteristics:                                                           │
-│  • One QUIC stream per peer connection carries all mesh frames; the       │
-│    frame header's StreamID multiplexes virtual streams on top (see 5.7).  │
-│    Native QUIC streams are used only for the initial handshake.           │
+│  • One QUIC stream per peer connection carries all mesh frames; the         │
+│    frame header's StreamID multiplexes virtual streams on top (see 5.7).    │
+│    Native QUIC streams are used only for the initial handshake.             │
 │  • Built-in TLS 1.3 encryption                                              │
 │  • Connection migration (survives IP changes)                               │
-│  • 0-RTT session resumption                                                 │
+│  • Full 1-RTT handshake (0-RTT resumption not enabled)                      │
 │                                                                             │
 │  Configuration:                                                             │
 │  • Max streams: 10,000                                                      │
@@ -806,9 +806,9 @@ All communication uses a consistent framing protocol:
 │    carries its OWN sequence; the same applies to ROUTE_WITHDRAW. Receivers  │
 │    dedupe on (OriginAgent, Sequence), so splits sharing one sequence would  │
 │    be discarded as duplicates and only the first would propagate. Emitting  │
-│    a wrapped count instead yields a frame the peer cannot decode, and since │
-│    a decode error drops the connection and the next attempt re-sends it,    │
-│    the link never recovers. Length-prefixed strings (display name,          │
+│    a wrapped count instead yields a frame the peer cannot decode; the       │
+│    decode error is logged and the frame dropped, and the next advertisement │
+│    re-sends the bad chunk. Length-prefixed strings (display name,           │
 │    comments) and 1-byte element counts are capped for the same reason.      │
 │                                                                             │
 │    When re-advertising ANOTHER agent's routes (full-table push on peer      │
@@ -816,11 +816,12 @@ All communication uses a consistent framing protocol:
 │    one advertisement is sent per group. A locally minted sequence must      │
 │    never be used there -- see "Sequence ownership on re-advertisement".     │
 │  • EncryptedData{Encrypted(1) + DataLen(2) + Data} wrapping the Path list   │
-│    (plaintext or management-key-encrypted; see NODE_INFO_ADVERTISE)         │
+│    (path encryption was removed: Encrypted is always false, and encrypted   │
+│    paths can no longer be decrypted; see NODE_INFO_ADVERTISE)               │
 │  • SeenByCount (1), SeenBy[] (16 bytes each)                                │
 │  • Optional trailing block: CommentCount (1), Comments[] (each 1+N bytes,   │
 │    parallel to Routes). Omitted entirely when no route carries a comment.   │
-│    Older agents (pre-0834122) ignore the trailing block; new receivers      │
+│    Older agents ignore the trailing block entirely; new receivers           │
 │    decode it when present and store the comment on the peer-learned route.  │
 │                                                                             │
 │  Control Frames:                                                            │
@@ -855,6 +856,7 @@ All communication uses a consistent framing protocol:
 │  │ 0x0F │ ROUTE_TRACE        │ Route selection trace (diagnostic)       │   │
 │  │ 0x10 │ STOP               │ Graceful agent shutdown (signed)         │   │
 │  │ 0x11 │ LISTENER_MANAGE    │ Add, remove, or list transport listeners │   │
+│  │ 0x12 │ INTERFACES         │ Request local interface addresses        │   │
 │  └──────┴────────────────────┴──────────────────────────────────────────┘   │
 │                                                                             │
 │  UDP Frames (for SOCKS5 UDP ASSOCIATE):                                     │
@@ -901,18 +903,17 @@ All communication uses a consistent framing protocol:
 │    3    │ (reserved)    │                        │                          │
 │   4-7   │ (reserved)    │                        │                          │
 │                                                                             │
-│   FIN_WRITE can be set on STREAM_DATA to signal half-close with final data  │
-│   or on STREAM_CLOSE for half-close without additional data.                │
+│   FIN_WRITE is set on STREAM_DATA to signal half-close, typically           │
+│   piggybacked on the final data frame.                                      │
 │                                                                             │
-│   Valid ways to signal half-close:                                          │
+│   Half-close signaling:                                                     │
 │   Method A: Piggyback FIN_WRITE on the final STREAM_DATA frame              │
 │            (atomic: delivers data + half-close together)                    │
-│   Method B: Send STREAM_CLOSE with flags = FIN_WRITE                        │
-│            (when no final data, or after data has already been sent)        │
-│   Method C: Send STREAM_CLOSE with flags = FIN_WRITE|FIN_READ               │
-│            (full close)                                                     │
+│   Method B: STREAM_CLOSE with flags = FIN_WRITE is preserved by transit     │
+│            hops, but endpoints currently treat any STREAM_CLOSE as a full   │
+│            close; Method A is the interoperable form                        │
 │                                                                             │
-│   FIN_READ note: TCP has no "done receiving" signal and Muti Metroo does not      │
+│   FIN_READ note: TCP has no "done receiving" signal and Muti Metroo does    │
 │   use FIN_READ in practice. A FIN_READ-only STREAM_CLOSE is equivalent to   │
 │   STREAM_RESET; receivers MUST tolerate it as a hard close. Prefer          │
 │   STREAM_RESET when aborting.                                               │
@@ -935,7 +936,7 @@ All communication uses a consistent framing protocol:
 │   ├─────────────────┼────────┼──────────────────────────────────────────┤   │
 │   │ Version         │ 2      │ Protocol version (currently 1)           │   │
 │   │ AgentID         │ 16     │ Sender's agent ID                        │   │
-│   │ Timestamp       │ 8      │ Unix timestamp (seconds)                 │   │
+│   │ Timestamp       │ 8      │ Unix timestamp (nanoseconds)             │   │
 │   │ DisplayName     │ 1+N    │ Length-prefixed UTF-8 display name       │   │
 │   │ CapabilitiesLen │ 1      │ Number of capabilities                   │   │
 │   │ Capabilities    │ varies │ List of capability strings               │   │
@@ -1065,7 +1066,8 @@ ICMP echo sessions) derive their session key using the same function:
 ```go
 DeriveSessionKey(
     sharedSecret       [32]byte,   // X25519 ECDH output
-    streamOrRequestID  uint64,     // StreamID for TCP/forward, RequestID for UDP/ICMP
+    streamOrRequestID  uint64,     // Always the RequestID (stable across relay hops;
+                                   // the StreamID changes at each hop)
     initiatorPub       [32]byte,   // Initiator (ingress) ephemeral public key
     responderPub       [32]byte,   // Responder (exit) ephemeral public key
     isInitiator        bool,       // true on the ingress side, false on the exit side
@@ -1184,8 +1186,9 @@ with the management key for topology compartmentalization.
 +------------------+--------+--------------------------------------------------+
 ```
 
-When `Encrypted` is 0x01, the `Data` field contains `EphemeralPub(32) + Nonce(24) + Ciphertext + Tag(16)`
-and must be decrypted with the management key before decoding as NodeInfo.
+When `Encrypted` is 0x01, the `Data` field contains `EphemeralPub(32) + Nonce(12) + Ciphertext + Tag(16)`
+(sealed-box overhead: 60 bytes) and must be decrypted with the management key before
+decoding as NodeInfo.
 
 **NodeInfo payload (encoding order):**
 
@@ -1216,6 +1219,7 @@ and must be decrypted with the management key before decoding as NodeInfo.
 | AdvertisedListenerCount * | 1      | Number of advertised listeners                   |
 | AdvertisedListeners[] *   | varies | Per listener: Transport(1+N) + Address(1+N)      |
 |                           |        |   + Path(1+N)                                    |
+| PID *                     | 8      | Process ID of the agent (uint64)                 |
 +---------------------------+--------+--------------------------------------------------+
 
 * Optional fields -- guarded by remaining-bytes check in decoder for backward
@@ -1465,8 +1469,9 @@ Each forwarded connection establishes independent E2E encryption:
 2. `STREAM_OPEN` includes listener's public key
 3. Endpoint generates ephemeral keypair, derives shared secret via ECDH
 4. `STREAM_OPEN_ACK` includes endpoint's public key
-5. Both derive session key via `DeriveSessionKey` (see section 6.4.1). The
-   listener is the initiator and supplies its StreamID as `streamOrRequestID`.
+5. Both derive session key via `DeriveSessionKey` (see section 6.4.1). Both
+   sides supply the connection's RequestID as `streamOrRequestID` (the
+   StreamID changes at each relay hop; the RequestID does not).
 6. All `STREAM_DATA` encrypted with ChaCha20-Poly1305
 
 Transit agents relay encrypted frames without decryption capability.
@@ -1495,7 +1500,7 @@ forward:
 ### Dynamic Management
 
 Endpoints and listeners can both be added, removed, and listed at runtime. The
-`forward.Handler.targets` map is guarded by an RWMutex so add/remove races
+`forward.Handler.backends` map is guarded by an RWMutex (`targetsMu`) so add/remove races
 cannot tear the read path (`GetTarget`, `HandleStreamOpen`). The Agent keeps
 per-origin sets (`configForwardEndpoints`, `dynamicForwardEndpoints`, and the
 same split for listeners) so config-sourced entries cannot be mutated via the
@@ -1530,6 +1535,7 @@ internal/forward/
 ├── forward.go        # Endpoint struct, ForwardDialer interface
 ├── handler.go        # Exit point handler (processes STREAM_OPEN for forward)
 ├── listener.go       # TCP listener (accepts connections, calls DialForward)
+├── tcp_backend.go    # TCP forward.Backend implementation
 ├── forward_test.go   # Forward unit tests
 ├── handler_test.go   # Handler unit tests
 └── listener_test.go  # Listener unit tests
@@ -1544,14 +1550,16 @@ firewalled host) opens the SOCKS5 `CmdExpose` (0x07) stream (see 11.4) and
 registers one or more routing keys. Each registration installs a
 `forward.Backend` that streams new connections back to the operator over the
 same stream; when the stream disconnects, the agent automatically revokes the
-registration and the route disappears on the next advertisement.
+registration, floods a `ROUTE_WITHDRAW`, and triggers an immediate route
+advertisement.
 
 **Wire protocol** (`internal/expose/protocol.go`): each expose frame is
 `[u8 type][u64 stream_id BE][payload]`. The SOCKS5 transport delimits frames
 with a `u32` big-endian length prefix (`[len:u32 BE][frame]`, same as the
-route-watch framing). Frame types include `REGISTER`/`REGISTER_ACK`
-(E -> M, JSON), `UNREGISTER`/`UNREGISTER_ACK`, `OPEN`/`OPEN_ACK` (per-stream
-open driven by the agent), `DATA`, `CLOSE_WRITE`, `CLOSE`, and `PING`/`PONG`.
+route-watch framing). Frame types include `REGISTER` (E -> M, JSON) /
+`REGISTER_ACK` (M -> E), `UNREGISTER`/`UNREGISTER_ACK`, `OPEN`/`OPEN_ACK`
+(per-stream open driven by the agent), `DATA`, `CLOSE_WRITE`, `CLOSE`, and
+`PING`/`PONG`.
 Outbound `DATA` frames are chunked at 16 KiB; the inbound frame read limit
 defaults to 1 MiB.
 
@@ -1576,8 +1584,8 @@ The ICMP echo (ping) feature allows sending ICMP echo requests through the mesh 
 
 - **Handler** (`internal/icmp/handler.go`): Exit node ICMP processing, session management, sends real echo requests
 - **Session** (`internal/icmp/session.go`): Per-session state with E2E encryption keys
-- **Socket** (`internal/icmp/socket.go`): Platform-specific unprivileged ICMP socket operations
-- **Config** (`internal/icmp/config.go`): Configuration and CIDR validation
+- **Socket** (`internal/icmp/socket.go`, `socket_unix.go`, `socket_windows.go`): Platform-specific unprivileged ICMP socket operations
+- **Config** (`internal/icmp/config.go`): Session and timeout configuration
 
 ### Session Lifecycle
 
@@ -1663,7 +1671,7 @@ ICMP session establishment failed.
 │ Field           │ Size   │ Description                              │
 ├─────────────────┼────────┼──────────────────────────────────────────┤
 │ RequestID       │ 8      │ Matches RequestID from ICMP_OPEN         │
-│ ErrorCode       │ 2      │ Error code (50, 51, 52, or 18)           │
+│ ErrorCode       │ 2      │ Error code (see below)                   │
 │ MessageLen      │ 1      │ Length of error message (max 255)        │
 │ Message         │ N      │ Human-readable error description         │
 └─────────────────┴────────┴──────────────────────────────────────────┘
@@ -1731,7 +1739,7 @@ The implementation uses unprivileged ICMP sockets (no root required):
 - **Windows**: Not supported. `NewSocketV4`/`NewSocketV6` are build-tagged
   (`socket_windows.go` / `socket_unix.go`). On Windows they return a clean
   `ErrNotSupported` error at socket creation, which the CLI surfaces as
-  `ErrGeneralFailure`. Integration tests that exercise ICMP are skipped on Windows.
+  `ErrGeneralFailure`. The ICMP unit tests are skipped on Windows.
 
 ### Configuration
 
@@ -1745,12 +1753,15 @@ icmp:
 
 ### Error Codes
 
-| Code | Name                  | Description                           |
-| ---- | --------------------- | ------------------------------------- |
-| 50   | ICMP_DISABLED         | ICMP feature is disabled              |
-| 51   | ICMP_DEST_NOT_ALLOWED | Destination not in allowed CIDRs      |
-| 52   | ICMP_SESSION_LIMIT    | Max concurrent sessions reached       |
-| 18   | GENERAL_FAILURE       | Socket creation or key exchange error |
+| Code | Name                  | Description                                              |
+| ---- | --------------------- | -------------------------------------------------------- |
+| 50   | ICMP_DISABLED         | ICMP feature is disabled                                 |
+| 51   | ICMP_DEST_NOT_ALLOWED | Reserved; defined but not currently emitted              |
+| 52   | ICMP_SESSION_LIMIT    | Max concurrent sessions reached                          |
+| 18   | GENERAL_FAILURE       | Socket creation or key exchange error                    |
+| 2    | CONNECTION_REFUSED    | No route to exit, or exit refused (sent by transit hops) |
+| 4    | TTL_EXCEEDED          | Hop limit reached in transit                             |
+| 5    | HOST_UNREACHABLE      | Next hop disconnected in transit                         |
 
 ### Package Structure
 
@@ -1758,8 +1769,10 @@ icmp:
 internal/icmp/
 ├── handler.go       # Exit node ICMP processing, session management
 ├── session.go       # Session state and lifecycle
-├── socket.go        # Platform-specific ICMP socket operations
-├── config.go        # Configuration and CIDR validation
+├── socket.go        # Platform-neutral ICMP socket helpers
+├── socket_unix.go   # Linux/macOS unprivileged ICMP sockets
+├── socket_windows.go # Windows stub (returns ErrNotSupported)
+├── config.go        # Session and timeout configuration
 ├── doc.go           # Package documentation
 ├── handler_test.go  # Handler unit tests
 ├── session_test.go  # Session unit tests
@@ -1833,7 +1846,12 @@ Identical structure to SLEEP_COMMAND, instructs agents to resume normal operatio
 
 #### QUEUED_STATE (0x52)
 
-Sent to agents when they reconnect after sleeping, containing accumulated state updates.
+Defined for delivering queued state to agents when they reconnect after sleeping.
+The frame is encoded and decoded and a receiver handler exists, but no sender is
+currently wired: QUEUED_STATE is never emitted. A polling agent instead catches
+up from the ordinary re-advertisements (route full-table push on connect,
+periodic node-info) it receives while awake, and pending wake commands reach it
+because the origin re-floods the command.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -1895,8 +1913,8 @@ During sleep mode, agents periodically reconnect to receive queued state updates
 │  ────────┼─────────────┼──────────────────────────────────────────────────  │
 │  T+0     │ SLEEPING    │ Waiting (jittered interval: 5min +/- 30%)          │
 │  T+4.2m  │ POLLING     │ Poll timer fires, reconnect to peers               │
-│  T+4.2m  │ POLLING     │ Receive queued RouteAdvertise, NodeInfo            │
-│  T+4.2m  │ POLLING     │ Check for WAKE_COMMAND in queued state             │
+│  T+4.2m  │ POLLING     │ Receive re-advertised routes and node info         │
+│  T+4.2m  │ POLLING     │ Receive re-flooded WAKE_COMMAND if one is pending  │
 │  T+4.7m  │ SLEEPING    │ Poll duration (30s) ends, disconnect               │
 │  T+4.7m  │ SLEEPING    │ Schedule next poll (jittered)                      │
 │  ...     │             │                                                    │
@@ -1908,21 +1926,28 @@ During sleep mode, agents periodically reconnect to receive queued state updates
 
 ### State Queue
 
-Awake agents queue state updates for sleeping peers:
+Awake agents have a per-peer queue (`internal/sleep/queue.go`) for state
+updates destined to sleeping peers:
 
 - **Route Advertisements**: Queued with deduplication (same origin + sequence)
 - **Route Withdrawals**: Queued with deduplication
 - **Node Info Updates**: Latest per-origin only (older superseded)
-- **Sleep/Wake Commands**: Latest command retained
 
-Queue limits prevent memory exhaustion (configurable `max_queued_messages`).
+The queueing helpers currently have no production callers and QUEUED_STATE is
+never sent, so a polling agent catches up from ordinary re-advertisements
+instead. Sleep/wake commands are not queued; a pending wake is re-flooded by
+its origin when the sleeper reconnects.
+
+Queue limits prevent memory exhaustion (configurable `max_queued_messages`,
+applied per message type per peer).
 
 ### Command Deduplication
 
 Sleep and wake commands use a seen-cache to prevent duplicate processing:
 
 - Key: `(OriginAgent, CommandID)`
-- TTL: 30 minutes
+- TTL: 5 minutes in the flooder's seen cache (the first dedup gate for flooded
+  commands), 30 minutes in the sleep manager's own cache
 - Commands already seen are silently dropped
 
 ### Configuration
@@ -1934,11 +1959,11 @@ sleep:
   poll_interval_jitter: 0.3 # +/- 30% variation
   poll_duration: 30s # How long to stay connected during poll
   persist_state: true # Survive agent restarts
-  max_queued_messages: 1000 # Queue limit per peer
+  max_queued_messages: 1000 # Queue limit per message type per peer
   auto_sleep_on_start: false # Start in sleep mode
   deterministic_windows: # Deterministic listening windows
     enabled: false # Use predictable windows derived from AgentID
-    window_length: 30s # Duration of each listening window (max 30s)
+    window_length: 30s # Duration of each listening window
     clock_tolerance: 5s # Clock drift tolerance
     epoch: "" # Reference point for window calculations (RFC3339, default: Unix epoch)
 ```
@@ -2037,7 +2062,7 @@ To enable coordinated reconnection during sleep mode, agents can calculate when 
 │                                                                             │
 │  CycleLength:  equal to sleep.poll_interval (default 5 minutes)             │
 │  WindowLength: sleep.deterministic_windows.window_length                    │
-│                (default 30s, max 30s)                                       │
+│                (default 30s; clamped to CycleLength/6 if larger)            │
 │  Offset:       derived from AgentID (deterministic, unique per agent)       │
 │                                                                             │
 │  Timeline for Agent X (offset = 2m):                                        │
@@ -2127,7 +2152,7 @@ internal/sleep/
 │                                 │                                           │
 │              ┌──────────────────┼──────────────────┐                        │
 │              │                  │                  │                        │
-│         Recv CLOSE         Send CLOSE         STREAM_RESET                  │
+│         Recv DATA          Send DATA          STREAM_RESET                  │
 │         (FIN_WRITE)        (FIN_WRITE)        (either side)                 │
 │              │                  │                  │                        │
 │              ▼                  ▼                  │                        │
@@ -2136,7 +2161,7 @@ internal/sleep/
 │       │  (remote)   │   │   (local)   │            │                        │
 │       └──────┬──────┘   └──────┬──────┘            │                        │
 │              │                  │                  │                        │
-│        Send CLOSE         Recv CLOSE               │                        │
+│        Send DATA          Recv DATA                │                        │
 │        (FIN_WRITE)        (FIN_WRITE)              │                        │
 │              │                  │                  │                        │
 │              └──────────────────┴──────────────────┘                        │
@@ -2174,12 +2199,12 @@ internal/sleep/
 │  │       │                    │◄─────────────────────│                 │    │
 │  │       │   STREAM_DATA      │                      │                 │    │
 │  │       │◄───────────────────│                      │                 │    │
-│  │       │   STREAM_CLOSE     │                      │                 │    │
+│  │       │   STREAM_DATA      │                      │                 │    │
 │  │       │   (FIN_WRITE)      │                      │                 │    │
 │  │       │◄───────────────────│                      │                 │    │
 │  │       │                    │                      │                 │    │
 │  │       │   Client processes final output           │                 │    │
-│  │       │   STREAM_CLOSE     │                      │                 │    │
+│  │       │   STREAM_DATA      │                      │                 │    │
 │  │       │   (FIN_WRITE)      │                      │                 │    │
 │  │       │───────────────────►│──────────────────────►                 │    │
 │  │       │                    │                      │                 │    │
@@ -2198,24 +2223,23 @@ internal/sleep/
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           RESOURCE LIMITS                                   │
 │                                                                             │
-│  Default limits (configurable):                                             │
+│  Enforced limits:                                                           │
 │                                                                             │
 │  ┌─────────────────────────────┬────────────┬───────────────────────────┐   │
 │  │ Resource                    │ Default    │ Notes                     │   │
 │  ├─────────────────────────────┼────────────┼───────────────────────────┤   │
-│  │ Max streams per peer        │ 1,000      │ Incoming + outgoing       │   │
 │  │ Max total streams           │ 10,000     │ All peers combined        │   │
-│  │ Max pending opens           │ 100        │ STREAM_OPEN awaiting ACK  │   │
 │  │ Stream open timeout         │ 30s        │ Time to receive ACK       │   │
-│  │ Idle stream timeout         │ 5m         │ No data exchanged         │   │
-│  │ Read buffer per stream      │ 256 KB     │                           │   │
-│  │ Write buffer per stream     │ 256 KB     │                           │   │
+│  │ Read queue per stream       │ 64 frames  │ Fixed channel, not bytes  │   │
+│  │ Exit write queue            │ 64 frames  │ Per destination conn      │   │
 │  └─────────────────────────────┴────────────┴───────────────────────────┘   │
 │                                                                             │
-│  When limits are reached:                                                   │
-│  • New STREAM_OPEN receives STREAM_OPEN_ERR with RESOURCE_LIMIT             │
+│  Deprecated config keys (accepted for compatibility, not enforced):         │
+│  limits.max_streams_per_peer, limits.max_pending_opens, limits.buffer_size  │
+│                                                                             │
+│  When the total-stream limit is reached:                                    │
+│  • New STREAM_OPEN receives STREAM_OPEN_ERR with CONNECTION_LIMIT           │
 │  • Existing streams are not affected                                        │
-│  • Log warning for monitoring                                               │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -2226,8 +2250,9 @@ internal/sleep/
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                  PROXY CHAIN PERFORMANCE CHARACTERISTICS                    │
 │                                                                             │
-│  Note: max_hops only limits route advertisement propagation, NOT stream     │
-│  path length. Stream paths are limited by the 30-second open timeout.       │
+│  Note: the routing.max_hops config key is parsed (1-255) but not currently  │
+│  enforced. Stream path length is bounded by the STREAM_OPEN TTL, which      │
+│  starts at the remaining path length and is decremented at each hop.        │
 │                                                                             │
 │  Recommended max hops by use case:                                          │
 │  ┌────────────────────┬──────────────┬─────────────────────────────────┐    │
@@ -2242,7 +2267,7 @@ internal/sleep/
 │  Per-hop overhead:                                                          │
 │  ┌────────────────────┬─────────────────────────────────────────────────┐   │
 │  │ Latency            │ +1-5ms (LAN), +50-200ms (WAN)                   │   │
-│  │ Memory             │ +256KB buffer per active stream                 │   │
+│  │ Memory             │ +64-frame queues per active stream              │   │
 │  │ CPU                │ Frame decode/encode at each relay               │   │
 │  └────────────────────┴─────────────────────────────────────────────────┘   │
 │                                                                             │
@@ -2277,6 +2302,7 @@ internal/sleep/
 │      Sequence    uint64        // From origin's advertisement               │
 │      LastUpdate  time.Time     // Updated on every refresh; route expires   │
 │                                // when now - LastUpdate > RouteTTL          │
+│      Comment     string        // Operator metadata; not used for selection │
 │  }                                                                          │
 │                                                                             │
 │  All four route tables (CIDR, agent presence, domain, forward) share the   │
@@ -2299,8 +2325,9 @@ internal/sleep/
 │  of a third-party exit).                                                    │
 │                                                                             │
 │  Note: internal/routing/manager.go defines a separate, smaller type named   │
-│  RouteEntry { Network *net.IPNet; Metric uint16 } used only as a payload    │
-│  shape for advertisements; do not confuse it with Route above.              │
+│  RouteEntry { Network *net.IPNet; Metric uint16; Comment string } used      │
+│  only as a payload shape for advertisements; do not confuse it with Route   │
+│  above.                                                                     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -2438,13 +2465,14 @@ internal/sleep/
 │          │                        │ ROUTE_ADVERTISE        │                │
 │          │                        │ origin=Agent3          │                │
 │          │                        │ seq=1                  │                │
-│          │                        │ metric=1               │                │
-│          │                        │ path=[Agent2,Agent3]   │                │
+│          │                        │ metric=0 (unchanged)   │                │
+│          │                        │ path=[Agent3]          │                │
 │          │                        │ seenBy=[Agent3,Agent2] │                │
 │          │                        │───────────────────────►│                │
 │          │                        │                        │                │
-│          │                        │                        │ Store route    │
-│          │                        │                        │ metric=2       │
+│          │                        │                        │ Store route:   │
+│          │                        │                        │ metric=0+1=1   │
+│          │                        │                        │ path=[A2,A3]   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -2500,8 +2528,9 @@ internal/sleep/
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note on sequence recovery:** A peer that restarts without a persisted sequence
-counter begins at 1. Receivers still accept updates because `AddRoute` compares the
+**Note on sequence recovery:** Sequence counters seed from the wall clock
+(`time.Now().UnixMilli()`) at startup and are not persisted. Receivers still accept
+updates after a restart because `AddRoute` compares the
 new `(Sequence, Metric)` pair against the currently stored entry per route, not
 against a global per-origin high-water mark. Seen-cache entries for the old
 sequences expire after `SeenCacheTTL` (a fixed 5m default, independent of `advertise_interval`) or are
@@ -2509,8 +2538,8 @@ cleared explicitly when the peer link drops (`ClearSeenCacheForOrigin`).
 
 **Seen-cache sizing:** The flood seen-cache holds entries of the form
 `(OriginAgent, Sequence)`. Expected steady-state size is roughly
-`agents * advertise_interval / SeenCacheTTL`. For the default 2m advertise interval
-and ~5m TTL the per-agent overhead is small.
+`agents * SeenCacheTTL / advertise_interval` (about 2-3 entries per agent at the
+default 2m advertise interval and ~5m TTL), so the per-agent overhead is small.
 
 **Sequence ownership on re-advertisement:** When a peer connects, the full routing
 table is pushed to it. Each origin's routes are re-advertised under that origin's
@@ -2601,7 +2630,7 @@ when a peer disconnects.
 │       │ PEER_HELLO                                   │                      │
 │       │ version=1                                    │                      │
 │       │ agentID=A                                    │                      │
-│       │ timestamp=1703001234                         │                      │
+│       │ timestamp=1703001234000000000                │                      │
 │       │ displayName="agent-A"                        │                      │
 │       │ capabilities=[]  (reserved; empty today)     │                      │
 │       │─────────────────────────────────────────────►│                      │
@@ -2609,12 +2638,12 @@ when a peer disconnects.
 │       │                                              │ Validate:            │
 │       │                                              │ • Version compatible │
 │       │                                              │ • AgentID expected?  │
-│       │                                              │ • Timestamp fresh?   │
 │       │                                              │                      │
 │       │                                   PEER_HELLO_ACK                    │
 │       │                                   version=1  │                      │
 │       │                                   agentID=B  │                      │
-│       │                                   timestamp=1703001235              │
+│       │                                   timestamp=1703001234000000000     │
+│       │                                   (echoes the hello timestamp)      │
 │       │                                   displayName="agent-B"             │
 │       │                                   capabilities=[]                   │
 │       │◄─────────────────────────────────────────────│                      │
@@ -2674,10 +2703,11 @@ the PEER_HELLO_ACK it receives.
 │  ┌─────────────────────────────┬──────────┬─────────────────────────────┐   │
 │  │ Parameter                   │ Default  │ Description                 │   │
 │  ├─────────────────────────────┼──────────┼─────────────────────────────┤   │
-│  │ Idle threshold              │ 5m       │ Send keepalive after idle   │   │
+│  │ Idle threshold              │ 5m       │ Keepalive interval base     │   │
 │  │ Timeout                     │ 90s      │ Declare dead if no response │   │
 │  └─────────────────────────────┴──────────┴─────────────────────────────┘   │
 │                                                                             │
+│  Keepalives are sent on a jittered periodic timer regardless of activity.   │
 │  Sent on StreamID 0 (control stream).                                       │
 │  KEEPALIVE_ACK echoes the same timestamp for RTT calculation.               │
 │                                                                             │
@@ -2884,10 +2914,10 @@ Both use the same `socks5.auth.users` configuration. Compatible clients (like Mu
 │      case STREAM_DATA:                                                      │
 │          entry := forwardTable.Lookup(peer.ID, frame.StreamID)              │
 │          if entry == nil:                                                   │
-│              send STREAM_RESET (unknown stream)                             │
-│              return                                                         │
+│              return  // Unknown stream: drop the frame silently             │
 │          if entry.LocalConn != nil:                                         │
 │              entry.LocalConn.Write(frame.Payload)  // Exit                  │
+│              // On read-buffer-full, send STREAM_RESET                      │
 │          else:                                                              │
 │              forward(entry.OutgoingPeer, frame)    // Transit               │
 │              // On transit write failure: pop the relay entry and send      │
@@ -3015,7 +3045,8 @@ listeners:
       # Option 1: File paths
       cert: "./certs/agent.crt"
       key: "./certs/agent.key"
-      client_ca: "./certs/ca.crt" # Optional: require client certs
+      ca: "./certs/ca.crt" # CA for verifying certs
+      mtls: true # Optional: require client certs (uses ca)
 
       # Option 2: Inline PEM content (takes precedence over file paths)
       # Useful for secrets management or single-file configs
@@ -3165,8 +3196,8 @@ http:
 shell:
   enabled: false # Disabled by default for security
   whitelist: [] # Empty = no commands allowed; ["*"] = all (testing only!)
-  password_hash: "" # bcrypt hash of shell password
-  timeout: 60s # Default command execution timeout
+  password_hash: "" # DEPRECATED and ignored (signing key authorizes commands)
+  timeout: 0s # Command execution timeout (0 = no timeout)
 
 # ------------------------------------------------------------------------------
 # File Transfer
@@ -3174,8 +3205,8 @@ shell:
 file_transfer:
   enabled: false # Disabled by default for security
   max_file_size: 524288000 # Maximum file size in bytes (500 MB)
-  allowed_paths: [] # Allowed path prefixes (empty = all absolute paths)
-  password_hash: "" # bcrypt hash of file transfer password
+  allowed_paths: [] # Allowed path prefixes (empty = NO paths allowed; ["*"] = all)
+  password_hash: "" # DEPRECATED and ignored (signing key authorizes transfers)
 
 # ------------------------------------------------------------------------------
 # UDP Relay (SOCKS5 UDP ASSOCIATE support at exit nodes)
@@ -3260,7 +3291,7 @@ peers:
 
 Syntax:
 
-- `${VAR}` - Substitute variable value
+- `${VAR}` - Substitute variable value (left as-is if the variable is not set)
 - `${VAR:-default}` - Use default if variable not set
 
 ### 13.3 Command-Line Interface
@@ -3278,11 +3309,13 @@ muti-metroo run --config ./config.yaml
 # Show status (via HTTP API)
 muti-metroo status -a localhost:8080
 
-# List peers
-muti-metroo peers
+# Stop a running agent (via HTTP API)
+muti-metroo stop
 
-# List routes
-muti-metroo routes
+# List peers and routes
+# (peers/routes are deprecated aliases of peer status / route status)
+muti-metroo peer status
+muti-metroo route status
 
 # Mesh connectivity testing
 muti-metroo mesh-test                # Test connectivity to all agents
@@ -3296,9 +3329,9 @@ muti-metroo probe listen             # Start a probe listener for inbound testin
 muti-metroo ping <target-agent-id> <destination-ip>
 
 # Certificate management
-muti-metroo cert ca -n "My CA" -o ./certs -d 365
-muti-metroo cert agent -n "agent-1" --ca ./certs/ca.crt
-muti-metroo cert client -n "client-1"
+muti-metroo cert ca --cn "My CA" -o ./certs --days 365
+muti-metroo cert agent --cn "agent-1" --ca ./certs/ca.crt
+muti-metroo cert client --cn "client-1"
 muti-metroo cert info ./certs/ca.crt
 
 # Management commands (execute command on remote agent)
@@ -3315,22 +3348,38 @@ muti-metroo download <target-agent-id> <remote-path> <local-path>
 muti-metroo route add 10.0.0.0/8
 muti-metroo route remove 10.0.0.0/8
 muti-metroo route list
+muti-metroo route comment 10.0.0.0/8 "edge exit"   # Set route comment
+muti-metroo route trace <destination>              # Route selection diagnostic
 
 # Dynamic forward listener management
 muti-metroo forward add <key> <address>
 muti-metroo forward remove <key>
 muti-metroo forward list
+muti-metroo forward endpoint add <key> <target>    # Manage forward endpoints
+muti-metroo forward endpoint remove <key>
+muti-metroo forward endpoint list
 
 # Dynamic peer management (ephemeral; tell a running agent to dial a new peer)
 muti-metroo peer add <address> [--transport quic|h2|ws] [--id <agent-id>]
 muti-metroo peer remove <address>
 muti-metroo peer list
 
+# Dynamic transport listener management
+muti-metroo listener add <transport> <address>
+muti-metroo listener remove <address>
+muti-metroo listener list
+
+# Dynamic host entry management
+muti-metroo host add <name> --ipv4 <ip>           # Map a mesh host name to an IP
+muti-metroo host remove <name>
+muti-metroo host list
+
 # Dynamic display name management
 muti-metroo display-name set "my-agent"
 muti-metroo display-name get
 
-# Password hash generation (for SOCKS5, shell, file transfer auth)
+# Password hash generation (for http.token_hash and socks5.auth.users[]
+# password_hash; shell and file transfer are authorized by the signing key)
 muti-metroo hash                     # Interactive prompt
 muti-metroo hash "password"          # From argument
 muti-metroo hash --cost 12           # Custom bcrypt cost
@@ -3352,6 +3401,13 @@ muti-metroo sleep-status             # Check sleep status
 muti-metroo service install -c /path/to/config.yaml
 muti-metroo service uninstall
 muti-metroo service status
+
+# Config utilities
+muti-metroo config validate ./config.yaml
+muti-metroo config show [./config.yaml]
+
+# Embed a config file into the binary
+muti-metroo embed-config ./config.yaml
 ```
 
 ---
@@ -3523,6 +3579,7 @@ HTTP endpoints are exposed when `http.enabled: true`:
 | `/api/dashboard`      | GET      | Dashboard overview (agent info, stats, peers, routes, hosts)                          |
 | `/api/nodes`          | GET      | Detailed node info listing for all known agents                                       |
 | `/api/mesh-test`      | GET/POST | Mesh connectivity test (GET = cached 30s; POST = forces fresh test)                   |
+| `/api/interfaces`     | GET      | Local network interface addresses                                                     |
 | `/api/probe`          | POST     | Probe a Muti Metroo listener (dial + PEER_HELLO handshake) from the local agent             |
 | `/api/setup-defaults` | GET      | Suggested defaults for the in-browser setup UI                                        |
 
@@ -3534,6 +3591,7 @@ HTTP endpoints are exposed when `http.enabled: true`:
 | `/agents/{agent-id}`               | GET    | Get status from specific agent                         |
 | `/agents/{agent-id}/routes`        | GET    | Get route table from specific agent                    |
 | `/agents/{agent-id}/peers`         | GET    | Get peer list from specific agent                      |
+| `/agents/{agent-id}/interfaces`    | GET    | Get interface addresses from specific agent            |
 | `/agents/{agent-id}/shell`         | GET    | WebSocket management commands on remote agent          |
 | `/agents/{agent-id}/icmp`          | GET    | WebSocket ICMP ping sessions                           |
 | `/agents/{agent-id}/file/upload`   | POST   | Upload file to remote agent                            |
@@ -3565,6 +3623,10 @@ HTTP endpoints are exposed when `http.enabled: true`:
 | `/agents/{id}/display-name/manage`      | POST   | Manage display name on a remote agent                    |
 | `/hosts/manage`                         | POST   | Add, remove, or list mesh-host entries (local-only)      |
 | `/hosts/suffixes/manage`                | POST   | Add, remove, or list mesh-host TLD suffixes (local-only) |
+| `/listeners/manage`                     | POST   | Add, remove, or list transport listeners                 |
+| `/agents/{id}/listeners/manage`         | POST   | Manage transport listeners on a remote agent             |
+| `/shutdown`                             | POST   | Shut down the local agent (signed)                       |
+| `/agents/{id}/shutdown`                 | POST   | Shut down a remote agent (signed)                        |
 
 **Sleep Mode:**
 
@@ -3602,7 +3664,7 @@ HTTP endpoints are exposed when `http.enabled: true`:
 
 `can_sign_management` is `true` when the agent holds `management.signing_private_key` and can therefore initiate shell, file-transfer, dynamic-mutation, and sleep/wake requests. `accepts_signed_management` is `true` when the agent holds `management.signing_public_key` and will verify and execute signed requests from operator agents. Web dashboards and the CLI use these flags to enable or disable management UI affordances without probing each feature individually.
 
-**Authentication on these endpoints.** Every endpoint listed above (other than `/health`, `/healthz`, `/ready`, `/`, and `/logo.png`) requires the bearer token from `http.token_hash` when that field is configured. In addition, every mutation action (`add`, `remove`, `set`, `set_comment`, etc.) on the `*/manage` and `/sleep`-family endpoints carries an Ed25519 management signature: the local agent must hold `management.signing_private_key` to _initiate_ the request, and the target agent must hold `management.signing_public_key` to _verify_ and execute it. Read-only actions (`list`, `get`, `route trace`, `mesh-test`) and the WebSocket shell / icmp endpoints follow the same model -- the WebSocket envelopes carry the signature inside the first message rather than in the HTTP request.
+**Authentication on these endpoints.** Every endpoint listed above (other than `/health`, `/healthz`, `/ready`, `/`, `/logo.png`, and `/notfound.png`) requires the bearer token from `http.token_hash` when that field is configured. In addition, every mutation action (`add`, `remove`, `set`, `set_comment`, etc.) on the `*/manage` and `/sleep`-family endpoints carries an Ed25519 management signature: the local agent must hold `management.signing_private_key` to _initiate_ the request, and the target agent must hold `management.signing_public_key` to _verify_ and execute it. Read-only actions (`list`, `get`, `route trace`, `mesh-test`) and the WebSocket shell / icmp endpoints follow the same model -- the WebSocket envelopes carry the signature inside the first message rather than in the HTTP request.
 
 ### 15.2 Structured Logging
 
@@ -3667,7 +3729,7 @@ sudo muti-metroo setup
 
 ```bash
 # Uninstall
-sudo muti-metroo uninstall --name muti-metroo
+sudo muti-metroo service uninstall --name muti-metroo
 
 # View status
 systemctl status muti-metroo
@@ -3716,8 +3778,11 @@ muti-metroo setup
 5. Peer connections
 6. SOCKS5 configuration (if ingress)
 7. Exit configuration (if exit)
-8. Advanced options (logging, health, control)
-9. Service installation (on supported platforms)
+8. Monitoring & logging (HTTP API, auth, log settings)
+9. Shell configuration (remote command execution)
+10. File transfer
+11. Management & signing keys
+12. Service installation (on supported platforms)
 
 ---
 
@@ -3745,11 +3810,11 @@ tls:
 
 ### 17.2 Certificate Types
 
-| Type       | Usage                                     | Default Validity |
-| ---------- | ----------------------------------------- | ---------------- |
-| CA         | Sign other certificates                   | 365 days         |
-| Agent/Peer | Server + client auth for mesh connections | 90 days          |
-| Client     | Client authentication only                | 90 days          |
+| Type       | Usage                                     | Default Validity        |
+| ---------- | ----------------------------------------- | ----------------------- |
+| CA         | Sign other certificates                   | 365 days                |
+| Agent/Peer | Server + client auth for mesh connections | 365 days (matches CA)   |
+| Client     | Client authentication only                | 365 days (matches CA)   |
 
 ### 17.3 Certificate Generation
 
@@ -3791,9 +3856,9 @@ muti-metroo cert info ./certs/agent-1.crt
 
 **Key Usages:**
 
-- CA: Certificate signing, CRL signing
+- CA: Digital signature, certificate signing, CRL signing
 - Server: Digital signature, key encipherment, server auth
-- Client: Digital signature, client auth
+- Client: Digital signature, key encipherment, client auth
 - Peer: Digital signature, key encipherment, server auth, client auth
 
 ---
@@ -3806,7 +3871,8 @@ muti-metroo cert info ./certs/agent-1.crt
 muti-metroo/
 ├── cmd/
 │   ├── muti-metroo/
-│   │   └── main.go                 # CLI entrypoint and all commands
+│   │   ├── main.go                 # CLI entrypoint and all commands
+│   │   └── detach.go               # Background/self-detach helpers (platform-specific variants)
 │   └── muti-dll/
 │       └── main.go                 # Windows DLL entry point for service installation
 │
@@ -4021,7 +4087,7 @@ muti-metroo/
 │   │   └── store_test.go           # Host registry tests
 │   │
 │   ├── apiclient/
-│   │   └── client.go               # HTTP client used by the CLI (token auth, signed envelopes)
+│   │   └── endpoint.go             # HTTP client used by the CLI (token auth, signed envelopes)
 │   │
 │   ├── sysinfo/
 │   │   ├── sysinfo.go              # System info and shell detection for node advertisements
@@ -4081,7 +4147,6 @@ muti-metroo/
 ├── Dockerfile
 ├── Dockerfile.test
 ├── docker-compose.yml              # Multi-agent test environment
-├── docker-compose.override.yml     # Local overrides
 └── README.md
 ```
 
@@ -4091,8 +4156,7 @@ muti-metroo/
 | --------------------------------------- | --------------------------------------------------------- |
 | `github.com/quic-go/quic-go`            | QUIC transport                                            |
 | `golang.org/x/net/http2`                | HTTP/2 transport                                          |
-| `nhooyr.io/websocket`                   | WebSocket transport (SOCKS5 WS)                           |
-| `github.com/gorilla/websocket`          | WebSocket (shell, ICMP relay)                             |
+| `nhooyr.io/websocket`                   | WebSocket transport (SOCKS5 WS, shell, ICMP relay)        |
 | `github.com/refraction-networking/utls` | TLS ClientHello profiles (browser-compatible ClientHello) |
 | `golang.org/x/crypto`                   | bcrypt, Ed25519, X25519                                   |
 | `gopkg.in/yaml.v3`                      | Configuration parsing                                     |
@@ -4177,7 +4241,6 @@ muti-metroo/
 │  │  • Set read/write deadlines                                         │    │
 │  │  • Close underlying connections on shutdown                         │    │
 │  │  • Use recovery.RecoverWithLog for panic handling                   │    │
-│  │  • Log goroutine count periodically (debug mode)                    │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -4352,7 +4415,7 @@ docker run --rm muti-metroo-test
 | 31   | UDP_PORT_NOT_ALLOWED  | UDP port not in whitelist             |
 | 40   | FORWARD_NOT_FOUND     | Port forward key not configured       |
 | 50   | ICMP_DISABLED         | ICMP feature is disabled              |
-| 51   | ICMP_DEST_NOT_ALLOWED | ICMP destination not in allowed CIDRs |
+| 51   | ICMP_DEST_NOT_ALLOWED | Reserved; not currently emitted         |
 | 52   | ICMP_SESSION_LIMIT    | Max ICMP sessions reached             |
 
 ### Default Timing
@@ -4371,7 +4434,7 @@ docker run --rm muti-metroo-test
 | Reconnect jitter            | 0.2                                              |
 | Stream open timeout         | 30s                                              |
 | Handshake timeout           | 10s                                              |
-| QUIC idle timeout           | 60s                                              |
+| QUIC idle timeout           | 90s                                              |
 | QUIC keepalive period       | 30s                                              |
 | UDP idle timeout            | 5m                                               |
 | ICMP session idle timeout   | 60s                                              |
@@ -4389,8 +4452,9 @@ docker run --rm muti-metroo-test
 | `init`                    | Initialize agent identity                       |
 | `run`                     | Start the agent                                 |
 | `status`                  | Show agent status                               |
-| `peers`                   | List connected peers                            |
-| `routes`                  | Show routing table                              |
+| `stop`                    | Shut down a running agent                       |
+| `peers`                   | List connected peers (deprecated: `peer status`) |
+| `routes`                  | Show routing table (deprecated: `route status`)  |
 | `probe`                   | Test connectivity to a listener                 |
 | `mesh-test`               | Test connectivity to all mesh agents            |
 | `ping`                    | ICMP ping through remote exit agent             |
@@ -4400,12 +4464,21 @@ docker run --rm muti-metroo-test
 | `route add`               | Add dynamic CIDR exit route                     |
 | `route remove`            | Remove dynamic CIDR exit route                  |
 | `route list`              | List dynamic routes                             |
+| `route status`            | Show routing table                              |
+| `route trace`             | Explain route selection for a destination       |
+| `route comment`           | Set a route comment                             |
 | `forward add`             | Add dynamic forward listener                    |
 | `forward remove`          | Remove dynamic forward listener                 |
 | `forward list`            | List forward listeners                          |
+| `forward endpoint ...`    | Manage dynamic forward endpoints (add/remove/list) |
 | `peer add`                | Add dynamic outbound peer connection            |
 | `peer remove`             | Remove dynamic peer connection                  |
 | `peer list`               | List peer connections (config + dynamic)        |
+| `peer status`             | List connected peers                            |
+| `listener ...`            | Manage transport listeners (add/remove/list)    |
+| `host ...`                | Manage mesh host entries and suffixes           |
+| `config validate`         | Validate a config file                          |
+| `config show`             | Show effective config                           |
 | `display-name set`        | Set agent display name                          |
 | `display-name get`        | Get current display name                        |
 | `cert ca`                 | Generate CA certificate                         |
@@ -4423,6 +4496,7 @@ docker run --rm muti-metroo-test
 | `sleep`                   | Put mesh into sleep mode                        |
 | `wake`                    | Wake mesh from sleep mode                       |
 | `sleep-status`            | Check sleep mode status                         |
+| `embed-config`            | Embed a config file into the binary             |
 
 ---
 
@@ -4441,10 +4515,10 @@ While Muti Metroo requires applications to be SOCKS5-aware, Mutiauk enables any 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MUTI_METROO ENTRY DATA FLOW                               │
+│                              MUTIAUK DATA FLOW                              │
 │                                                                             │
 │  Application → TUN Device → gVisor Stack → TCP/UDP Forwarder → SOCKS5 →     │
-│                                                               Muti Metroo →       │
+│                                                               Muti Metroo → │
 │                                                               Exit Agent →  │
 │                                                               Destination   │
 │                                                                             │
@@ -4453,19 +4527,19 @@ While Muti Metroo requires applications to be SOCKS5-aware, Mutiauk enables any 
 
 ### Platform Requirements
 
-| Aspect           | Requirement                   |
-| ---------------- | ----------------------------- |
-| **Platform**     | Linux only (TUN interface)    |
-| **Privileges**   | Root required (CAP_NET_ADMIN) |
-| **Dependencies** | None (static binary)          |
+| Aspect           | Requirement                            |
+| ---------------- | -------------------------------------- |
+| **Platform**     | Linux, macOS, Windows (TUN interface)  |
+| **Privileges**   | Root (Linux/macOS), Administrator (Windows) |
+| **Dependencies** | None (static binary; wintun embedded on Windows) |
 
-**Note:** Unlike Muti Metroo agents which run unprivileged, Mutiauk requires root to create and manage the TUN interface.
+**Note:** Unlike Muti Metroo agents which run unprivileged, Mutiauk needs elevated privileges to create and manage the TUN interface: root on Linux (the systemd unit provisions CAP_NET_ADMIN, CAP_NET_RAW, CAP_NET_BIND_SERVICE) and macOS, and Administrator with the bundled wintun driver on Windows.
 
 ### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MUTI_METROO ENTRY ARCHITECTURE                            │
+│                         MUTIAUK ARCHITECTURE                                │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                          DAEMON                                       │  │
@@ -4479,11 +4553,11 @@ While Muti Metroo requires applications to be SOCKS5-aware, Mutiauk enables any 
 │  │  └────────────────┘  └────────────────┘  └────────────────┘           │  │
 │  │                                                                       │  │
 │  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐           │  │
-│  │  │  Route Manager │  │  SOCKS5 Client │  │  Config Watch  │           │  │
+│  │  │  Route Manager │  │  SOCKS5 Client │  │  Config Reload │           │  │
 │  │  │                │  │                │  │                │           │  │
-│  │  │ • netlink      │  │ • CONNECT      │  │ • fsnotify     │           │  │
-│  │  │ • CIDR routes  │  │ • UDP ASSOCIATE│  │ • hot reload   │           │  │
-│  │  │ • conflict det │  │ • auth         │  │ • SIGHUP       │           │  │
+│  │  │ • OS routes    │  │ • CONNECT      │  │ • hot reload   │           │  │
+│  │  │ • CIDR routes  │  │ • UDP ASSOCIATE│  │ • SIGHUP       │           │  │
+│  │  │ • conflict det │  │ • auth         │  │ • reload API   │           │  │
 │  │  └────────────────┘  └────────────────┘  └────────────────┘           │  │
 │  │                                                                       │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -4499,16 +4573,22 @@ mutiauk/
 │   └── main.go              # CLI entrypoint
 ├── internal/
 │   ├── daemon/              # Orchestrator (server.go)
-│   ├── tun/                 # TUN device creation
+│   ├── tun/                 # TUN device creation (Linux/macOS/Windows, wintun embedded)
 │   ├── stack/               # gVisor TCP/IP stack wrapper
 │   ├── proxy/               # TCP/UDP forwarders
 │   ├── socks5/              # SOCKS5 client
 │   ├── nat/                 # Connection tracking
-│   ├── route/               # Linux route management
+│   ├── route/               # OS route management (netlink/route/Windows)
+│   ├── dns/                 # DNS handling
+│   ├── autoroutes/          # Route-watch driven auto-routing
+│   ├── expose/              # Expose local services through the mesh
+│   ├── api/                 # Daemon API types
+│   ├── adminhttp/           # Admin HTTP interface
+│   ├── backoff/             # Reconnect backoff helpers
 │   ├── config/              # YAML configuration
 │   ├── cli/                 # CLI commands
 │   ├── wizard/              # Interactive setup wizard
-│   └── service/             # Systemd service management
+│   └── service/             # System service management (Linux, macOS, Windows)
 └── configs/
     └── mutiauk.example.yaml
 ```
@@ -4520,13 +4600,20 @@ mutiauk/
 | `setup`             | Interactive configuration wizard                                         |
 | `daemon start`      | Start the daemon                                                         |
 | `daemon stop`       | Stop the daemon                                                          |
-| `daemon reload`     | Reload configuration                                                     |
+| `daemon reload`     | Reload configuration (cross-platform replacement for SIGHUP)             |
+| `daemon status`     | Show daemon status                                                       |
 | `route list`        | List active routes                                                       |
 | `route add`         | Add a route                                                              |
 | `route remove`      | Remove a route                                                           |
+| `route plan/apply/check` | Dry-run, apply, and verify route changes                            |
+| `trace`             | Trace which route a destination would take                               |
+| `dns`               | Manage DNS settings                                                      |
+| `expose`            | Expose local services through the mesh                                   |
+| `host`              | Manage mesh host entries                                                 |
 | `status`            | Show comprehensive daemon status (top-level command, not under `daemon`) |
-| `service install`   | Install systemd service                                                  |
-| `service uninstall` | Remove systemd service                                                   |
+| `service install`   | Install system service                                                   |
+| `service uninstall` | Remove system service                                                    |
+| `service status`    | Show service status                                                      |
 
 ### Configuration
 
@@ -4562,11 +4649,11 @@ nat:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     MUTI_METROO ENTRY + MUTI_METROO DEPLOYMENT                          │
+│                     MUTIAUK + MUTI METROO DEPLOYMENT                        │
 │                                                                             │
 │  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐     │
-│  │   Application    │     │     Mutiauk  │     │   Muti Metroo          │     │
-│  │   (any app)      │     │  (Linux, root)   │     │   (userspace)    │     │
+│  │   Application    │     │     Mutiauk      │     │   Muti Metroo    │     │
+│  │   (any app)      │     │  (TUN, elevated) │     │   (userspace)    │     │
 │  │                  │     │                  │     │                  │     │
 │  │  No SOCKS5       │     │  TUN interface   │     │  SOCKS5 ingress  │     │
 │  │  configuration   │────►│  IP → SOCKS5     │────►│  Mesh routing    │     │

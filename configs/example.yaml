@@ -311,7 +311,7 @@ routing:
   advertise_interval: 2m # How often to re-advertise routes
   # node_info_interval: 2m  # NodeInfo advertisement frequency (defaults to advertise_interval if unset)
   route_ttl: 5m # How long routes are valid
-  max_hops: 16 # Maximum path length (TTL)
+  max_hops: 16 # Accepted (validated 1-255) but not currently enforced; stream paths are bounded by STREAM_OPEN TTL
 
 # ------------------------------------------------------------------------------
 # Connection Tuning
