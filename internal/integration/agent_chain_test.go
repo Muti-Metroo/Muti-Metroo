@@ -425,6 +425,23 @@ func (c *AgentChain) WaitForRoutes(t *testing.T) bool {
 	return false
 }
 
+// WaitForAgentPath waits until agent fromIdx can route management requests
+// (shell, file transfer) to agent toIdx, failing the test on timeout. Agent
+// presence propagates separately from CIDR routes, so a fixed sleep after
+// start is not enough on a loaded machine.
+func (c *AgentChain) WaitForAgentPath(t *testing.T, fromIdx, toIdx int) {
+	t.Helper()
+	target := c.Agents[toIdx].ID()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Agents[fromIdx].CanReachAgent(target) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("agent %d has no path to agent %d (%s) after 30s", fromIdx, toIdx, target.ShortString())
+}
+
 // WaitForForwardRoute waits for a forward route with the given key to propagate to
 // the agent at agentIdx. Returns true if the route appears within the timeout.
 func (c *AgentChain) WaitForForwardRoute(t *testing.T, key string, agentIdx int) bool {

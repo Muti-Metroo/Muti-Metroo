@@ -5832,6 +5832,13 @@ func (a *Agent) GetRoutes() []*routing.Route {
 	return a.routeMgr.Table().GetAllRoutes()
 }
 
+// CanReachAgent reports whether management requests (shell, file transfer)
+// addressed to targetID can be routed from this agent right now.
+func (a *Agent) CanReachAgent(targetID identity.AgentID) bool {
+	_, _, _, err := a.findPathToAgent(targetID)
+	return err == nil
+}
+
 // LookupForwardRoute returns the best forward route for a key, or nil if none.
 func (a *Agent) LookupForwardRoute(key string) *routing.ForwardRoute {
 	return a.routeMgr.LookupForward(key)

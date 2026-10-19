@@ -67,7 +67,7 @@ func TestShell_OneOffCommand(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -106,7 +106,7 @@ func TestShell_CommandWithArgs(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -143,7 +143,7 @@ func TestShell_CommandWithStderr(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -183,7 +183,7 @@ func TestShell_NonZeroExitCode(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -215,7 +215,7 @@ func TestShell_StreamingOutput(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -265,7 +265,7 @@ func TestShell_SignatureRequired(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -304,7 +304,7 @@ func TestShell_TargetMissingPublicKey(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -332,7 +332,7 @@ func TestShell_WhitelistAllowed(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -375,7 +375,7 @@ func TestShell_WhitelistDenied(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -408,7 +408,7 @@ func TestShell_MaxSessions(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -466,7 +466,7 @@ func TestShell_TTYSessionOpen(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 

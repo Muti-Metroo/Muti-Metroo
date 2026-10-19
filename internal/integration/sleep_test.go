@@ -601,10 +601,16 @@ func TestSleepMesh_EchoThroughMesh(t *testing.T) {
 		t.Fatal("Route re-propagation failed")
 	}
 
-	// Test echo after wake
+	// Test echo after wake. WaitForRoutes only checks route counts, so a
+	// transit agent on the path may still be re-learning its routes on a
+	// loaded machine; retry until the path works or the deadline passes.
 	t.Log("=== Testing echo AFTER wake ===")
-	if !testEcho(t, mesh.Agents["A"], listener.Addr().String()) {
-		t.Error("Echo failed after wake")
+	deadline := time.Now().Add(15 * time.Second)
+	for !testEcho(t, mesh.Agents["A"], listener.Addr().String()) {
+		if time.Now().After(deadline) {
+			t.Fatal("Echo failed after wake")
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	t.Log("Echo test completed successfully")

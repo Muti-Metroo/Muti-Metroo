@@ -188,7 +188,7 @@ func TestFileTransfer_BasicUploadDownload(t *testing.T) {
 	chain.StartAgents(t)
 
 	// Wait for routes to propagate
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -257,7 +257,7 @@ func TestFileTransfer_LargeFile(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -347,7 +347,7 @@ func TestFileTransfer_SignatureRequired(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -392,7 +392,7 @@ func TestFileTransfer_TargetMissingPublicKey(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -428,7 +428,7 @@ func TestFileTransfer_PathRestrictions(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -500,7 +500,7 @@ func TestFileTransfer_MaxFileSize(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -560,7 +560,7 @@ func TestFileTransfer_ResumeDownload(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -621,7 +621,7 @@ func TestFileTransfer_RateLimit(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
@@ -834,7 +834,7 @@ func TestFileTransfer_Disabled(t *testing.T) {
 	chain.CreateAgents(t)
 	chain.StartAgents(t)
 
-	time.Sleep(3 * time.Second)
+	chain.WaitForAgentPath(t, 0, 3)
 
 	targetID := chain.Agents[3].ID().String()
 
