@@ -24,7 +24,7 @@ Muti Metroo is part of a three-component suite: **Muti Metroo** (mesh agent), **
 
 Both are sibling directories. You may explore their codebases when updating docs. Download links in the docs point at each repo's `releases/latest/download/<asset>` URL, so asset names must match the release assets exactly.
 
-- **Mutiauk** (`../Mutiauk/`): Cross-platform TUN interface tool (Linux/macOS/Windows; requires root/CAP_NET_ADMIN on Linux and macOS, Administrator on Windows). Provides transparent Layer 3 traffic interception, forwarding through Muti Metroo's SOCKS5 proxy. Docs: `docs/docs/mutiauk.mdx`. **Build it with `GOTOOLCHAIN=go1.25.5`** (the Makefile targets and the `golang:1.25` Docker image already pin this) -- its gVisor dependency does not compile under Go 1.26.
+- **Mutiauk** (`../Mutiauk/`): Cross-platform TUN interface tool (Linux/macOS/Windows; requires root/CAP_NET_ADMIN on Linux and macOS, Administrator on Windows). Provides transparent Layer 3 traffic interception, forwarding through Muti Metroo's SOCKS5 proxy. Docs: `docs/docs/mutiauk.mdx`. It needs Go 1.27.2 or later (its gVisor dependency requires it; an older local Go downloads that toolchain automatically).
 - **Muti Metroo Manager** (`../Muti-Metroo-Manager/`): Cross-platform single Go binary with embedded React SPA. Browser-based UI that reverse-proxies an agent's HTTP API (topology visualization, real-time stats, route management, management commands, file transfer, mesh testing, sleep/wake). Docs: `docs/docs/muti-metroo-manager.mdx`.
 
 ## Documentation
