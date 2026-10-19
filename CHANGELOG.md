@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.12.1](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.12.0...muti-metroo-v4.12.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* add per-stream flow control so slow readers never lose data ([e8a7d26](https://github.com/Muti-Metroo/Muti-Metroo/commit/e8a7d26c44afe25ab28f486ed3bcaaca77a7ad16))
+* relay UDP when the mesh has no default route ([4c90b73](https://github.com/Muti-Metroo/Muti-Metroo/commit/4c90b730d86225bbabfaf6c9565a9ffdbe775a77))
+
 ## [4.12.0](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.11.0...muti-metroo-v4.12.0) (2026-10-19)
 
 
