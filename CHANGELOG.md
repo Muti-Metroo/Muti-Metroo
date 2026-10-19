@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.0](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.11...muti-metroo-v4.11.0) (2026-10-19)
+
+
+### Features
+
+* add UDP STREAM, a SOCKS5 UDP association framed on the connection ([94b179b](https://github.com/Muti-Metroo/Muti-Metroo/commit/94b179b79fc55282aee1974a3e35002ac2856f7d))
+
 ## [4.10.11](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.10...muti-metroo-v4.10.11) (2026-10-12)
 
 
