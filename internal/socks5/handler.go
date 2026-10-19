@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Muti-Metroo/Muti-Metroo/internal/netutil"
 	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
@@ -73,6 +74,20 @@ type peekConn struct {
 }
 
 func (c *peekConn) Read(b []byte) (int, error) { return c.br.Read(b) }
+
+// NetConn returns the wrapped connection, so netutil.Abort can reset it.
+func (c *peekConn) NetConn() net.Conn { return c.Conn }
+
+// CloseWrite half-closes the wrapped connection when it supports that, so
+// relay can pass a FIN from the target on to the client. Without it the
+// wrapper hides TCP half-close and the client never sees the end of the
+// response while its own side is still open.
+func (c *peekConn) CloseWrite() error {
+	if hc, ok := c.Conn.(halfCloser); ok {
+		return hc.CloseWrite()
+	}
+	return nil
+}
 
 // NoDeadlineMonitor forwards the wrapped connection's opt-out of
 // deadline-based disconnect monitoring (see noDeadlineMonitor). Without this
@@ -270,7 +285,7 @@ func (h *Handler) handleConnect(conn net.Conn, req *Request) error {
 	conn.SetDeadline(time.Time{})
 	target.SetDeadline(time.Time{})
 
-	return relay(conn, target)
+	return netutil.Relay(conn, target)
 }
 
 // dialWithMonitor dials targetAddr while monitoring conn for early client disconnect.
@@ -809,37 +824,4 @@ func meshErrorToSOCKS5(code uint16) byte {
 	default:
 		return ReplyServerFailure
 	}
-}
-
-// relay copies data bidirectionally between two connections.
-// Supports half-close on any connection type that implements halfCloser interface.
-func relay(client, target net.Conn) error {
-	errCh := make(chan error, 2)
-
-	go func() {
-		_, err := io.Copy(target, client)
-		// Signal target that we're done writing (half-close)
-		if hc, ok := target.(halfCloser); ok {
-			hc.CloseWrite()
-		}
-		errCh <- err
-	}()
-
-	go func() {
-		_, err := io.Copy(client, target)
-		// Signal client that we're done writing (half-close)
-		if hc, ok := client.(halfCloser); ok {
-			hc.CloseWrite()
-		}
-		errCh <- err
-	}()
-
-	// Wait for both directions to complete
-	err1 := <-errCh
-	err2 := <-errCh
-
-	if err1 != nil {
-		return err1
-	}
-	return err2
 }

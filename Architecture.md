@@ -27,6 +27,7 @@ The architecture provides end-to-end encryption using X25519 key exchange and Ch
    - [6.4 Payload Definitions](#64-payload-definitions)
      - [6.4.1 Session Key Derivation](#641-session-key-derivation)
      - [6.4.2 Protocol Evolution Policy](#642-protocol-evolution-policy)
+     - [6.4.3 Stream Flow Control](#643-stream-flow-control)
    - [6.5 UDP Relay Protocol](#65-udp-relay-protocol)
    - [6.6 Port Forwarding](#66-port-forwarding-reverse-tunnel)
    - [6.7 ICMP Echo Protocol](#67-icmp-echo-protocol)
@@ -739,6 +740,7 @@ All communication uses a consistent framing protocol:
 │  │ 0x04 │ STREAM_DATA        │ Both        │ Payload data                │  │
 │  │ 0x05 │ STREAM_CLOSE       │ Both        │ Graceful close (half/full)  │  │
 │  │ 0x06 │ STREAM_RESET       │ Both        │ Abort stream with error     │  │
+│  │ 0x07 │ STREAM_WINDOW      │ Both        │ Grant sender more frames    │  │
 │  └──────┴────────────────────┴─────────────┴─────────────────────────────┘  │
 │                                                                             │
 │  Routing Frames:                                                            │
@@ -899,7 +901,7 @@ All communication uses a consistent framing protocol:
 │    0    │ FIN_WRITE     │ STREAM_DATA/CLOSE      │ Sender is done writing   │
 │    1    │ FIN_READ      │ STREAM_CLOSE           │ Reserved; treat as hard  │
 │         │               │                        │ close (see below)        │
-│    2    │ (reserved)    │                        │                          │
+│    2    │ FLOW_CONTROL  │ STREAM_OPEN/OPEN_ACK   │ Stream uses flow control │
 │    3    │ (reserved)    │                        │                          │
 │   4-7   │ (reserved)    │                        │                          │
 │                                                                             │
@@ -943,8 +945,8 @@ All communication uses a consistent framing protocol:
 │   └─────────────────┴────────┴──────────────────────────────────────────┘   │
 │                                                                             │
 │   Capability string format: 1-byte length + UTF-8 string                    │
-│   The capabilities list is reserved for future use; the current agent       │
-│   implementation advertises an empty list. Node roles are discovered        │
+│   Agents advertise "flow-control" (per-stream flow control, see 6.4.3).     │
+│   Unknown capability strings are ignored. Node roles are discovered         │
 │   through NODE_INFO_ADVERTISE instead.                                      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -1093,12 +1095,50 @@ Source: `internal/crypto/crypto.go`.
   the buffer. New optional fields MUST be appended at the end and MUST be
   self-delimiting (typically length-prefixed). Existing ordering is normative;
   reordering requires a protocol version bump.
-- The `capabilities` list in `PEER_HELLO` is reserved for future negotiation. Until
-  negotiation is defined, senders SHOULD emit `CapabilitiesLen = 0` and receivers
-  MUST ignore any capability strings encountered.
+- The `capabilities` list in `PEER_HELLO` negotiates optional per-link features.
+  Receivers MUST ignore capability strings they do not know. The only capability
+  defined so far is `flow-control` (6.4.3).
 - The wire protocol version in `PEER_HELLO` is currently `0x01`. Breaking frame-level
   changes require a version bump; backward-compatible additions should use the
   trailing-optional pattern described above.
+
+#### 6.4.3 Stream Flow Control
+
+Each stream has a credit-based window counted in data frames, one per direction.
+Endpoint buffers are fixed frame queues (the initiator's stream read buffer, the
+exit and forward destination write queues), and a peer connection's frame drainer
+must never block on one stream, so without a window a slow reader or a slow
+destination made the endpoint drop a frame and reset the stream.
+
+- **Negotiation.** An agent that supports flow control advertises the
+  `flow-control` capability in `PEER_HELLO`. The initiator sets `FLOW_CONTROL`
+  (flag bit 2, `0x04`) on `STREAM_OPEN` only when its next hop advertised the
+  capability; each transit hop keeps the flag only when its own next hop did. The
+  target confirms by setting the flag on `STREAM_OPEN_ACK`, which transit hops
+  relay unchanged. A stream without the flag on its ACK runs without flow control
+  in both directions, so a path through any older agent behaves as before.
+- **Window.** Each side may send `StreamWindowFrames` (128) `STREAM_DATA` frames
+  with a non-empty payload before it receives window back. Frames with an empty
+  payload (a bare `FIN_WRITE`) cost nothing. A sender that has no window blocks
+  its source (the SOCKS client connection, the destination socket, the file
+  reader); it never drops data. The window equals the endpoint queue sizes, so a
+  sender that honors it can never overflow them.
+- **Credit.** A receiver returns window once a frame has really been consumed: read
+  by the local application (initiator), written to the destination (exit,
+  forward), or processed (file transfer). Grants are batched, one `STREAM_WINDOW`
+  per `StreamWindowUpdateThreshold` (32) frames.
+- **STREAM_WINDOW (0x07).** Payload is a 4-byte big-endian `Increment`: the number
+  of frames the receiver of the frame may send in addition to its current window.
+  Transit hops relay it along the stream like `STREAM_DATA`.
+- **Exclusions.** Shell streams never use flow control (the shell client buffers
+  received data in its own adapter). UDP and ICMP have their own frame types and
+  are unaffected.
+- **Resets.** When a stream is reset (by `STREAM_RESET` or because a buffer
+  overflowed on a path without flow control), its local readers get an error
+  (`stream.ResetError`), and the SOCKS5 and forward relays abort the client
+  connection with a TCP RST, so a truncated stream never looks complete.
+
+Source: `internal/stream/flow.go`, `internal/agent/flow.go`.
 
 #### STREAM_OPEN_ERR (0x03)
 
@@ -4276,9 +4316,10 @@ muti-metroo/
 │                                                                             │
 │  Stream errors:                                                             │
 │  • Log error with stream ID                                                 │
-│  • Slow local consumer (read buffer full): drop the frame and               │
-│    STREAM_RESET only that stream -- never block the connection              │
-│    drainer                                                                  │
+│  • Slow local consumer: flow control (6.4.3) holds the sender back.         │
+│    Without it (older agent on the path) a full read buffer drops the        │
+│    frame and STREAM_RESETs only that stream -- never block the              │
+│    connection drainer                                                       │
 │  • Send STREAM_RESET to both ends                                           │
 │  • Remove from forward table                                                │
 │  • Close local connections if any                                           │

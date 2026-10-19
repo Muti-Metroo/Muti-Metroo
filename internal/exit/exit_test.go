@@ -156,6 +156,8 @@ type mockStreamWriter struct {
 	data   []streamData
 	closes []uint64
 	resets []uint64
+	// consumed counts StreamConsumed calls (flow-control credit returned).
+	consumed int
 }
 
 type streamAck struct {
@@ -1224,4 +1226,75 @@ func TestHandler_HandleStreamData_SlowDestinationResetsOnlyThatStream(t *testing
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// Flow-control credit for a data frame is returned only once the frame has
+// been written to the destination, so a slow destination holds back the
+// sender instead of overflowing the write queue.
+func TestHandler_HandleStreamData_CreditAfterDestinationWrite(t *testing.T) {
+	localID, _ := identity.NewAgentID()
+	peerID, _ := identity.NewAgentID()
+	writer := &mockStreamWriter{}
+	h := NewHandler(DefaultHandlerConfig(), localID, writer)
+	h.Start()
+	defer h.Stop()
+
+	destConn, destPeer := net.Pipe()
+	t.Cleanup(func() { destPeer.Close() })
+	key := registerTestConn(t, h, peerID, 1, 100, destConn)
+
+	const frames = 5
+	for i := 0; i < frames; i++ {
+		ct, err := key.Encrypt([]byte("payload"))
+		if err != nil {
+			t.Fatalf("Encrypt: %v", err)
+		}
+		if err := h.HandleStreamData(peerID, 1, ct, 0); err != nil {
+			t.Fatalf("HandleStreamData: %v", err)
+		}
+	}
+
+	// Nothing read yet: the writer is stuck in the first Write.
+	time.Sleep(50 * time.Millisecond)
+	if got := writer.consumedCount(); got != 0 {
+		t.Fatalf("credit returned before the destination read anything: %d", got)
+	}
+
+	// An empty-plaintext frame still used a unit of window; it is credited
+	// at once since there is nothing to write.
+	empty, err := key.Encrypt(nil)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if err := h.HandleStreamData(peerID, 1, empty, 0); err != nil {
+		t.Fatalf("HandleStreamData empty: %v", err)
+	}
+	if got := writer.consumedCount(); got != 1 {
+		t.Fatalf("credit after empty frame = %d, want 1", got)
+	}
+	// A bare FIN carries no payload and costs no window.
+	if err := h.HandleStreamData(peerID, 1, nil, protocol.FlagFinWrite); err != nil {
+		t.Fatalf("HandleStreamData FIN: %v", err)
+	}
+
+	go io.Copy(io.Discard, destPeer)
+	deadline := time.Now().Add(2 * time.Second)
+	for writer.consumedCount() != frames+1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("credit = %d, want %d", writer.consumedCount(), frames+1)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (m *mockStreamWriter) StreamConsumed(peerID identity.AgentID, streamID uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.consumed++
+}
+
+func (m *mockStreamWriter) consumedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.consumed
 }

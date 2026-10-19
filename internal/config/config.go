@@ -680,6 +680,10 @@ type LimitsConfig struct {
 	// fixed per-stream frame queue, not a sized byte buffer. The key is
 	// still accepted so existing configs keep loading.
 	BufferSize int `yaml:"buffer_size,omitempty"`
+	// DisableFlowControl makes the agent neither advertise nor use
+	// per-stream flow control, as an agent from before it existed. It is
+	// not a config file key: tests set it to exercise mixed-version meshes.
+	DisableFlowControl bool `yaml:"-"`
 }
 
 // HTTPConfig defines HTTP API server settings.

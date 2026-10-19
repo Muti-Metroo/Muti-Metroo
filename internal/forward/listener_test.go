@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Muti-Metroo/Muti-Metroo/internal/netutil"
 )
 
 // mockDialer is a mock implementation of TunnelDialer for testing.
@@ -383,7 +385,7 @@ func TestRelay(t *testing.T) {
 	}()
 
 	// Run relay
-	relay(client, target)
+	netutil.Relay(client, target)
 
 	// Verify data was copied
 	clientWritten := client.GetWriteData()

@@ -432,6 +432,29 @@ func TestStreamReset_EncodeDecode(t *testing.T) {
 	}
 }
 
+func TestStreamWindow_EncodeDecode(t *testing.T) {
+	original := &StreamWindow{Increment: 0x01020304}
+
+	data := original.Encode()
+	if len(data) != 4 {
+		t.Fatalf("encoded length = %d, want 4", len(data))
+	}
+	decoded, err := DecodeStreamWindow(data)
+	if err != nil {
+		t.Fatalf("DecodeStreamWindow() error = %v", err)
+	}
+	if decoded.Increment != original.Increment {
+		t.Errorf("Increment = %d, want %d", decoded.Increment, original.Increment)
+	}
+
+	if _, err := DecodeStreamWindow(data[:3]); err == nil {
+		t.Error("DecodeStreamWindow() should fail with short data")
+	}
+	if got := FrameTypeName(FrameStreamWindow); got != "STREAM_WINDOW" {
+		t.Errorf("FrameTypeName(FrameStreamWindow) = %q", got)
+	}
+}
+
 func TestKeepalive_EncodeDecode(t *testing.T) {
 	original := &Keepalive{Timestamp: 1703001234567}
 

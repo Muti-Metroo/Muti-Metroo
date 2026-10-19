@@ -82,6 +82,16 @@ func buildDomainConnectRequest(domain string, port uint16) []byte {
 	return buf.Bytes()
 }
 
+// buildIPv4ConnectRequest builds a SOCKS5 CONNECT request frame for an IPv4
+// destination.
+func buildIPv4ConnectRequest(addr *net.TCPAddr) []byte {
+	buf := &bytes.Buffer{}
+	buf.Write([]byte{socks5.SOCKS5Version, socks5.CmdConnect, 0x00, socks5.AddrTypeIPv4})
+	buf.Write(addr.IP.To4())
+	_ = binary.Write(buf, binary.BigEndian, uint16(addr.Port))
+	return buf.Bytes()
+}
+
 // readSocks5Reply reads the standard 10-byte IPv4-form reply that the
 // Muti Metroo SOCKS5 server returns for both successful and failed CONNECTs.
 // (See sendReply in internal/socks5/handler.go: replies always use the IPv4
@@ -100,21 +110,31 @@ func readSocks5Reply(conn net.Conn, deadline time.Duration) (byte, error) {
 // net.Conn. On non-success reply or read error, fails the test.
 func socksConnectDomain(t *testing.T, socksAddr string, domain string, port uint16) net.Conn {
 	t.Helper()
+	return socksConnect(t, socksAddr, buildDomainConnectRequest(domain, port), domain)
+}
+
+// socksConnect performs a SOCKS5 no-auth handshake, sends the CONNECT
+// request req (for dest, used in messages), and returns the connected
+// net.Conn with no read deadline. It fails the test unless the CONNECT
+// succeeds.
+func socksConnect(t *testing.T, socksAddr string, req []byte, dest string) net.Conn {
+	t.Helper()
 
 	conn := socks5Handshake(t, socksAddr)
-	if _, err := conn.Write(buildDomainConnectRequest(domain, port)); err != nil {
+	if _, err := conn.Write(req); err != nil {
 		conn.Close()
-		t.Fatalf("Failed to write CONNECT for %s: %v", domain, err)
+		t.Fatalf("Failed to write CONNECT for %s: %v", dest, err)
 	}
 	code, err := readSocks5Reply(conn, 10*time.Second)
 	if err != nil {
 		conn.Close()
-		t.Fatalf("Failed to read CONNECT reply for %s: %v", domain, err)
+		t.Fatalf("Failed to read CONNECT reply for %s: %v", dest, err)
 	}
 	if code != socks5.ReplySucceeded {
 		conn.Close()
-		t.Fatalf("CONNECT to %s rejected with reply code %d", domain, code)
+		t.Fatalf("CONNECT to %s rejected with reply code %d", dest, code)
 	}
+	conn.SetReadDeadline(time.Time{})
 	return conn
 }
 

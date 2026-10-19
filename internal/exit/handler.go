@@ -97,12 +97,18 @@ type StreamWriter interface {
 
 	// WriteStreamReset sends a reset frame aborting the stream.
 	WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error
+
+	// StreamConsumed reports that one data frame of a flow-controlled stream
+	// has been consumed, so its window can be returned to the sender.
+	StreamConsumed(peerID identity.AgentID, streamID uint64)
 }
 
 // writeQueueSize bounds each connection's pending destination writes. The
 // queue exists so a slow destination never stalls the peer connection's frame
-// drainer; when it fills, only the affected stream is reset.
-const writeQueueSize = 64
+// drainer. It holds one flow-control window, so a sender that honors the
+// window never fills it; a sender without flow control that does gets only
+// its own stream reset.
+const writeQueueSize = protocol.StreamWindowFrames
 
 // writeRequest is one unit of work for a connection's writer goroutine. The
 // FIN marker travels through the queue so CloseWrite cannot overtake queued
@@ -110,6 +116,9 @@ const writeQueueSize = 64
 type writeRequest struct {
 	data []byte // plaintext payload; empty for a pure FIN
 	fin  bool   // half-close the destination after data is written
+	// credit is set when the frame used a unit of flow-control window,
+	// returned once the write is done.
+	credit bool
 }
 
 // ActiveConnection represents an active exit connection.
@@ -456,7 +465,11 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 	}
 
 	fin := flags&protocol.FlagFinWrite != 0
+	credit := len(data) > 0
 	if len(plaintext) == 0 && !fin {
+		if credit {
+			h.writer.StreamConsumed(peerID, streamID)
+		}
 		return nil
 	}
 
@@ -465,7 +478,7 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 	// blocking the frame drainer (and every other stream on the
 	// connection) behind it.
 	select {
-	case ac.writeCh <- writeRequest{data: plaintext, fin: fin}:
+	case ac.writeCh <- writeRequest{data: plaintext, fin: fin, credit: credit}:
 	case <-ac.done:
 		return fmt.Errorf("stream %d closed", streamID)
 	default:
@@ -500,6 +513,9 @@ func (h *Handler) writeLoop(ac *ActiveConnection) {
 				if tcpConn, ok := ac.Conn.(*net.TCPConn); ok {
 					tcpConn.CloseWrite()
 				}
+			}
+			if req.credit {
+				h.writer.StreamConsumed(ac.RemoteID, ac.StreamID)
 			}
 		}
 	}

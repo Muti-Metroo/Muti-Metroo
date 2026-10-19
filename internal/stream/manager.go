@@ -72,16 +72,40 @@ type Stream struct {
 
 	// End-to-end encryption session key
 	sessionKey *crypto.SessionKey
+
+	// Flow control (nil when the path does not support it): sendWindow gates
+	// this side's data frames, credit batches the frames this side has
+	// consumed, and onCredit sends them back to the peer as STREAM_WINDOW.
+	sendWindow *Window
+	credit     *Credit
+	onCredit   func(n uint32)
+
+	// resetErr is set when the stream was reset rather than closed, so
+	// readers fail instead of seeing a clean end of stream.
+	resetErr error
+}
+
+// ResetError reports that a stream was aborted with STREAM_RESET, by the peer
+// or locally, instead of closed cleanly. Data after the reset is lost, so
+// readers must not treat it as an end of stream.
+type ResetError struct {
+	Code uint16
+}
+
+func (e *ResetError) Error() string {
+	return fmt.Sprintf("stream reset (code %d)", e.Code)
 }
 
 // NewStream creates a new stream.
 func NewStream(id uint64, localID, remoteID identity.AgentID, requestID uint64) *Stream {
 	s := &Stream{
-		ID:          id,
-		LocalID:     localID,
-		RemoteID:    remoteID,
-		RequestID:   requestID,
-		readBuffer:  make(chan []byte, 64),
+		ID:        id,
+		LocalID:   localID,
+		RemoteID:  remoteID,
+		RequestID: requestID,
+		// One slot per frame of the flow-control window: a sender that honors
+		// the window can never overflow it.
+		readBuffer:  make(chan []byte, protocol.StreamWindowFrames),
 		closed:      make(chan struct{}),
 		remoteFinCh: make(chan struct{}),
 		CreatedAt:   time.Now(),
@@ -195,12 +219,13 @@ func (s *Stream) PushData(data []byte) error {
 }
 
 // Read reads data from the stream.
-// Prioritizes reading buffered data before returning EOF on close or remote half-close.
+// Prioritizes reading buffered data before returning EOF on close or remote
+// half-close. A reset stream returns its *ResetError instead.
 func (s *Stream) Read(ctx context.Context) ([]byte, error) {
 	// First, try to read any buffered data without blocking
 	select {
 	case data := <-s.readBuffer:
-		return data, nil
+		return s.took(data), nil
 	default:
 		// No data immediately available, continue to blocking select
 	}
@@ -210,10 +235,13 @@ func (s *Stream) Read(ctx context.Context) ([]byte, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-s.closed:
+		if err := s.resetError(); err != nil {
+			return nil, err
+		}
 		// Stream closed - drain any remaining buffered data first
 		select {
 		case data := <-s.readBuffer:
-			return data, nil
+			return s.took(data), nil
 		default:
 			return nil, io.EOF
 		}
@@ -221,13 +249,88 @@ func (s *Stream) Read(ctx context.Context) ([]byte, error) {
 		// Remote half-closed - drain buffered data then return EOF
 		select {
 		case data := <-s.readBuffer:
-			return data, nil
+			return s.took(data), nil
 		default:
 			return nil, io.EOF
 		}
 	case data := <-s.readBuffer:
-		return data, nil
+		return s.took(data), nil
 	}
+}
+
+// TryRead returns a buffered frame without waiting, and false when none is
+// buffered.
+func (s *Stream) TryRead() ([]byte, bool) {
+	select {
+	case data := <-s.readBuffer:
+		return s.took(data), true
+	default:
+		return nil, false
+	}
+}
+
+// took records that a frame left the read buffer and returns it. With flow
+// control on, consumed frames are returned to the sender in batches.
+func (s *Stream) took(data []byte) []byte {
+	s.mu.Lock()
+	credit, onCredit := s.credit, s.onCredit
+	s.mu.Unlock()
+	if credit != nil {
+		if n := credit.Consumed(1); n > 0 {
+			onCredit(n)
+		}
+	}
+	return data
+}
+
+// EnableFlowControl turns on flow control for the stream: data frames this
+// side sends need window (AcquireSend), and onCredit is called with the
+// number of frames to grant back to the peer as this side consumes data.
+// Call it before the stream is handed to its reader and writer.
+func (s *Stream) EnableFlowControl(onCredit func(n uint32)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sendWindow = NewWindow(protocol.StreamWindowFrames)
+	s.credit = &Credit{}
+	s.onCredit = onCredit
+}
+
+// AcquireSend waits for window to send one data frame. It returns at once
+// when flow control is off, and ErrWindowClosed if the stream ends first.
+func (s *Stream) AcquireSend() error {
+	s.mu.Lock()
+	w := s.sendWindow
+	s.mu.Unlock()
+	if w == nil {
+		return nil
+	}
+	return w.Acquire(s.closed)
+}
+
+// GrantSend adds n frames to the send window (a STREAM_WINDOW from the peer).
+func (s *Stream) GrantSend(n int) {
+	s.mu.Lock()
+	w := s.sendWindow
+	s.mu.Unlock()
+	if w != nil {
+		w.Grant(n)
+	}
+}
+
+// Reset aborts the stream: readers get err instead of buffered data or EOF.
+func (s *Stream) Reset(err error) {
+	s.mu.Lock()
+	if s.resetErr == nil {
+		s.resetErr = err
+	}
+	s.mu.Unlock()
+	s.Close()
+}
+
+func (s *Stream) resetError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resetErr
 }
 
 // ReadWithTimeout reads with a timeout.
@@ -242,8 +345,12 @@ func (s *Stream) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.SetState(StateClosed)
+		w := s.sendWindow
 		s.mu.Unlock()
 		close(s.closed)
+		if w != nil {
+			w.Close()
+		}
 		// Do not drain readBuffer: Read() consumes remaining data before
 		// returning io.EOF. Draining here would race with concurrent readers.
 	})
@@ -258,12 +365,6 @@ func (s *Stream) IsClosed() bool {
 	default:
 		return false
 	}
-}
-
-// ReadBuffer returns the read buffer channel for direct access.
-// Use this sparingly - prefer using Read() instead.
-func (s *Stream) ReadBuffer() <-chan []byte {
-	return s.readBuffer
 }
 
 // Done returns a channel that's closed when the stream closes.
@@ -352,6 +453,16 @@ type Manager struct {
 	streams         map[streamKey]*Stream
 	pendingRequests map[uint64]*PendingRequest
 	nextRequestID   atomic.Uint64
+
+	// windowSender delivers a STREAM_WINDOW grant for a flow-controlled
+	// stream to its peer. Set once by the owner before streams are opened.
+	windowSender func(peer identity.AgentID, streamID uint64, n uint32)
+}
+
+// SetWindowSender sets the function that sends STREAM_WINDOW grants for
+// flow-controlled streams. Call it before opening streams.
+func (m *Manager) SetWindowSender(f func(peer identity.AgentID, streamID uint64, n uint32)) {
+	m.windowSender = f
 }
 
 // NewManager creates a new stream manager.
@@ -428,7 +539,9 @@ func (m *Manager) handleRequestTimeout(requestID uint64) {
 // frame arrived from; it must be the peer the request was sent to, or any peer
 // could complete a request this agent addressed to a different one. Request IDs
 // are a sequential counter, so they are as guessable as stream IDs.
-func (m *Manager) HandleStreamOpenAck(peer identity.AgentID, requestID uint64, boundAddr net.IP, boundPort uint16, remoteEphemeral [crypto.KeySize]byte) (*Stream, error) {
+// flowControl reports that the ACK carried FlagFlowControl: every hop
+// supports flow control, so the stream uses it in both directions.
+func (m *Manager) HandleStreamOpenAck(peer identity.AgentID, requestID uint64, boundAddr net.IP, boundPort uint16, remoteEphemeral [crypto.KeySize]byte, flowControl bool) (*Stream, error) {
 	m.mu.Lock()
 	pending, ok := m.pendingRequests[requestID]
 	if !ok {
@@ -445,6 +558,10 @@ func (m *Manager) HandleStreamOpenAck(peer identity.AgentID, requestID uint64, b
 	crypto.ZeroKey(&pending.EphemeralPrivate)
 
 	stream := pending.Stream
+	if flowControl && m.windowSender != nil {
+		send, remote, id := m.windowSender, stream.RemoteID, stream.ID
+		stream.EnableFlowControl(func(n uint32) { send(remote, id, n) })
+	}
 	stream.Open()
 	m.streams[streamKey{peer: stream.RemoteID, streamID: stream.ID}] = stream
 	m.mu.Unlock()
@@ -590,6 +707,11 @@ func (m *Manager) HandleStreamClose(peer identity.AgentID, streamID uint64) {
 
 // HandleStreamReset processes a STREAM_RESET frame.
 func (m *Manager) HandleStreamReset(peer identity.AgentID, streamID uint64, errorCode uint16) {
+	m.ResetStream(peer, streamID, &ResetError{Code: errorCode})
+}
+
+// ResetStream removes a stream and fails its readers with err.
+func (m *Manager) ResetStream(peer identity.AgentID, streamID uint64, err error) {
 	key := streamKey{peer: peer, streamID: streamID}
 	m.mu.Lock()
 	stream, ok := m.streams[key]
@@ -599,8 +721,19 @@ func (m *Manager) HandleStreamReset(peer identity.AgentID, streamID uint64, erro
 	m.mu.Unlock()
 
 	if ok {
-		stream.Close()
+		stream.Reset(err)
 	}
+}
+
+// HandleStreamWindow processes a STREAM_WINDOW frame for a stream this
+// manager owns, and reports whether the stream was found.
+func (m *Manager) HandleStreamWindow(peer identity.AgentID, streamID uint64, increment uint32) bool {
+	stream := m.GetStream(peer, streamID)
+	if stream == nil {
+		return false
+	}
+	stream.GrantSend(int(increment))
+	return true
 }
 
 // CloseStreamsForPeer closes every stream opened through the given peer and

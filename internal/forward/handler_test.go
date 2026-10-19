@@ -35,6 +35,8 @@ type mockStreamWriter struct {
 	resets       []closeWrite
 	writeFail    bool
 	writeDataErr error
+	// consumed counts StreamConsumed calls (flow-control credit returned).
+	consumed int
 }
 
 type dataWrite struct {
@@ -1052,4 +1054,49 @@ func TestHandler_HandleStreamData_SlowBackendResetsOnlyThatStream(t *testing.T) 
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// Flow-control credit for a data frame is returned only once the frame has
+// been written to the backend.
+func TestHandler_HandleStreamData_CreditAfterBackendWrite(t *testing.T) {
+	writer := &mockStreamWriter{}
+	h := NewHandler(HandlerConfig{}, mustNewAgentID(), writer)
+	h.Start()
+	defer h.Stop()
+
+	peerID := mustNewAgentID()
+	conn := &blockingWriteConn{mockConn: newMockConn(), gate: make(chan struct{})}
+	key := registerTestConn(t, h, peerID, 1, 100, conn)
+
+	const frames = 5
+	for i := 0; i < frames; i++ {
+		if err := h.HandleStreamData(peerID, 1, mustEncrypt(t, key, []byte("payload")), 0); err != nil {
+			t.Fatalf("HandleStreamData: %v", err)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := writer.consumedCount(); got != 0 {
+		t.Fatalf("credit returned before the backend accepted anything: %d", got)
+	}
+
+	close(conn.gate)
+	deadline := time.Now().Add(2 * time.Second)
+	for writer.consumedCount() != frames {
+		if time.Now().After(deadline) {
+			t.Fatalf("credit = %d, want %d", writer.consumedCount(), frames)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (m *mockStreamWriter) StreamConsumed(peerID identity.AgentID, streamID uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.consumed++
+}
+
+func (m *mockStreamWriter) consumedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.consumed
 }

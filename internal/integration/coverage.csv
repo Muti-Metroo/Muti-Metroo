@@ -75,6 +75,9 @@ Mesh-Hosts,Mesh-host TLD suffix add/remove/list,POST /hosts/suffixes/manage and 
 Stream,STREAM_OPEN/ACK exchange,Open handshake with ephemeral key exchange,2,M,e2e_stream::*,-,Full,Low,Implicit in every stream
 Stream,FIN_WRITE half-close,Sender done writing,2,M,halfclose::StreamBehavior,-,Full,Low,Already covered
 Stream,FIN_READ half-close,Sender done reading (rare),2,M,-,-,None,Low,Edge flag
+Stream,Flow control: slow reader,Stalled SOCKS client gets every byte once it resumes (no drop or reset),4,M,flow_control::SlowReader,-,Full,High,24 MB payload is well over one window plus socket buffers
+Stream,Flow control: slow destination,Stalled destination gets every byte once it resumes,4,M,flow_control::SlowDestination,-,Full,High,Exercises the exit write queue credit path
+Stream,Flow control: mixed-version fallback,Path through an agent without flow-control capability still carries data,4,M,"flow_control::LegacyAgentFallback, LegacyOverflowIsAnError",-,Full,Med,Legacy simulated with Limits.DisableFlowControl; overflow on the legacy path must surface as a client reset
 Stream,Stream count tracking,No leaked streams in healthz,2,M,-,T7,Partial,Med,Could be Go test
 Stream,Frame ordering after race fix,STREAM_DATA before STREAM_CLOSE preserved,2,M,peer::ConcurrentClose* (unit),-,Partial,Low,Recently fixed; unit tests cover
 Stream,Stream open timeout,STREAM_OPEN with no ACK times out at 30s,2,M,-,-,None,Med,Untested

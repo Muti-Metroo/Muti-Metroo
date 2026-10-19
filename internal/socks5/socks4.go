@@ -9,6 +9,8 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"github.com/Muti-Metroo/Muti-Metroo/internal/netutil"
 )
 
 const (
@@ -55,7 +57,7 @@ func (h *Handler) handleSOCKS4(conn *peekConn) error {
 	conn.SetDeadline(time.Time{})
 	target.SetDeadline(time.Time{})
 
-	return relay(conn, target)
+	return netutil.Relay(conn, target)
 }
 
 // parseSOCKS4Request reads and parses a SOCKS4/4a request.

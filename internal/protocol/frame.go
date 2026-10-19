@@ -760,6 +760,28 @@ func DecodeStreamReset(buf []byte) (*StreamReset, error) {
 	return &StreamReset{ErrorCode: r.readUint16()}, nil
 }
 
+// StreamWindow is the payload of a STREAM_WINDOW frame: the number of data
+// frames the receiver of the frame may send in addition to its current window.
+type StreamWindow struct {
+	Increment uint32
+}
+
+// Encode serializes StreamWindow to bytes.
+func (s *StreamWindow) Encode() []byte {
+	w := newBufferWriter(4)
+	w.writeUint32(s.Increment)
+	return w.bytes()
+}
+
+// DecodeStreamWindow deserializes StreamWindow from bytes.
+func DecodeStreamWindow(buf []byte) (*StreamWindow, error) {
+	if len(buf) < 4 {
+		return nil, fmt.Errorf("%w: StreamWindow too short", ErrInvalidFrame)
+	}
+	r := newBufferReader(buf, "StreamWindow")
+	return &StreamWindow{Increment: r.readUint32()}, nil
+}
+
 // Keepalive is the payload for KEEPALIVE and KEEPALIVE_ACK frames.
 type Keepalive struct {
 	Timestamp uint64

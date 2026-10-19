@@ -9,6 +9,7 @@ import (
 
 	"github.com/Muti-Metroo/Muti-Metroo/internal/crypto"
 	"github.com/Muti-Metroo/Muti-Metroo/internal/identity"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
 // ForwardDialer is an interface for dialing port forward connections through the mesh.
@@ -33,12 +34,18 @@ type StreamWriter interface {
 
 	// WriteStreamReset sends a reset frame aborting the stream.
 	WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error
+
+	// StreamConsumed reports that one data frame of a flow-controlled stream
+	// has been consumed, so its window can be returned to the sender.
+	StreamConsumed(peerID identity.AgentID, streamID uint64)
 }
 
 // writeQueueSize bounds each connection's pending backend writes. The queue
-// exists so a slow backend never stalls the peer connection's frame drainer;
-// when it fills, only the affected stream is reset.
-const writeQueueSize = 64
+// exists so a slow backend never stalls the peer connection's frame drainer.
+// It holds one flow-control window, so a sender that honors the window never
+// fills it; a sender without flow control that does gets only its own stream
+// reset.
+const writeQueueSize = protocol.StreamWindowFrames
 
 // writeRequest is one unit of work for a connection's writer goroutine. The
 // FIN marker travels through the queue so CloseWrite cannot overtake queued
@@ -46,6 +53,9 @@ const writeQueueSize = 64
 type writeRequest struct {
 	data []byte // plaintext payload; empty for a pure FIN
 	fin  bool   // half-close the backend after data is written
+	// credit is set when the frame used a unit of flow-control window,
+	// returned once the write is done.
+	credit bool
 }
 
 // Endpoint represents a tunnel exit point configuration.

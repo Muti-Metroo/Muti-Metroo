@@ -3,13 +3,13 @@ package forward
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
 
 	"github.com/Muti-Metroo/Muti-Metroo/internal/logging"
+	"github.com/Muti-Metroo/Muti-Metroo/internal/netutil"
 	"github.com/Muti-Metroo/Muti-Metroo/internal/recovery"
 )
 
@@ -222,43 +222,9 @@ func (l *Listener) handleConnection(conn net.Conn) {
 		"remote", remoteAddr)
 
 	// Relay data bidirectionally
-	relay(conn, target)
+	_ = netutil.Relay(conn, target)
 
 	l.logger.Debug("forward connection closed",
 		"key", l.cfg.Key,
 		"remote", remoteAddr)
-}
-
-// halfCloser is implemented by connections that support half-close.
-type halfCloser interface {
-	CloseWrite() error
-}
-
-// relay copies data bidirectionally between two connections.
-// Supports half-close for graceful shutdown.
-func relay(client, target net.Conn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Client -> Target
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(target, client)
-		// Signal we're done writing
-		if hc, ok := target.(halfCloser); ok {
-			hc.CloseWrite()
-		}
-	}()
-
-	// Target -> Client
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(client, target)
-		// Signal we're done writing
-		if hc, ok := client.(halfCloser); ok {
-			hc.CloseWrite()
-		}
-	}()
-
-	wg.Wait()
 }

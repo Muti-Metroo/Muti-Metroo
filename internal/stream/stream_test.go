@@ -564,7 +564,7 @@ func TestManager_OpenStream_MaxLimitIncludesPending(t *testing.T) {
 	// Once a pending open resolves and its stream goes away, a new open fits
 	// under the limit again.
 	var remoteEphemeral [crypto.KeySize]byte
-	if _, err := m.HandleStreamOpenAck(remoteID, p1.RequestID, nil, 0, remoteEphemeral); err != nil {
+	if _, err := m.HandleStreamOpenAck(remoteID, p1.RequestID, nil, 0, remoteEphemeral, false); err != nil {
 		t.Fatalf("HandleStreamOpenAck() error = %v", err)
 	}
 	m.RemoveStream(remoteID, 1)
@@ -590,7 +590,7 @@ func TestManager_OpenStream_Success(t *testing.T) {
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		var remoteEphemeral [crypto.KeySize]byte
-		m.HandleStreamOpenAck(remoteID, pending.RequestID, nil, 0, remoteEphemeral)
+		m.HandleStreamOpenAck(remoteID, pending.RequestID, nil, 0, remoteEphemeral, false)
 	}()
 
 	result := <-pending.ResultCh
@@ -975,13 +975,13 @@ func TestManager_OpenAckRejectsWrongPeer(t *testing.T) {
 	pending := m.OpenStream(1, intendedPeer, "10.0.0.1", 80, time.Second)
 
 	var remoteEphemeral [crypto.KeySize]byte
-	if _, err := m.HandleStreamOpenAck(impostor, pending.RequestID, nil, 0, remoteEphemeral); err == nil {
+	if _, err := m.HandleStreamOpenAck(impostor, pending.RequestID, nil, 0, remoteEphemeral, false); err == nil {
 		t.Error("an impostor peer completed a request addressed to another peer")
 	}
 
 	// The request must survive the rejection and still be completable by its
 	// intended peer -- otherwise the check is a denial of service instead.
-	if _, err := m.HandleStreamOpenAck(intendedPeer, pending.RequestID, nil, 0, remoteEphemeral); err != nil {
+	if _, err := m.HandleStreamOpenAck(intendedPeer, pending.RequestID, nil, 0, remoteEphemeral, false); err != nil {
 		t.Fatalf("intended peer could not complete its own request: %v", err)
 	}
 	if s := m.GetStream(intendedPeer, 1); s == nil {

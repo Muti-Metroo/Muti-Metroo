@@ -142,6 +142,10 @@ type Agent struct {
 	fileStreamsMu     sync.RWMutex
 	fileStreams       map[streamKey]*fileTransferStream // (peer, StreamID) -> active transfer
 
+	// Flow-control state of streams this agent is the target of; see flow.go.
+	flowMu      sync.Mutex
+	flowTargets map[streamKey]*targetFlow
+
 	// Shell (stream-based)
 	shellHandler       *shell.Handler
 	shellClientMu      sync.RWMutex
@@ -343,6 +347,7 @@ func New(cfg *config.Config) (*Agent, error) {
 		pendingControl:            make(map[uint64]*pendingControlRequest),
 		forwardedControl:          make(map[uint64]*forwardedControlRequest),
 		fileStreams:               make(map[streamKey]*fileTransferStream),
+		flowTargets:               make(map[streamKey]*targetFlow),
 		shellClientStreams:        make(map[streamKey]*health.ShellStreamAdapter),
 		udpIngressByBase:          make(map[uint64]*udpIngressAssociation),
 		udpIngressByLocalStream:   make(map[streamKey]*udpDestLookup),
@@ -387,11 +392,15 @@ func (a *Agent) initComponents() error {
 		MaxStreamsTotal: a.cfg.Limits.MaxStreamsTotal,
 	}
 	a.streamMgr = stream.NewManager(streamCfg, a.id)
+	a.streamMgr.SetWindowSender(a.sendStreamWindow)
 
 	// Initialize peer manager with default QUIC transport
 	// Other transports are used via ConnectWithTransport()
 	peerCfg := peer.DefaultManagerConfig(a.id, a.transports[transport.TransportQUIC])
 	peerCfg.DisplayName = a.cfg.Agent.DisplayName
+	if !a.cfg.Limits.DisableFlowControl {
+		peerCfg.Capabilities = []string{protocol.CapabilityFlowControl}
+	}
 	peerCfg.KeepaliveInterval = a.cfg.Connections.IdleThreshold
 	peerCfg.KeepaliveTimeout = a.cfg.Connections.Timeout
 	peerCfg.KeepaliveJitter = a.cfg.Connections.KeepaliveJitter
@@ -3771,6 +3780,8 @@ func (a *Agent) processFrame(peerID identity.AgentID, frame *protocol.Frame) {
 		a.handleStreamClose(peerID, frame)
 	case protocol.FrameStreamReset:
 		a.handleStreamReset(peerID, frame)
+	case protocol.FrameStreamWindow:
+		a.handleStreamWindow(peerID, frame)
 	case protocol.FrameRouteAdvertise:
 		a.handleRouteAdvertise(peerID, frame)
 	case protocol.FrameRouteWithdraw:
@@ -3837,14 +3848,25 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 
 	// Check if we are the exit node (path is empty or we're the target)
 	if len(open.RemainingPath) == 0 || (len(open.RemainingPath) == 1 && open.RemainingPath[0] == a.id) {
+		// Flow control is accepted only by the targets below that return
+		// window as they consume data (StreamConsumed); any other target,
+		// such as shell, leaves it off.
+		acceptFlow := func() {
+			if frame.Flags&protocol.FlagFlowControl != 0 {
+				a.registerTargetFlow(peerID, frame.StreamID)
+			}
+		}
+		destAddr := addressToString(open.AddressType, open.Address)
+
 		// Check if this is a file transfer or shell stream
 		if open.AddressType == protocol.AddrTypeDomain {
-			destAddr := addressToString(open.AddressType, open.Address)
 			if destAddr == protocol.FileTransferUpload {
+				acceptFlow()
 				a.handleFileUploadStreamOpen(peerID, frame.StreamID, open.RequestID, open.EphemeralPubKey)
 				return
 			}
 			if destAddr == protocol.FileTransferDownload {
+				acceptFlow()
 				a.handleFileDownloadStreamOpen(peerID, frame.StreamID, open.RequestID, open.EphemeralPubKey)
 				return
 			}
@@ -3861,6 +3883,7 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 			if strings.HasPrefix(destAddr, protocol.ForwardStreamPrefix) {
 				key := strings.TrimPrefix(destAddr, protocol.ForwardStreamPrefix)
 				if a.forwardHandler != nil {
+					acceptFlow()
 					ctx := context.Background()
 					a.forwardHandler.HandleStreamOpen(ctx, frame.StreamID, open.RequestID, peerID, key, open.EphemeralPubKey)
 				} else {
@@ -3883,9 +3906,8 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 
 		// We are the exit node for TCP traffic
 		if a.exitHandler != nil {
+			acceptFlow()
 			ctx := context.Background()
-			// Convert address bytes to string based on address type
-			destAddr := addressToString(open.AddressType, open.Address)
 			a.exitHandler.HandleStreamOpen(ctx, frame.StreamID, open.RequestID, peerID, destAddr, open.Port, open.EphemeralPubKey)
 		}
 		return
@@ -3960,6 +3982,11 @@ func (a *Agent) handleStreamOpen(peerID identity.AgentID, frame *protocol.Frame)
 		StreamID: downstreamID,
 		Payload:  fwdOpen.Encode(),
 	}
+	// Keep flow control only if the next hop relays STREAM_WINDOW too;
+	// otherwise the endpoints fall back to running without it.
+	if frame.Flags&protocol.FlagFlowControl != 0 && a.flowControlWith(conn) {
+		fwdFrame.Flags = protocol.FlagFlowControl
+	}
 
 	if err := a.peerMgr.SendToPeer(nextHop, fwdFrame); err != nil {
 		// Clean up relay entry on failure
@@ -4011,6 +4038,7 @@ func (a *Agent) handleStreamOpenAck(peerID identity.AgentID, frame *protocol.Fra
 		fwdFrame := &protocol.Frame{
 			Type:     protocol.FrameStreamOpenAck,
 			StreamID: relay.UpstreamID,
+			Flags:    frame.Flags,
 			Payload:  frame.Payload,
 		}
 		a.peerMgr.SendToPeer(relay.UpstreamPeer, fwdFrame)
@@ -4028,7 +4056,8 @@ func (a *Agent) handleStreamOpenAck(peerID identity.AgentID, frame *protocol.Fra
 		boundIP = net.IP(ack.BoundAddr)
 	}
 
-	a.streamMgr.HandleStreamOpenAck(peerID, ack.RequestID, boundIP, ack.BoundPort, ack.EphemeralPubKey)
+	a.streamMgr.HandleStreamOpenAck(peerID, ack.RequestID, boundIP, ack.BoundPort, ack.EphemeralPubKey,
+		frame.Flags&protocol.FlagFlowControl != 0)
 }
 
 // handleStreamOpenErr processes a STREAM_OPEN_ERR.
@@ -4143,6 +4172,10 @@ func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame)
 	// Check if this is a file transfer stream
 	if a.getFileTransferStream(peerID, frame.StreamID) != nil {
 		a.handleFileTransferStreamData(peerID, frame.StreamID, frame.Payload, frame.Flags)
+		// Handled synchronously, so the frame is consumed now.
+		if len(frame.Payload) > 0 {
+			a.StreamConsumed(peerID, frame.StreamID)
+		}
 		return
 	}
 
@@ -4169,7 +4202,7 @@ func (a *Agent) handleStreamData(peerID identity.AgentID, frame *protocol.Frame)
 		a.logger.Debug("stream read buffer full, resetting stream",
 			logging.KeyPeerID, peerID.ShortString(),
 			logging.KeyStreamID, frame.StreamID)
-		a.streamMgr.RemoveStream(peerID, frame.StreamID)
+		a.streamMgr.ResetStream(peerID, frame.StreamID, &stream.ResetError{Code: protocol.ErrResourceLimit})
 		a.peerMgr.SendToPeer(peerID, &protocol.Frame{
 			Type:     protocol.FrameStreamReset,
 			StreamID: frame.StreamID,
@@ -4212,6 +4245,9 @@ func (a *Agent) handleStreamClose(peerID identity.AgentID, frame *protocol.Frame
 		}
 		return
 	}
+
+	// The stream is over: wake a target-side sender waiting for window.
+	a.releaseTargetFlow(peerID, frame.StreamID)
 
 	// Check if this is an exit handler stream
 	if a.exitHandler != nil && a.exitHandler.GetConnection(peerID, frame.StreamID) != nil {
@@ -4276,6 +4312,8 @@ func (a *Agent) handleStreamReset(peerID identity.AgentID, frame *protocol.Frame
 		}
 		return
 	}
+
+	a.releaseTargetFlow(peerID, frame.StreamID)
 
 	// Check if this is an exit handler stream
 	if a.exitHandler != nil && a.exitHandler.GetConnection(peerID, frame.StreamID) != nil {
@@ -4915,6 +4953,7 @@ func (a *Agent) handlePeerDisconnect(conn *peer.Connection, err error) {
 	// Close this agent's own streams opened through the dead peer, so
 	// ingress consumers (SOCKS5 clients, file transfers) get an error
 	// instead of hanging on a next hop that no longer exists.
+	a.releaseTargetFlowsForPeer(peerID)
 	if n := a.streamMgr.CloseStreamsForPeer(peerID); n > 0 {
 		a.logger.Debug("closed streams for disconnected peer",
 			logging.KeyPeerID, peerID.ShortString(), logging.KeyCount, n)
@@ -5204,6 +5243,7 @@ func (a *Agent) DialContext(ctx context.Context, network, address string) (net.C
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(route.NextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(route.NextHop, frame); err != nil {
@@ -5311,6 +5351,7 @@ func (a *Agent) dialViaDomainRouteWithContext(ctx context.Context, network, host
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(route.NextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(route.NextHop, frame); err != nil {
@@ -5433,6 +5474,7 @@ func (a *Agent) DialForward(ctx context.Context, key string) (net.Conn, error) {
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(route.NextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(route.NextHop, frame); err != nil {
@@ -5681,6 +5723,9 @@ func (c *meshConn) Write(b []byte) (int, error) {
 			Payload:  ciphertext,
 		}
 
+		if err := c.stream.AcquireSend(); err != nil {
+			return offset, err
+		}
 		if err := c.agent.peerMgr.SendToPeer(c.peerID, frame); err != nil {
 			// Return bytes written so far
 			return offset, err
@@ -5729,6 +5774,9 @@ func (c *meshConn) CloseWrite() error {
 		Payload:  emptyEncrypted,
 	}
 
+	if err := c.stream.AcquireSend(); err != nil {
+		return err
+	}
 	if err := c.agent.peerMgr.SendToPeer(c.peerID, frame); err != nil {
 		return err
 	}
@@ -6200,7 +6248,8 @@ func (a *Agent) HealthServerAddress() net.Addr {
 	return a.healthServer.Address()
 }
 
-// WriteStreamData implements exit.StreamWriter.
+// WriteStreamData implements exit.StreamWriter. It waits for flow-control
+// window, so it must not run on a peer's frame drainer (see acquireSend).
 // Chunks data larger than MaxPayloadSize into multiple frames.
 func (a *Agent) WriteStreamData(peerID identity.AgentID, streamID uint64, data []byte, flags uint8) error {
 	// Handle empty data with flags (e.g., FIN_WRITE)
@@ -6237,6 +6286,9 @@ func (a *Agent) WriteStreamData(peerID identity.AgentID, streamID uint64, data [
 			Payload:  chunk,
 		}
 
+		if err := a.acquireSend(peerID, streamID); err != nil {
+			return err
+		}
 		if err := a.peerMgr.SendToPeer(peerID, frame); err != nil {
 			return err
 		}
@@ -6274,11 +6326,15 @@ func (a *Agent) WriteStreamOpenAck(peerID identity.AgentID, streamID uint64, req
 		StreamID: streamID,
 		Payload:  ack.Encode(),
 	}
+	if a.targetFlowFor(peerID, streamID) != nil {
+		frame.Flags = protocol.FlagFlowControl
+	}
 	return a.peerMgr.SendToPeer(peerID, frame)
 }
 
 // WriteStreamOpenErr implements exit.StreamWriter.
 func (a *Agent) WriteStreamOpenErr(peerID identity.AgentID, streamID uint64, requestID uint64, errorCode uint16, message string) error {
+	a.releaseTargetFlow(peerID, streamID)
 	errPayload := &protocol.StreamOpenErr{
 		RequestID: requestID,
 		ErrorCode: errorCode,
@@ -6294,6 +6350,7 @@ func (a *Agent) WriteStreamOpenErr(peerID identity.AgentID, streamID uint64, req
 
 // WriteStreamClose implements exit.StreamWriter.
 func (a *Agent) WriteStreamClose(peerID identity.AgentID, streamID uint64) error {
+	a.releaseTargetFlow(peerID, streamID)
 	frame := &protocol.Frame{
 		Type:     protocol.FrameStreamClose,
 		StreamID: streamID,
@@ -6303,6 +6360,7 @@ func (a *Agent) WriteStreamClose(peerID identity.AgentID, streamID uint64) error
 
 // WriteStreamReset implements exit.StreamWriter and forward.StreamWriter.
 func (a *Agent) WriteStreamReset(peerID identity.AgentID, streamID uint64, errorCode uint16) error {
+	a.releaseTargetFlow(peerID, streamID)
 	frame := &protocol.Frame{
 		Type:     protocol.FrameStreamReset,
 		StreamID: streamID,
@@ -6781,6 +6839,11 @@ func (a *Agent) closeFileTransferStream(peerID identity.AgentID, streamID uint64
 	// If stream has a session key, it's already open and we need to send
 	// an encrypted error response instead of STREAM_OPEN_ERR
 	if sessionKey != nil {
+		// This can run on the peer's frame drainer, which also delivers
+		// STREAM_WINDOW grants, so the error must not wait for window.
+		// Dropping flow control first sends it at once (and stops a running
+		// download sender).
+		a.releaseTargetFlow(peerID, streamID)
 		// Send error as encrypted metadata response
 		errMeta := &filetransfer.TransferMetadata{
 			Error:     message,
@@ -6888,6 +6951,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(nextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(nextHop, frame); err != nil {
@@ -7143,6 +7207,7 @@ func (a *Agent) DownloadFile(ctx context.Context, targetID identity.AgentID, rem
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(nextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(nextHop, frame); err != nil {
@@ -7429,6 +7494,7 @@ func (a *Agent) DownloadFileStream(ctx context.Context, targetID identity.AgentI
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,
 		Payload:  openPayload.Encode(),
+		Flags:    a.streamOpenFlags(nextHop),
 	}
 
 	if err := a.peerMgr.SendToPeer(nextHop, frame); err != nil {
@@ -7796,17 +7862,16 @@ func (a *Agent) receiveEncryptedStreamData(ctx context.Context, s *stream.Stream
 			// Try to drain remaining data if stream is closed
 			if s.IsClosed() {
 				for {
-					select {
-					case remaining := <-s.ReadBuffer():
-						plaintext, decErr := sessionKey.DecryptStrict(remaining)
-						if decErr != nil {
-							return &dataBuf, totalReceived, fmt.Errorf("decrypt remaining data: %w", decErr)
-						}
-						dataBuf.Write(plaintext)
-						totalReceived += int64(len(plaintext))
-					default:
+					remaining, ok := s.TryRead()
+					if !ok {
 						return &dataBuf, totalReceived, nil
 					}
+					plaintext, decErr := sessionKey.DecryptStrict(remaining)
+					if decErr != nil {
+						return &dataBuf, totalReceived, fmt.Errorf("decrypt remaining data: %w", decErr)
+					}
+					dataBuf.Write(plaintext)
+					totalReceived += int64(len(plaintext))
 				}
 			}
 			return &dataBuf, totalReceived, fmt.Errorf("read stream: %w", err)
@@ -7953,6 +8018,8 @@ func (a *Agent) OpenShellStream(ctx context.Context, targetID identity.AgentID, 
 		EphemeralPubKey: ephPub,
 	}
 
+	// No FlagFlowControl: the shell client buffers received data in its own
+	// adapter rather than a stream read buffer, so it cannot return window.
 	frame := &protocol.Frame{
 		Type:     protocol.FrameStreamOpen,
 		StreamID: streamID,

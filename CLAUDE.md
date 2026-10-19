@@ -282,7 +282,7 @@ Example config in `configs/example.yaml`. Key sections:
 ## Key Implementation Details
 
 - **Frame size**: Max 16 KB payload for write fairness
-- **Buffer size**: 256 KB per stream default
+- **Stream buffering and flow control**: fixed 128-frame queues per stream endpoint, matched by a per-stream credit window of 128 data frames (`STREAM_WINDOW`, negotiated per hop through the `flow-control` PEER_HELLO capability; paths through older agents run without it). See Architecture.md 6.4.3
 - **Timeouts**: Handshake 10s, Stream open 30s, Idle stream 5m
 - **Keepalive**: Every 5m idle, 90s timeout
 - **Reconnection**: Exponential backoff 1s->60s with 20% jitter

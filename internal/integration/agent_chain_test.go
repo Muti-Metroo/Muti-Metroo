@@ -109,6 +109,9 @@ type AgentChain struct {
 	// Tests use this to simulate "missing public key on target" or "missing
 	// private key on origin" by clearing the relevant field.
 	ManagementConfigure func(agentIdx int, mgmt *config.ManagementConfig)
+	// LegacyAgents marks agents (by index) that run without per-stream flow
+	// control, like agents older than it.
+	LegacyAgents map[int]bool
 
 	// SigningPrivateHex / SigningPublicHex hold the management signing
 	// keypair shared across all agents in this chain. Generated lazily on
@@ -329,6 +332,7 @@ func (c *AgentChain) buildConfig(i int) *config.Config {
 	if lns, ok := c.ForwardListeners[i]; ok {
 		cfg.Forward.Listeners = lns
 	}
+	cfg.Limits.DisableFlowControl = c.LegacyAgents[i]
 
 	return cfg
 }

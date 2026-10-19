@@ -446,7 +446,11 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 	}
 
 	fin := flags&protocol.FlagFinWrite != 0
+	credit := len(data) > 0
 	if len(plaintext) == 0 && !fin {
+		if credit {
+			h.writer.StreamConsumed(peerID, streamID)
+		}
 		return nil
 	}
 
@@ -455,7 +459,7 @@ func (h *Handler) HandleStreamData(peerID identity.AgentID, streamID uint64, dat
 	// blocking the frame drainer (and every other stream on the
 	// connection) behind it.
 	select {
-	case ac.writeCh <- writeRequest{data: plaintext, fin: fin}:
+	case ac.writeCh <- writeRequest{data: plaintext, fin: fin, credit: credit}:
 	case <-ac.done:
 		return fmt.Errorf("stream %d closed", streamID)
 	default:
@@ -490,6 +494,9 @@ func (h *Handler) writeLoop(ac *ActiveConnection) {
 				if hcw, ok := ac.Conn.(halfCloseWriter); ok {
 					hcw.CloseWrite()
 				}
+			}
+			if req.credit {
+				h.writer.StreamConsumed(ac.RemoteID, ac.StreamID)
 			}
 		}
 	}

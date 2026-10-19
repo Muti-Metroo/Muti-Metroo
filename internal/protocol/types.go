@@ -12,6 +12,7 @@ const (
 	FrameStreamData    uint8 = 0x04 // Payload data
 	FrameStreamClose   uint8 = 0x05 // Graceful close
 	FrameStreamReset   uint8 = 0x06 // Abort stream
+	FrameStreamWindow  uint8 = 0x07 // Grant the sender more data frames (flow control)
 
 	// Routing frames
 	FrameRouteAdvertise    uint8 = 0x10 // Announce CIDR routes
@@ -75,6 +76,31 @@ const (
 	// Flag bit 0x02 (historically "FIN_READ", sender done reading) is reserved
 	// on the wire but never set or acted on; TCP has no "done receiving"
 	// signal to propagate. Receivers ignore it.
+
+	// FlagFlowControl on STREAM_OPEN asks for per-stream flow control; on
+	// STREAM_OPEN_ACK it confirms it. A hop only keeps the flag on a forwarded
+	// STREAM_OPEN when the next hop advertised CapabilityFlowControl, so an
+	// acknowledged flag means every hop relays STREAM_WINDOW frames.
+	FlagFlowControl uint8 = 0x04
+)
+
+// Per-stream flow control. When it is on, each STREAM_DATA frame with a
+// non-empty payload uses one unit of the receiver's window. The sender stops
+// at zero and resumes when the receiver returns units in STREAM_WINDOW frames
+// as it consumes data, so the receiver never buffers more than
+// StreamWindowFrames frames for a stream.
+const (
+	// CapabilityFlowControl is advertised in PEER_HELLO by agents that
+	// support per-stream flow control and relay STREAM_WINDOW frames.
+	CapabilityFlowControl = "flow-control"
+
+	// StreamWindowFrames is the initial window in each direction, in data
+	// frames (at most StreamWindowFrames * MaxPayloadSize bytes).
+	StreamWindowFrames = 128
+
+	// StreamWindowUpdateThreshold is how many consumed frames a receiver
+	// collects before it sends a STREAM_WINDOW update.
+	StreamWindowUpdateThreshold = 32
 )
 
 // Address type constants
@@ -201,6 +227,8 @@ func FrameTypeName(t uint8) string {
 		return "STREAM_DATA"
 	case FrameStreamClose:
 		return "STREAM_CLOSE"
+	case FrameStreamWindow:
+		return "STREAM_WINDOW"
 	case FrameStreamReset:
 		return "STREAM_RESET"
 	case FrameRouteAdvertise:
