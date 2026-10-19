@@ -16,13 +16,13 @@ Each agent in a mesh plays one or more roles: it accepts client connections (ing
 
 | Role | What it does | Enabled by |
 | ---- | ------------ | ---------- |
-| **Ingress** | Accepts SOCKS4, SOCKS4a, and SOCKS5 client connections and sends them into the mesh | `socks5.enabled: true` |
+| **Ingress** | Accepts connections from Mutiauk and other SOCKS4, SOCKS4a, and SOCKS5 clients and sends them into the mesh | `socks5.enabled: true` |
 | **Transit** | Relays streams and route advertisements between its peers | Always on; any agent with more than one peer relays between them |
 | **Exit** | Advertises routes and opens the real connections to destinations | `exit.enabled: true` with `exit.routes` or `exit.domain_routes` |
 
 ```mermaid
 flowchart LR
-    Client[Your App] -->|SOCKS5| Ingress[Ingress Agent]
+    Client[Workstation<br/>Mutiauk] -->|SOCKS5| Ingress[Ingress Agent]
     Ingress -->|Encrypted| Transit[Transit Agent]
     Transit -->|Encrypted| Exit[Exit Agent]
     Exit -->|TCP| Server[Destination]
@@ -32,7 +32,7 @@ Port forwarding adds two related roles: an agent with `forward.listeners` accept
 
 ## Ingress
 
-An ingress agent is where client traffic enters the mesh. Point curl, SSH, a browser, or [Mutiauk](/mutiauk) at its SOCKS listener.
+An ingress agent is where client traffic enters the mesh. Operators usually connect to its SOCKS listener with [Mutiauk](/mutiauk), which forwards traffic from a TUN interface on the workstation. SOCKS-aware applications such as curl, SSH, and browsers can also connect to it directly.
 
 The ingress agent:
 
@@ -40,7 +40,7 @@ The ingress agent:
 - Picks the exit for each destination from its route table: domain routes first, then CIDR routes after resolving the name locally
 - Opens an end-to-end encrypted stream to that exit and relays the client's data over it
 
-Typical placements: an operator workstation (local proxy on `127.0.0.1:1080`), or a gateway host that a team connects to.
+Typical placements: a relay or gateway host that operator workstations can reach, with SOCKS authentication enabled and, over untrusted networks, the TLS WebSocket listener for Mutiauk's [WebSocket transport](/mutiauk#websocket-transport). An agent on the workstation itself, with the listener on `127.0.0.1:1080`, also works.
 
 See [SOCKS5 Proxy](/features/socks5-proxy) and [SOCKS5 configuration](/configuration/socks5).
 

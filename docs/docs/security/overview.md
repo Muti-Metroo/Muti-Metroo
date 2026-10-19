@@ -54,6 +54,7 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 | Operator agents' HTTP API | An operator agent signs every privileged request that reaches its API. Access to that API grants control of the mesh. |
 | File browse on operator agents | An agent that holds the signing private key accepts unsigned file browse requests (including `chmod` and `delete`) from other agents. See [Authentication](/security/authentication#how-a-request-is-signed). |
 | Unrouted SOCKS destinations | The ingress agent dials them directly from its own host. |
+| The link from Mutiauk or a SOCKS client to the ingress | Plain SOCKS5 over TCP, including the password, is not encrypted; end-to-end encryption starts at the ingress agent. Use the [WebSocket listener](/configuration/socks5#websocket-listener) with TLS when workstations connect across untrusted networks. |
 | UDP and ICMP destinations | Exit routes do not restrict them. Disable `udp` and `icmp` where they are not needed. |
 | Certificate revocation | There is no CRL or OCSP support; replacing the CA is the only way to revoke a certificate. |
 | Audit trail | Agents do not keep an audit log of management commands, file transfers, or configuration changes. |

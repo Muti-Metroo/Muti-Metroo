@@ -1,6 +1,6 @@
 # Muti Metroo Manager
 
-Muti Metroo Manager is a lightweight web dashboard for managing and monitoring Muti Metroo mesh networks. It runs as a standalone Go binary with an embedded React SPA that reverse-proxies a Muti Metroo agent's HTTP API.
+Muti Metroo Manager is the web dashboard of the Muti Metroo suite. It is a single Go binary with an embedded React SPA that reverse-proxies a Muti Metroo agent's HTTP API. The operator usually runs it on the workstation, next to Mutiauk: Mutiauk carries the traffic into the mesh (Chapter 10), and Muti Metroo Manager shows the topology and runs management actions through an agent's HTTP API. It also generates agent and Mutiauk configurations (see "Config Wizards").
 
 ![Muti Metroo Manager topology view](./01-topology.png)
 
@@ -31,11 +31,13 @@ Once you have the binary in your working directory (example: Linux amd64):
 ```bash
 chmod +x metroo-manager-linux-amd64
 
-# Launch (connects to local agent on port 8080)
-./metroo-manager-linux-amd64
+# Launch on loopback, connected to an agent's HTTP API
+./metroo-manager-linux-amd64 -addr 127.0.0.1:3000 -agent http://192.168.1.10:8080
 
-# Open http://localhost:3000 in your browser
+# Open http://127.0.0.1:3000 in your browser
 ```
+
+The default `-addr :3000` binds every interface. Without a manager access token (`-auth-token-file`, `-auth-token`, or `METROO_MANAGER_AUTH_TOKEN`), the manager refuses to start on a non-loopback address unless `-insecure-no-auth` is passed. Bind to `127.0.0.1` for local use, or set a token.
 
 ## Command Surface
 
@@ -47,7 +49,7 @@ muti-metroo-manager config init [path]       emit a commented TOML config templa
 muti-metroo-manager version | -V             print version and build info
 ```
 
-`check` is what systemd's `ExecStartPre=` should run -- it validates the config, the data dir, and upstream agent reachability without binding the listener, so a broken deploy fails before the long-lived process starts. `config show` reports each value alongside its source (default / TOML / env / flag), making "why is the agent URL wrong?" investigations a single command. `config init` writes a commented TOML template with every supported key.
+`check` is what systemd's `ExecStartPre=` should run: it validates the config, the data dir, and upstream agent reachability without binding the listener, so a broken deploy fails before the long-lived process starts. `config show` reports each value alongside its source (default / TOML / env / flag), making "why is the agent URL wrong?" investigations a single command. `config init` writes a commented TOML template with every supported key.
 
 ## CLI Flags
 
@@ -60,6 +62,11 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 | `-agent`            | `http://127.0.0.1:8080`      | Muti Metroo agent HTTP API URL.                                                            |
 | `-agent-token`      |                              | Bearer token. Visible via `/proc`; prefer `-agent-token-file` or the env var.        |
 | `-agent-token-file` |                              | File containing the bearer token (single line, trimmed).                             |
+| `-agent-ca-bundle`  |                              | PEM file with extra CA certificates for verifying an `https://` agent URL.           |
+| `-insecure-skip-verify` | `false`                  | Disable TLS verification of the agent (logs a warning; prefer `-agent-ca-bundle`).   |
+| `-auth-token`       |                              | Manager access token guarding all `/api/*` routes. Prefer `-auth-token-file` or the env var. |
+| `-auth-token-file`  |                              | File containing the manager access token (single line, trimmed).                     |
+| `-insecure-no-auth` | `false`                      | Allow a non-loopback `-addr` with no manager access token (dangerous).               |
 | `-data-dir`         | OS-specific (see below)      | Directory for `muti-metroo-manager.db` and the instance lock.                                  |
 | `-log-format`       | `text`                       | Log encoding: `text` (operator) or `json` (SIEM).                                    |
 | `-log-level`        | `info`                       | Minimum severity: `debug`, `info`, `warn`, `error`.                                  |
@@ -69,16 +76,16 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 
 **Data directory defaults:** `~/Library/Application Support/Muti-Metroo-Manager` on macOS, `/var/lib/muti-metroo-manager` for root on Linux, `$XDG_CONFIG_HOME/muti-metroo-manager` for unprivileged Linux users, `%LOCALAPPDATA%\muti-metroo-manager` on Windows. The directory holds the SQLite settings database and an exclusive instance lock, so each running manager needs its own data dir.
 
-**Token environment variables:** the canonical name is `METROO_MANAGER_AGENT_TOKEN`. The legacy `MUTI_METROO_TOKEN` is still accepted but logs a deprecation warning at startup. `-agent-token` and `-agent-token-file` both override the env var; the file form is preferred for systemd / Kubernetes secrets.
+**Token environment variables:** the agent bearer token's canonical name is `METROO_MANAGER_AGENT_TOKEN`, and the manager access token is `METROO_MANAGER_AUTH_TOKEN`. The legacy `MUTI_METROO_TOKEN` is still accepted but logs a deprecation warning at startup. `-agent-token` and `-agent-token-file` both override the env var; the file form is preferred for systemd / Kubernetes secrets.
 
 ### Examples
 
 ```bash
 # Connect to a remote agent
-./muti-metroo-manager -agent http://192.168.1.10:8080
+./muti-metroo-manager -addr 127.0.0.1:3000 -agent http://192.168.1.10:8080
 
 # Use a custom port for the web UI
-./muti-metroo-manager -addr :9090
+./muti-metroo-manager -addr 127.0.0.1:9090
 
 # Token from a file (preferred for systemd/Kubernetes secrets)
 ./muti-metroo-manager -agent http://192.168.1.10:8080 \
@@ -91,8 +98,9 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 # Render a starter config
 ./muti-metroo-manager config init /etc/muti-metroo-manager/config.toml
 
-# Bind to all interfaces
-./muti-metroo-manager -addr 0.0.0.0:3000 -agent http://10.0.0.5:8080
+# Bind to all interfaces (requires a manager access token)
+./muti-metroo-manager -addr 0.0.0.0:3000 -agent http://10.0.0.5:8080 \
+  -auth-token-file /etc/muti-metroo-manager/auth-token
 
 # Production: structured logs, /metrics on a private IP, sounds disabled
 ./muti-metroo-manager -config /etc/muti-metroo-manager/config.toml \
@@ -102,11 +110,11 @@ The same flag set applies to `run` (default), `check`, and `config show`.
 
 ## Operations
 
-`/healthz` is on the main listener and reports the manager's own state plus a cached one-shot probe of the upstream agent (config validity, agent reachability, and -- if a token is set -- a successful `/healthz` round-trip to the agent). Suitable for Kubernetes liveness/readiness, ALB health checks, or systemd `WatchdogSec=`.
+`/healthz` is on the main listener and reports the manager's own state plus a cached one-shot probe of the upstream agent (config validity, agent reachability, and (if a token is set) a successful `/healthz` round-trip to the agent). Suitable for Kubernetes liveness/readiness, ALB health checks, or systemd `WatchdogSec=`.
 
 `/metrics` is on a separate optional listener (`-metrics-addr`). Output is Prometheus text format with `metroo_manager_requests_total{method,path,status}`, `metroo_manager_request_duration_seconds_bucket{...}`, and `metroo_manager_agent_reachable`. Disabled by default; pin to a private interface when you turn it on.
 
-`-log-format text` is operator-readable; `-log-format json` writes one JSON object per line for SIEM ingestion. Every request gets a request ID -- propagated via `X-Request-ID` if the client sends one, otherwise generated -- which appears in every log line for that request. State-changing operations (route mutations, sleep/wake, settings overrides, file uploads/downloads) emit a dedicated `audit=true` log line for compliance audits.
+`-log-format text` is operator-readable; `-log-format json` writes one JSON object per line for SIEM ingestion. Every request gets a request ID (taken from `X-Request-ID` if the client sends one, otherwise generated), which appears in every log line for that request. State-changing operations (route mutations, sleep/wake, settings overrides, file uploads/downloads) emit a dedicated `audit=true` log line for compliance audits.
 
 On startup the manager takes an exclusive lock on a file inside `-data-dir` (`flock` on Linux/macOS, `LockFileEx` on Windows). A second instance pointed at the same data directory exits with a clear error rather than racing on the SQLite store.
 
@@ -183,9 +191,9 @@ The Routes tab has two sub-tabs:
 
 The DNS tab is split into two sub-tabs: **Hosts** and **TLDs**.
 
-**Hosts** is a CRUD UI for the agent's mesh-host registry (hostname &rarr; IPv4 / IPv6) backed by `POST /hosts/manage`. Add a name, set one or both IP families and an optional comment, and the entry is journalled to the agent's data directory so it survives restarts. Names ending in any of the active TLD suffixes (default `.mesh`) are accepted; the active suffix set is reported back by the agent so the form can validate client-side. Bare TLDs without a label are also valid hostnames (e.g. an entry whose name is exactly the suffix). Single-label bare names without a configured suffix are rejected. Config-seeded entries are visible but protected against runtime removal -- edit the agent's `mesh_hosts:` block and restart to drop them.
+**Hosts** is a CRUD UI for the agent's mesh-host registry (hostname &rarr; IPv4 / IPv6) backed by `POST /hosts/manage`. Add a name, set one or both IP families and an optional comment, and the entry is journalled to the agent's data directory so it survives restarts. Names ending in any of the active TLD suffixes (default `.mesh`) are accepted; the active suffix set is reported back by the agent so the form can validate client-side. Bare TLDs without a label are also valid hostnames (e.g. an entry whose name is exactly the suffix). Single-label bare names without a configured suffix are rejected. Config-seeded entries are visible but protected against runtime removal; edit the agent's `mesh_hosts:` block and restart to drop them.
 
-**TLDs** manages the suffix set itself at runtime via `POST /hosts/suffixes/manage`. Operators can add or remove suffixes (single-label like `mesh` or multi-level like `corp.local`) without touching the config; changes take effect immediately and propagate to clients (Mutiauk's mesh DNS resolver, Muti Metroo Manager validation) on the next dashboard poll.
+**TLDs** manages the suffix set itself at runtime via `POST /hosts/suffixes/manage`. Operators can add or remove suffixes (single-label like `mesh` or multi-level like `corp.local`) without touching the config; changes take effect immediately and propagate to clients: Mutiauk's mesh DNS resolver receives them over the SOCKS5 route-watch stream, and Muti Metroo Manager picks them up on its next dashboard poll.
 
 See chapter 11 for how mesh-local hostnames work end to end.
 
@@ -211,7 +219,7 @@ Run commands on any reachable agent from the browser. Supports streaming mode (s
 
 Upload and download files to/from any reachable agent through the browser. Supports individual files and directory transfers. The target agent must have file transfer enabled.
 
-The file browser toolbar is laid out as four equal-weight text buttons -- **Up**, **Path**, **Upload**, **Refresh** -- with drag-and-drop carrying the primary upload affordance via a drop overlay. The breadcrumb's leading `/` segment is clickable: it opens an editable path input so an operator can jump directly to a known directory. The input expands a leading `~` to the agent user's home directory on Unix targets and shows a platform-appropriate placeholder.
+The file browser toolbar is laid out as four equal-weight text buttons (**Up**, **Path**, **Upload**, **Refresh**), with drag-and-drop carrying the primary upload affordance via a drop overlay. The breadcrumb's leading `/` segment is clickable: it opens an editable path input so an operator can jump directly to a known directory. The input expands a leading `~` to the agent user's home directory on Unix targets and shows a platform-appropriate placeholder.
 
 ![File browser showing browsable paths on a Windows workstation](./11-agent-files.png)
 
@@ -229,7 +237,9 @@ Trigger mesh-wide sleep or wake commands from the dashboard. Sleep puts agents i
 
 ### Config Wizards
 
-The dashboard includes two interactive configuration wizards -- one for the Muti Metroo agent and one for Mutiauk -- reachable from each agent's kebab menu. Both wizards perform inline **management-keypair validation**: the wizard derives the public half of every entered private key and surfaces a mismatch on the same step. X25519 keys are 32-byte (64-hex) scalars; Ed25519 signing keys are 64-byte (128-hex) seed-with-public-tail values per Go's `crypto/ed25519` layout. Mismatches stop the wizard before download, so an operator never ends up with a config that fails to decrypt topology or sign privileged ops at runtime.
+The dashboard includes two interactive configuration wizards, one for the Muti Metroo agent and one for Mutiauk, reachable from the header **Actions** menu ("Generate Muti Metroo agent config..." and "Generate Mutiauk config..."). The Mutiauk wizard produces the workstation configuration: TUN settings, the SOCKS5 server of the ingress agent (a `host:port` or a `ws://` / `wss://` URL, with optional credentials), autoroutes, static routes, and the local admin interface.
+
+The agent wizard performs inline **management-keypair validation**: the wizard derives the public half of every entered private key and surfaces a mismatch on the same step. X25519 keys are 32-byte (64-hex) scalars; Ed25519 signing keys are 64-byte (128-hex) seed-with-public-tail values per Go's `crypto/ed25519` layout. Mismatches stop the wizard before download, so an operator never ends up with a config that fails to decrypt topology or sign privileged ops at runtime.
 
 The Muti Metroo agent wizard also pre-populates its peer step from `advertised_listeners` reported on the topology poll, so an operator can pick a known agent rather than typing its address by hand. Each listener step offers an "Advertise this listener" toggle that emits the corresponding `listeners[].advertise: {address, path, transport}` block in the YAML preview, opting into NodeInfo-based discovery for that listener.
 
@@ -244,7 +254,7 @@ The commands are generated from the wizard's own paths and pinned to whatever th
 
 ### Settings
 
-A persistent settings dialog lets operators override the agent API URL and the default SOCKS5 address surfaced in setup hints. Those two values are stored in Muti Metroo Manager's local SQLite store (`muti-metroo-manager.db`) and survive restarts; the Mutiauk wizard seeds itself from them. The bearer token used for proxied API calls can also be set in the Settings dialog, but it lives only in the browser's session storage -- it is not persisted to SQLite and disappears when the tab is closed. This keeps the most sensitive credential off-disk on the host running Muti Metroo Manager.
+A persistent settings dialog lets operators override the agent API URL and the default SOCKS5 address surfaced in setup hints. Those two values are stored in Muti Metroo Manager's local SQLite store (`muti-metroo-manager.db`) and survive restarts; the Mutiauk wizard seeds itself from them. The bearer token used for proxied API calls can also be set in the Settings dialog, but it lives only in the browser's session storage; it is not persisted to SQLite and disappears when the tab is closed. This keeps the most sensitive credential off-disk on the host running Muti Metroo Manager.
 
 ### Per-Agent Notes and Icons
 
@@ -259,4 +269,4 @@ Each agent has a free-text notes field (saved on blur or Ctrl/Cmd-S) and a selec
 | `/`      | Focus the search box (switches to the topology tab if needed) |
 | `Esc`    | Close the active agent panel                                  |
 
-URL hashes like `#/agents/<id>` (short or full ID) open an agent panel directly. Destructive actions -- removing routes, peers, or port forwards -- go through a confirmation dialog.
+The URL carries the selected tab and agent, for example `/topology?agent=<id>&panel=<tab>`, so links open an agent panel directly. Legacy `#/agents/<id>` links are rewritten to this form. Destructive actions (removing routes, peers, or port forwards) go through a confirmation dialog.

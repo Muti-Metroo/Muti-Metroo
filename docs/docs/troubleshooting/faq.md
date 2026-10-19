@@ -14,9 +14,13 @@ Short answers, each with a link to the page that covers the topic in full.
 
 ## Running the agent
 
+### Do I run an agent on my workstation?
+
+Usually not. Agents run on the mesh nodes: relays, gateways, and hosts in the networks you reach. The workstation runs [Mutiauk](/mutiauk), which connects to an ingress agent's SOCKS listener and routes the mesh's networks through a TUN interface, and optionally [Muti Metroo Manager](/muti-metroo-manager). An agent on the workstation with a local SOCKS listener also works, for example when you cannot run Mutiauk. See the [Suite Overview](/suite-overview).
+
 ### Does the agent need root or Administrator rights?
 
-No. The agent runs in userspace with no TUN device or kernel module. Elevation is needed only to bind ports below 1024 on Linux and macOS, and to install a system-wide service. [User services](/deployment/system-service#linux-user-service) and [PM2](/deployment/pm2) work without it.
+No. The agent runs in userspace with no TUN device or kernel module. Mutiauk on the workstation needs root or Administrator to create its TUN interface; the agents do not. Elevation is needed only to bind ports below 1024 on Linux and macOS, and to install a system-wide service. [User services](/deployment/system-service#linux-user-service) and [PM2](/deployment/pm2) work without it.
 
 ### Which platforms are supported?
 

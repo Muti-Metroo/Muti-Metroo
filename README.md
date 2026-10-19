@@ -6,94 +6,87 @@
 
 A userspace mesh networking agent that builds VPN-like overlay networks across heterogeneous transport layers. It enables multi-hop routing with SOCKS5 ingress and CIDR-based exit routing, operating entirely in unprivileged userspace - no root privileges, no kernel extensions, no drivers.
 
+`muti-metroo` is the mesh agent of the Muti Metroo suite:
+
+- **Muti Metroo** (this repository): runs on the mesh nodes, such as relays, gateways, transit hops, and exits inside target networks. An agent with the SOCKS5 listener enabled is the ingress where traffic enters the mesh. The ingress is usually a mesh node too (for example a public relay), not the operator's laptop.
+- **[Mutiauk](https://github.com/Muti-Metroo/Mutiauk)**: runs on the operator's workstation. It creates a TUN interface and forwards IP traffic into the SOCKS5 listener of an ingress agent, so ordinary tools reach mesh networks without proxy settings. This is the usual operator entry point.
+- **[Muti Metroo Manager](https://github.com/Muti-Metroo/Muti-Metroo-Manager)**: web dashboard, usually run on the operator's workstation, for the mesh topology and management actions through an agent's HTTP API. It also generates agent and Mutiauk configs.
+
 ## Features
 
 - **Multiple Transport Layers**: QUIC/TLS 1.3, HTTP/2, and WebSocket transports
-- **SOCKS Proxy Ingress**: Accept SOCKS4, SOCKS4a, and SOCKS5 client connections with optional username/password authentication (TCP or WebSocket transport)
+- **SOCKS Proxy Ingress**: Accept SOCKS4, SOCKS4a, and SOCKS5 connections from Mutiauk or SOCKS-aware applications, with optional username/password authentication (TCP or WebSocket transport)
+- **Route Push to Mutiauk**: CIDR routes, mesh hostnames, and DNS suffixes are pushed to Mutiauk over the same SOCKS5 endpoint
 - **Port Forwarding**: Reverse tunnel to expose local services through the mesh (ngrok-style)
 - **CIDR-Based Exit Routing**: Advertise routes and handle DNS resolution at exit nodes
 - **Multi-Hop Mesh Routing**: Flood-based route propagation with longest-prefix match
 - **Stream Multiplexing**: Multiple virtual streams over a single peer connection with half-close support
 - **Automatic Reconnection**: Exponential backoff with jitter for resilient peer connections
-- **No Root Required**: Runs entirely in userspace - no kernel extensions or drivers
+- **No Root Required**: Agents run entirely in userspace - no kernel extensions or drivers (only Mutiauk on the operator workstation needs root or Administrator)
 - **Mesh Encryption**: X25519 + ChaCha20-Poly1305 between ingress and exit (transit cannot decrypt)
 - **Embedded Configuration**: Single-file deployment with config baked into binary
 
 ## How It Works
 
 ```
-                                       MESH NETWORK
-                         .---------------------------------------------.
-    +--------+     +-------------+     +-------------+     +-------------+     +--------+
-    |        |     |   Agent A   |     |   Agent B   |     |   Agent C   |     |        |
-    | Client |---->|   INGRESS   |=====|   TRANSIT   |=====|    EXIT     |---->| Target |
-    |        |     |             |     |             |     |             |     | Server |
-    +--------+     +-------------+     +-------------+     +-------------+     +--------+
-                         |                                       |
-        SOCKS5           '-----------Encrypted Tunnel------------'           TCP
-        Proxy                    (Transit Cannot Decrypt)                 Connection
+    OPERATOR WORKSTATION                              MESH NETWORK
+    .-------------------.          .---------------------------------------------.
+    |    +-----------+  |    +-------------+     +-------------+     +-------------+     +--------+
+    |    | ssh, curl |  |    |   Agent A   |     |   Agent B   |     |   Agent C   |     |        |
+    |    |  browser  |  |    |   INGRESS   |=====|   TRANSIT   |=====|    EXIT     |---->| Target |
+    |    +-----------+  |    |   (relay)   |     |             |     |             |     | Server |
+    |          |        |    +-------------+     +-------------+     +-------------+     +--------+
+    |    +-----------+  |    |  SOCKS5     |                               |
+    |    |  Mutiauk  |------>|  listener   |                               |
+    |    |   (TUN)   |  |    +-------------+                               |
+    |    +-----------+  |          '-----------Encrypted Tunnel------------'
+    '-------------------'                   (Transit Cannot Decrypt)
 ```
 
 **Traffic Flow:**
 
-1. Client connects to SOCKS5 proxy on the ingress agent
-2. Ingress looks up route, finds path to exit agent through transit nodes
-3. Virtual stream opens with encryption between ingress and exit
-4. Exit agent opens real TCP connection to target server
-5. Data flows bidirectionally - encrypted within the mesh, plain at endpoints
+1. An application on the operator workstation sends traffic normally; Mutiauk's TUN interface captures traffic for mesh routes
+2. Mutiauk forwards each connection to the SOCKS5 listener of the ingress agent (preferably over the SOCKS5 WebSocket listener with TLS)
+3. Ingress looks up the route and finds the path to the exit agent through transit nodes
+4. A virtual stream opens with encryption between ingress and exit
+5. Exit agent opens the real TCP connection to the target server
+6. Data flows bidirectionally - encrypted within the mesh, plain at the endpoints
 
-## Transparent TUN Routing with Mutiauk
-
-For transparent traffic routing without per-application SOCKS5 configuration, use **[Mutiauk](https://github.com/Muti-Metroo/Mutiauk)** - a companion TUN interface tool that forwards all traffic through Muti Metroo's SOCKS5 proxy.
-
-```
-    OPERATOR LINUX                                 MESH NETWORK
-    .-------------------.          .---------------------------------------------.
-    |    +-----------+  |    +-------------+     +-------------+     +-------------+     +--------+
-    |    |    App    |  |    |   Agent A   |     |   Agent B   |     |   Agent C   |     |        |
-    |    +-----------+  |    |   INGRESS   |=====|   TRANSIT   |=====|    EXIT     |---->| Target |
-    |          |        |    |             |     |             |     |             |     | Server |
-    |    +-----------+  |    +-------------+     +-------------+     +-------------+     +--------+
-    |    |  Mutiauk  |------>|  SOCKS5     |           |                   |
-    |    |   (TUN)   |  |    |  :1080      |           |                   |
-    |    +-----------+  |    +-------------+           |                   |
-    '-------------------'          '---------Encrypted Tunnel--------------'
-      No proxy config                      (Transit Cannot Decrypt)
-        required
-```
-
-**With Mutiauk** (transparent routing):
-
-1. Application sends traffic normally (no proxy configuration needed)
-2. Mutiauk TUN interface captures traffic destined for configured routes
-3. Traffic is forwarded to Muti Metroo's SOCKS5 proxy on localhost
-4. Mesh routing and encryption work the same as direct SOCKS5 usage
+With `autoroutes.enabled: true`, Mutiauk receives the mesh's CIDR routes, mesh hostnames, and DNS suffixes from the ingress agent over the same SOCKS5 endpoint, so the workstation needs no route list.
 
 ```bash
-# Install Mutiauk (Linux only)
+# On the ingress agent: enable SOCKS5 auth and the WebSocket listener (see config below)
+
+# On the operator workstation (Linux release binary shown)
 curl -L -o mutiauk https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64
 chmod +x mutiauk && sudo mv mutiauk /usr/local/bin/
 
-# Run interactive setup
-sudo mutiauk setup
-
-# Or manual configuration
+# Write a config that points at the ingress agent, then start the daemon
+sudo MUTIAUK_SOCKS5_PASSWORD='...' mutiauk config generate \
+  --socks5-server wss://relay.example.com:8443/socks5 \
+  --socks5-username operator --autoroutes-enabled
 sudo mutiauk daemon start
+
+# Ordinary tools now reach mesh networks
+ssh admin@10.10.5.100
 ```
 
-With Mutiauk, any application's traffic to configured routes is automatically tunneled through the mesh - no proxy settings required. Key advantages:
+Plain SOCKS5 over TCP is not encrypted between the workstation and the ingress agent, credentials included. For a remote ingress, enable SOCKS5 authentication and use the SOCKS5 WebSocket listener over TLS (`wss://`) with a certificate the workstation trusts (Mutiauk verifies it against the system trust store), or reach the ingress over a network you already trust. See the [Mutiauk repository](https://github.com/Muti-Metroo/Mutiauk) and the [Mutiauk documentation](https://mutimetroo.com/mutiauk) for setup details, including macOS and Windows builds.
 
-- **Native multi-hop routing** - no manual listener chaining for double pivots
-- **End-to-end encryption** - transit nodes cannot decrypt traffic
-- **Multiple transports** - QUIC, HTTP/2, WebSocket vs TCP-only
+### Direct SOCKS5 Clients
 
-See the [Mutiauk repository](https://github.com/Muti-Metroo/Mutiauk) for detailed setup instructions.
+SOCKS-aware applications can also use the ingress agent's SOCKS5 listener directly. This is useful for quick tests, a single application, machines without root or Administrator, and domain-based exit routes (Mutiauk works at the IP layer and only uses CIDR routes):
+
+```bash
+curl -x socks5h://user:password@127.0.0.1:1080 https://example.com
+ssh -o ProxyCommand='nc -x 127.0.0.1:1080 %h %p' user@10.10.5.100
+```
 
 ## Documentation
 
 | Resource                                                             | Description                                                                          |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **[Documentation](https://github.com/Muti-Metroo/Muti-Metroo)**              | Online documentation with installation, configuration, and usage guides              |
+| **[Documentation](https://mutimetroo.com/)**                                 | Online documentation with installation, configuration, and usage guides              |
 | **[User Manual (PDF)](https://github.com/Muti-Metroo/Muti-Metroo/releases)** | Comprehensive PDF manual for offline use and printing (download from latest release) |
 | **[Architecture.md](./Architecture.md)**                             | Technical internals, protocol specification, and implementation details              |
 
@@ -128,7 +121,7 @@ The easiest way to get started is using the interactive setup wizard:
 The wizard guides you through:
 
 - **Basic setup**: Data directory and config file location
-- **Agent role**: Ingress (SOCKS5 proxy), Transit (relay), or Exit (external network access)
+- **Agent role**: Ingress (SOCKS5 listener for Mutiauk and SOCKS clients), Transit (relay), or Exit (external network access)
 - **Network config**: Transport protocol (QUIC/HTTP2/WebSocket) and listen address
 - **TLS certificates**: Generate new, paste existing, or use certificate files
 - **Peer connections**: Connect to other mesh agents
@@ -214,14 +207,14 @@ Generate fresh TLS certificates for your deployment:
 
 ```bash
 # Generate CA certificate (valid for 1 year)
-./build/muti-metroo cert ca -n "My Mesh CA" -o ./certs
+./build/muti-metroo cert ca --cn "My Mesh CA" -o ./certs
 
 # Generate agent certificates signed by the CA
-./build/muti-metroo cert agent -n "agent-a" --dns "node-a.example.com" --ip "192.168.1.10"
-./build/muti-metroo cert agent -n "agent-b" --dns "node-b.example.com" --ip "192.168.1.20"
+./build/muti-metroo cert agent --cn "agent-a" --dns "node-a.example.com" --ip "192.168.1.10"
+./build/muti-metroo cert agent --cn "agent-b" --dns "node-b.example.com" --ip "192.168.1.20"
 
 # Generate client certificate (for mTLS)
-./build/muti-metroo cert client -n "admin-client"
+./build/muti-metroo cert client --cn "admin-client"
 
 # View certificate details
 ./build/muti-metroo cert info ./certs/agent-a.crt
@@ -290,22 +283,28 @@ peers:
 
 ### SOCKS5 Server (Ingress)
 
+The endpoint that Mutiauk (and any SOCKS-aware application) connects to. For an ingress that workstations reach over the network, enable authentication and the WebSocket listener with TLS:
+
 ```yaml
+tls:
+  cert: "./certs/relay.crt" # ECDSA; served by the WebSocket listener, must be trusted by workstations
+  key: "./certs/relay.key"
+
 socks5:
   enabled: true
-  address: "127.0.0.1:1080"
+  address: "127.0.0.1:1080" # plain TCP listener
   auth:
-    enabled: false
+    enabled: true
     users:
-      - username: "user1"
-        password_hash: "$2a$10$..." # bcrypt hash (use: muti-metroo hash)
-  # WebSocket transport (optional, for firewall bypass)
+      - username: "operator"
+        password_hash: "$2a$12$..." # bcrypt hash (use: muti-metroo hash)
+  # SOCKS5 over WebSocket; Mutiauk connects with socks5.server: wss://relay.example.com:8443/socks5
   # When auth.enabled is true, WebSocket requires HTTP Basic Auth with same credentials
   websocket:
-    enabled: false
+    enabled: true
     address: "0.0.0.0:8443"
     path: "/socks5"
-    plaintext: false # true when behind reverse proxy
+    plaintext: false # true when behind a reverse proxy that terminates TLS
 ```
 
 ### Exit Node
@@ -316,10 +315,12 @@ exit:
   routes:
     - "10.0.0.0/8"
     - "0.0.0.0/0" # Default route
-  dns:
-    servers:
-      - "8.8.8.8:53"
-    timeout: 5s
+  # dns.servers defaults to [] (the host's system resolver); set it only to
+  # pin specific upstream resolvers, for example an internal one:
+  # dns:
+  #   servers:
+  #     - "10.0.0.1:53"
+  #   timeout: 5s
 ```
 
 ## Architecture
@@ -328,38 +329,38 @@ exit:
 
 An agent can serve multiple roles simultaneously:
 
-- **Ingress**: SOCKS5 listener, initiates virtual streams, performs route lookup
+- **Ingress**: SOCKS5 listener for Mutiauk and SOCKS clients, initiates virtual streams, performs route lookup
 - **Transit**: Forwards streams between peers, participates in route flooding
 - **Exit**: Opens real TCP connections, advertises CIDR routes, handles DNS
 
 ### Data Flow
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │     │   Agent A   │     │   Agent B   │     │   Agent C   │
-│  (Browser)  │     │  (Ingress)  │     │  (Transit)  │     │   (Exit)    │
-└──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-       │                   │                   │                   │
-       │ SOCKS5 CONNECT    │                   │                   │
-       │──────────────────>│                   │                   │
-       │                   │                   │                   │
-       │                   │ Route Lookup      │                   │
-       │                   │ (longest match)   │                   │
-       │                   │                   │                   │
-       │                   │ STREAM_OPEN       │ STREAM_OPEN       │
-       │                   │──────────────────>│──────────────────>│
-       │                   │                   │                   │
-       │                   │                   │                   │ TCP Connect
-       │                   │                   │                   │────────────>
-       │                   │                   │                   │
-       │                   │ STREAM_OPEN_ACK   │ STREAM_OPEN_ACK   │
-       │                   │<──────────────────│<──────────────────│
-       │                   │                   │                   │
-       │ SOCKS5 OK         │                   │                   │
-       │<──────────────────│                   │                   │
-       │                   │                   │                   │
-       │     STREAM_DATA frames (bidirectional relay)              │
-       │<═══════════════════════════════════════════════════════════>
++--------------+     +-------------+     +-------------+     +-------------+
+| SOCKS client |     |   Agent A   |     |   Agent B   |     |   Agent C   |
+|  (Mutiauk)   |     |  (Ingress)  |     |  (Transit)  |     |   (Exit)    |
++------+-------+     +------+------+     +------+------+     +------+------+
+       |                    |                   |                   |
+       | SOCKS5 CONNECT     |                   |                   |
+       |------------------->|                   |                   |
+       |                    |                   |                   |
+       |                    | Route Lookup      |                   |
+       |                    | (longest match)   |                   |
+       |                    |                   |                   |
+       |                    | STREAM_OPEN       | STREAM_OPEN       |
+       |                    |------------------>|------------------>|
+       |                    |                   |                   |
+       |                    |                   |                   | TCP Connect
+       |                    |                   |                   |------------>
+       |                    |                   |                   |
+       |                    | STREAM_OPEN_ACK   | STREAM_OPEN_ACK   |
+       |                    |<------------------|<------------------|
+       |                    |                   |                   |
+       | SOCKS5 OK          |                   |                   |
+       |<-------------------|                   |                   |
+       |                    |                   |                   |
+       |      STREAM_DATA frames (bidirectional relay)              |
+       |<==========================================================>|
 ```
 
 ### Package Structure

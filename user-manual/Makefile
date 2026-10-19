@@ -59,7 +59,7 @@ $(BUILD_DIR)/combined.md: mermaid
 	done
 	@# Replace generic diagram captions with descriptive ones
 	@sed -i.bak \
-		-e 's/!\[diagram\](\.\/01-introduction-1/![Multi-hop mesh network flow](\.\/01-introduction-1/g' \
+		-e 's/!\[diagram\](\.\/01-introduction-1/![Muti Metroo suite operator workflow](\.\/01-introduction-1/g' \
 		-e 's/!\[diagram\](\.\/01-introduction-2/![Corporate network access topology](\.\/01-introduction-2/g' \
 		-e 's/!\[diagram\](\.\/01-introduction-3/![Multi-site connectivity topology](\.\/01-introduction-3/g' \
 		-e 's/!\[diagram\](\.\/07-agent-roles-1/![Agent roles in mesh network](\.\/07-agent-roles-1/g' \

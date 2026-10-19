@@ -10,7 +10,7 @@ sidebar_position: 7
 
 # SOCKS Proxy
 
-The `socks5` section turns the agent into an ingress: applications connect to the proxy, and the agent carries their traffic through the mesh to an exit. One listener serves SOCKS4, SOCKS4a, and SOCKS5; the version is detected from the first byte of each connection.
+The `socks5` section turns the agent into an ingress: [Mutiauk](/mutiauk) on the operator's workstation, or a SOCKS-aware application, connects to the proxy, and the agent carries the traffic through the mesh to an exit. One listener serves SOCKS4, SOCKS4a, and SOCKS5; the version is detected from the first byte of each connection.
 
 ## Configuration
 
@@ -50,7 +50,7 @@ socks5:
 
 ## Bind address
 
-The default binds to loopback, so only local applications can use the proxy. To accept clients from the network, bind to an interface address or `0.0.0.0`, and turn on authentication:
+The default binds to loopback, so only local applications can use the proxy. When the operator's workstation runs Mutiauk and the agent runs on a mesh node, the workstation connects over the network: bind to an interface address or `0.0.0.0`, and turn on authentication:
 
 ```yaml
 socks5:
@@ -97,18 +97,18 @@ socks5:
     path: "/socks5"
 ```
 
-The WebSocket listener carries the SOCKS5 protocol inside a WebSocket connection, for networks that only allow HTTPS. It runs next to the TCP listener and only starts when `socks5.enabled` is true.
+The WebSocket listener carries the SOCKS5 protocol inside a WebSocket connection. With TLS it also encrypts the connection between the client and the agent, which plain SOCKS5 over TCP does not; this matters when Mutiauk on a workstation connects to the agent across an untrusted network. It also works on networks that only allow HTTPS. It runs next to the TCP listener and only starts when `socks5.enabled` is true.
 
 - Without `plaintext`, it serves TLS with the agent certificate from [`tls`](/configuration/tls-certificates), or a generated self-signed certificate.
 - With `plaintext: true`, it serves plain HTTP; bind it to loopback and put a TLS-terminating reverse proxy in front.
 - When `auth.enabled` is true, the WebSocket upgrade also requires HTTP Basic authentication with the same credentials, before the SOCKS5 handshake.
 - Requests to `/` return a plain splash page; only `path` accepts upgrades.
 
-[Mutiauk](/mutiauk) can connect to this listener with its WebSocket transport.
+[Mutiauk](/mutiauk) connects to this listener with its [WebSocket transport](/mutiauk#websocket-transport) and a `wss://` URL. Mutiauk verifies the server certificate against the workstation's system trust store, so a self-signed or private-CA certificate fails unless the workstation trusts it. A TLS-terminating reverse proxy with a public certificate in front of a `plaintext: true` listener avoids this.
 
 ## Hostname resolution
 
-When a client sends a host name (SOCKS5 domain address or SOCKS4a), the ingress agent resolves it in this order:
+When a client sends a host name (SOCKS5 domain address or SOCKS4a), the ingress agent resolves it in this order. Mutiauk always sends IP addresses, so this applies to SOCKS-aware applications only.
 
 1. A matching [domain route](/configuration/exit#domain-routes) sends the name to the exit agent, which resolves it.
 2. A name in the local [mesh host registry](/configuration/hosts) resolves to its registered IP.
@@ -123,6 +123,25 @@ socks5:
   enabled: true
   address: "127.0.0.1:1080"
 ```
+
+### Ingress for remote Mutiauk workstations
+
+```yaml
+socks5:
+  enabled: true
+  address: "127.0.0.1:1080"
+  auth:
+    enabled: true
+    users:
+      - username: "${SOCKS_USER}"
+        password_hash: "${SOCKS_PASS_HASH}"
+  websocket:
+    enabled: true
+    address: "0.0.0.0:8443"
+    path: "/socks5"
+```
+
+The TCP listener stays on loopback, and workstations connect with `socks5.server: wss://relay.example.com:8443/socks5` in their Mutiauk config. The certificate the listener serves must be one the workstations trust.
 
 ### Shared proxy with authentication
 
@@ -140,6 +159,7 @@ socks5:
 
 ## See Also
 
+- [Mutiauk](/mutiauk) for the workstation side of the connection
 - [SOCKS Proxy usage](/features/socks5-proxy) for client examples (curl, SSH, browsers, proxychains)
 - [UDP](/configuration/udp) for the exit-side UDP relay settings used by UDP ASSOCIATE
 - [Exit](/configuration/exit) for the routes that decide where proxied traffic leaves the mesh

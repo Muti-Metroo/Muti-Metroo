@@ -151,7 +151,7 @@ forward:
   endpoints: [] # [{key, target}] - expose local services
   listeners: [] # [{key, address, max_connections}] - accept inbound
 
-# Mesh-local hostname registry (served to Mutiauk via /api/dashboard)
+# Mesh-local hostname registry (pushed to Mutiauk over the SOCKS5 endpoint)
 mesh_hosts_suffixes: ["mesh"] # allowed TLD suffixes; every host must end with one of these
 mesh_hosts: [] # [{name, ipv4, ipv6, comment}] config-seeded entries
 
@@ -315,7 +315,7 @@ muti-metroo peer add newagent.example:4433 --target <agent-id>
 
 ## SOCKS5 Section
 
-Configure the SOCKS proxy ingress. The listener accepts SOCKS4, SOCKS4a, and SOCKS5 connections on the same address — auto-detected from the first byte.
+Configure the SOCKS proxy ingress. This is the endpoint that Mutiauk on an operator workstation, or a SOCKS-aware application, connects to (Chapters 9 and 10). The listener accepts SOCKS4, SOCKS4a, and SOCKS5 connections on the same address, auto-detected from the first byte. The optional `websocket` block adds a SOCKS5-over-WebSocket listener with TLS for remote clients (Chapter 9).
 
 ```yaml
 socks5:

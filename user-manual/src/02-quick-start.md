@@ -1,6 +1,6 @@
 # Quick Start
 
-Get Muti Metroo running in under 5 minutes using the interactive setup wizard.
+This chapter starts a single agent with the interactive setup wizard and tests it with a SOCKS5 client. In a real deployment agents run on the mesh nodes (relays, gateways, exits), and the operator's workstation reaches the mesh through Mutiauk; see "Connect from Your Workstation" at the end of this chapter.
 
 ## Get the Binary
 
@@ -12,6 +12,8 @@ Obtain the binary for your platform from the distribution channel your team uses
 | Linux (arm64)         | `muti-metroo-linux-arm64`  |
 | macOS (Apple Silicon) | `muti-metroo-darwin-arm64` |
 | macOS (Intel)         | `muti-metroo-darwin-amd64` |
+| Windows (amd64)       | `muti-metroo-windows-amd64.exe` |
+| Windows (arm64)       | `muti-metroo-windows-arm64.exe` |
 
 Then install it (example: Linux amd64):
 
@@ -25,7 +27,7 @@ muti-metroo --version
 
 ## Run the Setup Wizard
 
-The easiest way to get started is using the interactive setup wizard:
+Start with the interactive setup wizard:
 
 ```bash
 muti-metroo setup
@@ -86,16 +88,16 @@ curl http://localhost:8080/healthz
 #          can_sign_management, accepts_signed_management
 ```
 
-## Test SOCKS5 Proxy
+## Quick Test with a SOCKS5 Client
 
-If you configured exit routing (standalone mode):
+If you configured exit routing (standalone mode), point `curl` at the SOCKS5 listener. This direct SOCKS5 path is useful for quick tests and for single applications:
 
 ```bash
-# Test the proxy
-curl -x socks5://localhost:1080 https://example.com
+# Test the proxy (socks5h sends the hostname to the agent for resolution)
+curl -x socks5h://localhost:1080 https://example.com
 
 # Test with authentication (if configured)
-curl -x socks5://user:password@localhost:1080 https://example.com
+curl -x socks5h://user:password@localhost:1080 https://example.com
 ```
 
 ## Minimal Configuration Example
@@ -125,12 +127,27 @@ exit:
     - "0.0.0.0/0"
   # dns.servers defaults to [] (use system resolver, including .local / mDNS).
   # Override only when you need to pin specific upstreams. Do NOT use public
-  # resolvers (8.8.8.8, 1.1.1.1) in compliance-bound deployments -- they
+  # resolvers (8.8.8.8, 1.1.1.1) in compliance-bound deployments; they
   # leak DNS to a third party.
 
 http:
   enabled: true
   address: ":8080"
+```
+
+## Connect from Your Workstation
+
+The usual operator setup runs the ingress agent on a mesh node, for example a relay on a public server, and runs Mutiauk on the workstation:
+
+1. On the ingress agent, enable SOCKS5 authentication and the SOCKS5 WebSocket listener with a TLS certificate the workstation trusts (Chapter 9).
+2. On the workstation, create a Mutiauk configuration whose `socks5.server` points at the agent, for example `wss://relay.example.com:8443/socks5`, with `autoroutes.enabled: true`, and start the Mutiauk daemon (Chapter 10). The Mutiauk config wizard in Muti Metroo Manager and `mutiauk config generate` both accept a `wss://` server; the interactive `mutiauk setup` wizard asks for a plain `host:port`.
+3. Optionally run Muti Metroo Manager on the workstation against an agent's HTTP API for the topology view and management actions (Chapter 18).
+
+After that, ordinary tools reach mesh networks with no proxy settings:
+
+```bash
+ssh admin@10.10.5.100
+curl http://10.10.5.100/
 ```
 
 ## Next Steps
@@ -139,3 +156,5 @@ http:
 - **Chapter 4**: Setup wizard walkthrough
 - **Chapter 5**: TLS certificate management
 - **Chapter 6**: Full configuration reference
+- **Chapter 9**: SOCKS5 ingress listener
+- **Chapter 10**: Mutiauk TUN interface on the operator workstation

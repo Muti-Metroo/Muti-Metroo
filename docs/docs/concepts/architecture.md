@@ -12,6 +12,8 @@ sidebar_position: 1
 
 A Muti Metroo mesh is a set of agents connected to each other by peer connections. Each agent is the same single binary running in userspace, without root privileges, kernel modules, or a TUN device. There is no central coordinator: once agents are connected, they exchange route advertisements and relay traffic for each other.
 
+Agents run on the mesh nodes. The operator's workstation reaches the mesh through [Mutiauk](/mutiauk), which captures traffic on a TUN interface and forwards it into the SOCKS listener of an ingress agent. The [Suite Overview](/suite-overview) shows which component runs where.
+
 ## Building blocks
 
 | Term | Meaning |
@@ -20,7 +22,7 @@ A Muti Metroo mesh is a set of agents connected to each other by peer connection
 | **Listener** | A transport endpoint (QUIC, HTTP/2, or WebSocket) on which an agent accepts peer connections. Configured under `listeners`. |
 | **Peer** | An outbound connection that an agent dials to another agent's listener. Configured under `peers`. |
 | **Peer connection** | The TLS-protected transport link between two agents, regardless of which side dialed. |
-| **Stream** | One client connection (for example a TCP connection made through the SOCKS proxy) carried across the mesh from ingress to exit. Many streams share each peer connection. See [Streams](/concepts/streams). |
+| **Stream** | One client connection (for example a TCP connection that Mutiauk or another SOCKS client makes through the SOCKS proxy) carried across the mesh from ingress to exit. Many streams share each peer connection. See [Streams](/concepts/streams). |
 | **Route** | An advertisement that an agent can reach a CIDR range, a domain pattern, or a port forward key. See [Routing](/concepts/routing). |
 | **Role** | What an agent does with traffic: ingress, transit, or exit. See [Agent Roles](/concepts/agent-roles). |
 
@@ -30,7 +32,7 @@ Which services an agent runs depends on its configuration:
 
 | Service | Enabled by | Purpose |
 | ------- | ---------- | ------- |
-| SOCKS proxy | `socks5.enabled` | Accepts SOCKS4, SOCKS4a, and SOCKS5 clients and sends their connections into the mesh (ingress). |
+| SOCKS proxy | `socks5.enabled` | Accepts Mutiauk and other SOCKS4, SOCKS4a, and SOCKS5 clients and sends their connections into the mesh (ingress). Also pushes routes and mesh hostnames to Mutiauk. |
 | Exit handler | `exit.enabled` | Advertises CIDR and domain routes and opens the real connections to destinations (exit). |
 | Port forwarding | `forward.listeners`, `forward.endpoints` | Exposes a service reachable from one agent on a local port of another. |
 | HTTP API | `http.enabled` | Health checks, dashboard and topology data, and the API that the CLI management commands use. |
@@ -86,11 +88,11 @@ Reversing the connection (Agent A dials Agent B) gives the same result.
 
 ## Data flow
 
-When a client connects through the SOCKS proxy of an ingress agent:
+When a client connects through the SOCKS proxy of an ingress agent (Mutiauk opens one such connection for each TCP connection it captures on the workstation):
 
 ```mermaid
 flowchart LR
-    Client[Client] -->|SOCKS CONNECT| Ingress[Ingress agent]
+    Client[Mutiauk or<br/>SOCKS client] -->|SOCKS CONNECT| Ingress[Ingress agent]
     Ingress -->|Route lookup,<br/>open stream| Transit[Transit agent]
     Transit -->|Relay| Exit[Exit agent]
     Exit -->|TCP| Server[Destination]
@@ -127,7 +129,7 @@ See [Routing](/concepts/routing) for route selection and expiry.
 | Peer connections | TLS 1.3 on every transport. Certificates are self-signed and generated at startup unless you configure a CA; CA verification and mutual TLS are optional. |
 | Peer identity | A peer entry's `id` can pin the expected agent ID of the remote agent; `id: "auto"` accepts any agent. |
 | Stream payload | End-to-end encryption between ingress and exit with X25519 key exchange and ChaCha20-Poly1305. Transit agents relay the payload without the session keys; see [the limits](/security/e2e-encryption#limits-of-the-protection). |
-| SOCKS clients | Optional username/password authentication. |
+| SOCKS clients (including Mutiauk) | Optional username/password authentication. The SOCKS connection itself is not encrypted unless it uses the WebSocket listener with TLS. |
 | HTTP API | Optional bearer token (`http.token_hash`). |
 | Privileged operations | Shell, file transfer, and dynamic configuration changes require requests signed with the management signing key. Sleep and wake require a signature on agents that have the signing public key configured. |
 | Topology | Optional management key that encrypts node information, so only operators with the private key can read the mesh layout. |

@@ -6,13 +6,13 @@ Every Muti Metroo agent can serve one or more roles simultaneously. Understandin
 
 | Role        | Description                                | Typical Use                |
 | ----------- | ------------------------------------------ | -------------------------- |
-| **Ingress** | Accepts client connections via SOCKS5      | User-facing proxy endpoint |
+| **Ingress** | Accepts client connections via SOCKS5      | Entry point that Mutiauk and SOCKS clients connect to |
 | **Transit** | Relays traffic between other agents        | Network bridge             |
 | **Exit**    | Opens connections to external destinations | Internet/network gateway   |
 
 ```mermaid
 flowchart LR
-    Client[Client] --> Ingress
+    Client[Mutiauk or<br/>SOCKS client] --> Ingress
     Ingress --> Transit
     Transit --> Exit
     Exit --> Target[Target Server]
@@ -24,7 +24,7 @@ flowchart LR
 
 ## Ingress Role
 
-An **ingress agent** accepts client connections and initiates streams into the mesh.
+An **ingress agent** accepts client connections on its SOCKS5 listener and initiates streams into the mesh. The client is usually Mutiauk on an operator workstation (Chapter 10); SOCKS-aware applications can also connect directly (Chapter 9). The ingress agent is usually a mesh node, such as a relay on a public server, rather than the operator's own machine.
 
 ### Responsibilities
 
@@ -32,7 +32,8 @@ An **ingress agent** accepts client connections and initiates streams into the m
 - Authenticate clients (if enabled)
 - Perform route lookup for destinations
 - Open streams to the appropriate exit node
-- Relay data between SOCKS5 client and mesh stream
+- Relay data between the SOCKS5 client and the mesh stream
+- Push route, mesh-host, and DNS suffix snapshots to Mutiauk clients with autoroutes enabled
 
 ### Configuration
 
@@ -47,11 +48,13 @@ socks5:
 
 ### Typical Deployments
 
-- **Operator workstations**: Local SOCKS5 proxy
-- **Edge servers**: Remote access gateway
-- **Cloud instances**: Entry point for distributed team
+- **Public relays and cloud instances**: Entry point that operator workstations running Mutiauk connect to
+- **Edge servers**: Remote access gateway for a site
+- **Local agent on a workstation**: Single-operator setups and tests with SOCKS clients on `127.0.0.1`
 
 ### Example: Ingress-Only Agent
+
+A relay that operator workstations reach over the internet. Authentication is enabled, and the SOCKS5 WebSocket listener serves TLS with the agent's `tls` certificate so Mutiauk can connect with a `wss://` URL (Chapter 9):
 
 ```yaml
 agent:
@@ -66,14 +69,22 @@ peers:
     transport: quic
     address: "relay.example.com:4433"
 
+tls:
+  cert: "./certs/relay.crt" # ECDSA certificate the workstations trust
+  key: "./certs/relay.key"
+
 socks5:
   enabled: true
-  address: "0.0.0.0:1080"
+  address: "127.0.0.1:1080" # plain TCP listener kept local
   auth:
     enabled: true
     users:
       - username: "operator"
-        password_hash: "$2a$10$..."
+        password_hash: "$2a$12$..."
+  websocket:
+    enabled: true
+    address: "0.0.0.0:8443"
+    path: "/socks5"
 
 # No exit configuration - pure ingress
 ```
@@ -160,12 +171,12 @@ exit:
     - "0.0.0.0/0"
   # dns.servers defaults to [] (use the host's system resolver, including
   # split-horizon DNS and .local / mDNS). Configure explicit upstreams only
-  # when you need to override that -- do NOT paste public resolvers
+  # when you need to override that. Do NOT paste public resolvers
   # (8.8.8.8 / 1.1.1.1) into compliance-bound or confidentiality-sensitive
   # deployments; that leaks every resolved name to a third party.
 ```
 
-**Note:** All agents are reachable by ID for management operations (management commands, file transfer, ping, status queries) regardless of whether they have exit routes configured. Exit routes only control which network destinations an agent can reach on behalf of SOCKS5 clients.
+**Note:** All agents are reachable by ID for management operations (management commands, file transfer, ping, status queries) regardless of whether they have exit routes configured. Exit routes only control which network destinations an agent can reach on behalf of ingress clients.
 
 ### Typical Deployments
 
@@ -216,6 +227,7 @@ socks5:
 
 peers:
   - id: "remote-exit-id..."
+    transport: quic
     address: "remote.example.com:4433"
 ```
 
@@ -226,6 +238,7 @@ Relays traffic and provides exit for specific routes:
 ```yaml
 peers:
   - id: "ingress-id..."
+    transport: quic
     address: "ingress.example.com:4433"
 
 exit:
@@ -264,7 +277,7 @@ exit:
 | Scenario                    | Recommended Roles                  |
 | --------------------------- | ---------------------------------- |
 | Local proxy for one user    | Ingress + Exit (standalone)        |
-| Team proxy with cloud exit  | Ingress (local) + Exit (cloud)     |
+| Operator access to internal networks | Ingress (cloud relay, Mutiauk on each workstation) + Exit (each internal network) |
 | Multi-site connectivity     | Transit (cloud) + Exit (each site) |
 | Internet gateway for office | Ingress (office) + Exit (DMZ)      |
 
@@ -289,8 +302,8 @@ flowchart LR
 
 Even though B dialed A, virtual streams can flow **both directions**:
 
-- A SOCKS5 client on Agent A can tunnel to `192.168.0.0/16` via Agent B's exit
-- A SOCKS5 client on Agent B can tunnel to `10.0.0.0/8` via Agent A's exit
+- A client connected to Agent A's SOCKS5 listener can tunnel to `192.168.0.0/16` via Agent B's exit
+- A client connected to Agent B's SOCKS5 listener can tunnel to `10.0.0.0/8` via Agent A's exit
 
 **Practical implications:**
 

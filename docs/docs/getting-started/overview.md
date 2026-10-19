@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Run a demo Muti Metroo mesh in Docker, then choose between the setup wizard and a hand-written config for your own agents.
+description: Run a demo Muti Metroo mesh in Docker, set up agents on your mesh nodes with the setup wizard or a hand-written config, and connect your workstation with Mutiauk.
 sidebar_label: Overview
 sidebar_position: 1
 ---
@@ -11,7 +11,9 @@ sidebar_position: 1
 
 # Getting Started
 
-This page shows two ways in: a demo mesh that runs in Docker with no installation, and the paths for setting up agents on your own hosts.
+A Muti Metroo deployment has two sides. Agents (`muti-metroo`) run on the mesh nodes: relays, gateways, and hosts inside the networks you want to reach. The operator's workstation runs [Mutiauk](/mutiauk), which connects to an ingress agent and sends traffic for the mesh's networks through it, and optionally [Muti Metroo Manager](/muti-metroo-manager) for a web view of the mesh. The [Suite Overview](/suite-overview) describes which component runs where.
+
+This page shows a demo mesh that runs in Docker with no installation, the paths for setting up agents on your own hosts, and how to connect your workstation to them.
 
 ## Try a demo mesh in Docker
 
@@ -30,7 +32,7 @@ curl http://localhost:18080/healthz
 curl -x socks5h://localhost:11080 https://httpbin.org/ip
 ```
 
-The second command travels through the mesh and returns JSON with the source address that httpbin.org saw. Stop the demo with `docker compose down`. The `README.md` in the `examples/docker-tryout` directory describes the topology and more things to try.
+The second command uses the ingress agent's SOCKS listener directly, which is the quickest way to test a mesh. It travels through the mesh and returns JSON with the source address that httpbin.org saw. Stop the demo with `docker compose down`. The `README.md` in the `examples/docker-tryout` directory describes the topology and more things to try.
 
 ## Set up your own agents
 
@@ -59,15 +61,22 @@ muti-metroo run -c ./config.yaml
 
 After one agent works, [Your First Mesh](/getting-started/first-mesh) connects two or three agents so traffic enters on one host and leaves from another.
 
-:::tip[Transparent routing]
-Applications that cannot use a SOCKS proxy can reach the mesh through [Mutiauk](/mutiauk), a companion tool that creates a TUN interface and forwards IP traffic into the agent's SOCKS5 proxy. It runs on Linux, macOS, and Windows and requires root or Administrator.
-:::
+## Connect your workstation
+
+Once the agents are running, install [Mutiauk](/mutiauk) on your workstation and point it at the SOCKS5 listener of an ingress agent. With autoroutes enabled (the setup wizard's default), Mutiauk receives the mesh's routes and hostnames from the agent and installs them on a TUN interface, so `ssh`, `curl`, browsers, and other tools reach mesh destinations without proxy settings:
+
+```bash
+sudo mutiauk setup
+sudo mutiauk daemon start
+```
+
+Mutiauk runs on Linux, macOS, and Windows and requires root or Administrator. Where that is not available, SOCKS-aware applications can use the agent's [SOCKS listener](/features/socks5-proxy) directly.
 
 ## See Also
 
 - [Installation](/getting-started/installation): download the binary and install it as a service
 - [Your First Mesh](/getting-started/first-mesh): connect an ingress agent to an exit agent
+- [Mutiauk](/mutiauk): install and configure the TUN interface on your workstation
 - [Architecture](/concepts/architecture): how agents, routes, and streams fit together
 - [Configuration Overview](/configuration/overview): every configuration section
 - [Troubleshooting](/troubleshooting/common-issues): fixes for common problems
-- [FAQ](/troubleshooting/faq): answers to frequently asked questions

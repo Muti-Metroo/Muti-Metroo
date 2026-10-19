@@ -52,9 +52,10 @@ function UseCases(): ReactNode {
             <div className={styles.useCase}>
               <Heading as="h3">Secure Remote Access</Heading>
               <p>
-                Reach internal resources through a SOCKS proxy without
-                traditional VPN infrastructure. Stream payloads are encrypted
-                end to end between ingress and exit agents.
+                Reach internal resources from your workstation through the
+                Mutiauk TUN interface, without traditional VPN infrastructure.
+                Stream payloads are encrypted end to end between ingress and
+                exit agents.
               </p>
             </div>
           </div>
@@ -106,23 +107,24 @@ function QuickExample(): ReactNode {
         </div>
         <div className="row">
           <div className="col col--6">
-            <Heading as="h4">1. Setup and Run</Heading>
+            <Heading as="h4">1. Run agents on the mesh nodes</Heading>
             <pre className={styles.codeBlock}>
 {`# Interactive setup wizard
-./muti-metroo setup
+muti-metroo setup
 
 # Run with config
-./muti-metroo run -c config.yaml`}
+muti-metroo run -c config.yaml`}
             </pre>
           </div>
           <div className="col col--6">
-            <Heading as="h4">2. Connect via SOCKS5</Heading>
+            <Heading as="h4">2. Connect your workstation with Mutiauk</Heading>
             <pre className={styles.codeBlock}>
-{`# Use curl through the mesh
-curl -x socks5://localhost:1080 https://internal.example.com
+{`# Point Mutiauk at an ingress agent, receive the mesh's routes
+sudo mutiauk setup
+sudo mutiauk daemon start
 
-# SSH through the mesh
-ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@host`}
+# Ordinary tools now reach mesh networks
+ssh admin@10.20.0.5`}
             </pre>
           </div>
         </div>
@@ -145,7 +147,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="Self-Hosted Mesh Tunneling"
-      description="Secure mesh networking for distributed infrastructure. Build multi-hop relay chains across your infrastructure with SOCKS5 proxy. Single binary, no root required.">
+      description="Secure mesh networking for distributed infrastructure. Run agents on your mesh nodes and reach their networks from your workstation through the Mutiauk TUN interface.">
       <HomepageHeader />
       <main>
         <NetworkDiagram />

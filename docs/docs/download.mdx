@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Download
-description: Download Muti Metroo binaries for Linux, macOS, and Windows, verify their checksums, and get the PDF user manual and companion tools.
+description: Download Muti Metroo binaries for Linux, macOS, and Windows, verify their checksums, and get the PDF user manual and the other suite components, Mutiauk and Muti Metroo Manager.
 ---
 
 import Tabs from '@theme/Tabs';
@@ -249,7 +249,7 @@ The user manual collects installation, configuration, features, and deployment i
 
 ## Mutiauk
 
-Mutiauk creates a TUN interface and forwards IP traffic through Muti Metroo's SOCKS5 proxy, so applications need no proxy settings. It requires root or Administrator. Release binaries are published for Linux; see the [Mutiauk guide](/mutiauk) for details.
+Mutiauk runs on the operator's workstation. It creates a TUN interface, installs the mesh's routes, and forwards IP traffic through an ingress agent's SOCKS5 listener, so applications need no proxy settings. It requires root or Administrator. Release binaries are published for Linux; see the [Mutiauk guide](/mutiauk) for details.
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64" primary>
@@ -262,7 +262,7 @@ Mutiauk creates a TUN interface and forwards IP traffic through Muti Metroo's SO
 
 ## Muti Metroo Manager
 
-A web dashboard that connects to an agent's HTTP API to show the mesh topology and run management actions. See the [Muti Metroo Manager guide](/muti-metroo-manager) for details.
+A web dashboard, usually run on the operator's workstation, that connects to an agent's HTTP API to show the mesh topology and run management actions. See the [Muti Metroo Manager guide](/muti-metroo-manager) for details.
 
 <Tabs groupId="manager-os">
   <TabItem value="macos" label="macOS" default>

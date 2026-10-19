@@ -16,7 +16,7 @@ udp:
 
 ## Usage
 
-UDP relay uses standard SOCKS5 UDP ASSOCIATE. The client establishes a TCP connection to negotiate, then sends UDP datagrams.
+UDP relay uses standard SOCKS5 UDP ASSOCIATE. The client establishes a TCP connection to negotiate, then sends UDP datagrams. Mutiauk uses UDP ASSOCIATE for UDP traffic captured on its TUN interface, so UDP applications on the operator workstation need no extra setup. The examples below test UDP relay with direct SOCKS clients.
 
 ### Testing with proxychains
 

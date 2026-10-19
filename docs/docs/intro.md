@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: Muti Metroo is a userspace mesh networking agent that tunnels TCP, UDP, and ICMP traffic through encrypted multi-hop relay chains.
+description: Muti Metroo is a suite of mesh agents, a TUN interface for the operator's workstation, and a web dashboard that together tunnel TCP, UDP, and ICMP traffic through encrypted multi-hop relay chains.
 sidebar_position: 1
 ---
 
@@ -10,19 +10,28 @@ sidebar_position: 1
 
 # Introduction
 
-Muti Metroo is a mesh networking agent that runs entirely in userspace. Agents connect to each other over QUIC, HTTP/2, or WebSocket, propagate routes across the mesh, and carry traffic end-to-end encrypted from the agent where it enters the mesh to the agent where it leaves. It needs no root privileges, kernel modules, or TUN driver, and ships as a single binary.
+Muti Metroo is a suite of three tools for reaching networks through an encrypted multi-hop mesh:
+
+- **Muti Metroo agents** run on the mesh nodes: relays, gateways, and hosts inside the networks you want to reach. Agents connect to each other over QUIC, HTTP/2, or WebSocket, propagate routes across the mesh, and carry traffic end-to-end encrypted from the agent where it enters the mesh to the agent where it leaves. The agent runs entirely in userspace, needs no root privileges, and ships as a single binary.
+- **[Mutiauk](/mutiauk)** runs on the operator's workstation. It creates a TUN interface, receives the mesh's routes and hostnames from an agent, and forwards IP traffic into that agent's SOCKS5 listener, so ordinary tools such as `ssh`, `curl`, and browsers reach mesh networks without proxy settings.
+- **[Muti Metroo Manager](/muti-metroo-manager)** is a web dashboard, usually also on the operator's workstation, that connects to an agent's HTTP API to show the topology and run management actions.
 
 <div className="tunnel-diagram">
 
 ```mermaid
 flowchart LR
-    Client[Your App] -->|SOCKS5| A[Agent A<br/>Ingress]
+    subgraph WS[Operator workstation]
+        App[ssh, curl, browser] -->|IP traffic| TUN[Mutiauk<br/>TUN]
+    end
+    TUN -->|SOCKS5| A[Agent A<br/>Ingress]
     A -->|Encrypted| B[Agent B<br/>Transit]
     B -->|Encrypted| C[Agent C<br/>Exit]
     C --> Target[Internal Server]
 ```
 
 </div>
+
+Applications that support SOCKS can also use an agent's SOCKS listener directly, without Mutiauk. That is the quickest way to test a mesh, and it works on machines where you cannot get root or Administrator rights.
 
 <div className="text--center margin-vert--lg">
   <a className="button button--primary button--lg" href="/getting-started/overview">Get Started</a>
@@ -35,22 +44,14 @@ flowchart LR
 | **Multi-hop routing**    | Agents form chains, trees, or a full mesh. Routes propagate between agents automatically.                         |
 | **End-to-end encryption** | X25519 key exchange and ChaCha20-Poly1305. Transit agents relay payloads without holding the session keys. See [limits](/security/e2e-encryption#limits-of-the-protection). |
 | **Multiple transports**  | QUIC over UDP, HTTP/2 and WebSocket over TCP. WebSocket can also run behind a TLS-terminating reverse proxy or CDN. |
-| **SOCKS proxy ingress**  | SOCKS4, SOCKS4a, and SOCKS5 with optional username/password authentication. SOCKS5 UDP ASSOCIATE is supported.     |
+| **Transparent access**   | [Mutiauk](/mutiauk) carries TCP, UDP, and ICMP echo from the operator's workstation into the mesh, installs the mesh's routes, and resolves mesh hostnames. |
+| **SOCKS proxy ingress**  | SOCKS4, SOCKS4a, and SOCKS5 with optional username/password authentication, over TCP or WebSocket. Mutiauk connects here, and so can SOCKS-aware applications. |
 | **Exit routing**         | CIDR routes (DNS resolved at the ingress) and domain routes (DNS resolved at the exit).                           |
 | **Port forwarding**      | Expose a service behind one agent as a listening port on another.                                                 |
 | **Management**           | Remote shell, file transfer, and ICMP ping through the mesh, authorized by a signing key.                          |
-| **HTTP API**             | Health checks, topology and dashboard data, and runtime changes to routes, peers, and listeners.                  |
+| **Web dashboard and HTTP API** | [Muti Metroo Manager](/muti-metroo-manager) and the agent HTTP API show the topology and make runtime changes to routes, peers, and listeners. |
 
-See the [Configuration Overview](/configuration/overview) for every option.
-
-## Companion tools
-
-Two separate binaries extend the agent. Both are optional.
-
-- [Mutiauk](/mutiauk) creates a TUN interface and forwards IP traffic into the agent's SOCKS5 proxy, so applications need no proxy settings. It requires root or Administrator.
-- [Muti Metroo Manager](/muti-metroo-manager) is a web dashboard that connects to an agent's HTTP API to show the topology and run management actions.
-
-The [Suite Overview](/suite-overview) explains how the three fit together.
+See the [Configuration Overview](/configuration/overview) for every agent option, and the [Suite Overview](/suite-overview) for how the three tools fit together.
 
 ## Use cases
 
@@ -60,7 +61,7 @@ Reach servers behind NAT or a firewall through a chain of agents.
 
 ```mermaid
 flowchart LR
-    Laptop[Your Laptop] -->|SOCKS5| Cloud[Cloud Agent]
+    Laptop[Your laptop<br/>Mutiauk] -->|SOCKS5| Cloud[Cloud Agent]
     Cloud -->|QUIC| Office[Office Agent]
     Office --> Internal[Internal Server<br/>192.168.1.50]
 ```
@@ -89,7 +90,7 @@ When several exit agents advertise the same network, the ingress uses the route 
 
 ```mermaid
 flowchart LR
-    Client[Client] --> A[Agent A]
+    Client[Operator] --> A[Agent A]
     A --> B1[Exit 1]
     A --> B2[Exit 2]
     B1 --> Net[10.0.0.0/8]
@@ -100,17 +101,18 @@ flowchart LR
 
 1. You deploy agents on hosts you control and configure which agents dial which.
 2. Once peers connect, each exit agent advertises its routes, and the advertisements flood through the mesh.
-3. Applications connect to the SOCKS proxy on an ingress agent.
-4. The ingress looks up the destination in its route table and opens an encrypted stream through the mesh to the exit that advertises it.
-5. The exit agent opens the real connection to the destination.
+3. On your workstation, Mutiauk connects to the SOCKS5 listener of an ingress agent, receives the mesh's routes, and installs them on its TUN interface. (SOCKS-aware applications can connect to the listener directly instead.)
+4. Traffic for a mesh destination enters the TUN interface, and Mutiauk forwards each connection to the ingress agent over SOCKS5.
+5. The ingress looks up the destination in its route table and opens an encrypted stream through the mesh to the exit that advertises it.
+6. The exit agent opens the real connection to the destination.
 
 The [Architecture](/concepts/architecture) page describes each step in detail.
 
 ## See Also
 
 - [Getting Started](/getting-started/overview): run a demo mesh in Docker, or set up your first agent
+- [Suite Overview](/suite-overview): which tool runs where, and how they connect
 - [Download](/download): binaries for Linux, macOS, and Windows
 - [Architecture](/concepts/architecture): agent roles, routing, and encryption in depth
-- [Muti Metroo vs SSH Jump Hosts](/comparisons/vs-ssh-jump): how the mesh compares to SSH-based tunneling
 - [Deployment Scenarios](/deployment/scenarios): example topologies for real deployments
 - [Troubleshooting](/troubleshooting/common-issues): fixes for common problems

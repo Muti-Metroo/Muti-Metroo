@@ -1,7 +1,7 @@
 ---
 sidebar_position: 8
 title: Mutiauk TUN Interface
-description: Install, configure, and operate Mutiauk, the TUN interface that sends IP traffic for selected networks through a Muti Metroo SOCKS5 proxy without per-application proxy settings.
+description: Install, configure, and operate Mutiauk, the operator's TUN interface into a Muti Metroo mesh, which sends IP traffic for the mesh's networks through an ingress agent's SOCKS5 listener without per-application proxy settings.
 ---
 
 export const DownloadButton = ({ href, children, primary }) => (
@@ -29,20 +29,20 @@ export const DownloadButtonGroup = ({ children }) => (
   />
 </div>
 
-Mutiauk creates a TUN network interface, captures IP traffic for the networks you route to it, and forwards each TCP connection, UDP flow, and ICMP echo through the SOCKS5 proxy of a Muti Metroo agent. Applications on the host reach mesh destinations without any SOCKS configuration of their own.
+Mutiauk is the operator's entry point to a Muti Metroo mesh. It runs on the operator's workstation, creates a TUN network interface, captures IP traffic for the networks you route to it, and forwards each TCP connection, UDP flow, and ICMP echo through the SOCKS5 listener of an ingress agent. Applications on the workstation reach mesh destinations without any SOCKS configuration of their own.
 
 ```mermaid
 flowchart LR
-    subgraph Host
+    subgraph WS[Operator workstation]
         App[Application] -->|IP traffic| TUN[TUN interface]
         TUN -->|TCP/UDP/ICMP| ME[Mutiauk]
-        ME -->|SOCKS5| MM[Muti Metroo agent]
     end
+    ME -->|SOCKS5| MM[Ingress agent]
     MM -->|Mesh| Exit[Exit agent]
     Exit -->|Direct| Dest[Destination]
 ```
 
-Mutiauk is a separate binary. A Muti Metroo agent does not need it, and Mutiauk talks to the agent only through the agent's SOCKS5 listener.
+The agents run on the mesh nodes; the ingress agent is usually a relay or gateway that the workstation can reach over the network. Mutiauk talks to the agent only through the agent's SOCKS5 listener, over TCP or [WebSocket](#websocket-transport). The [Suite Overview](/suite-overview) shows how Mutiauk, the agents, and Muti Metroo Manager fit together.
 
 | Traffic          | How Mutiauk forwards it                                                            |
 | ---------------- | ---------------------------------------------------------------------------------- |
@@ -104,8 +104,8 @@ make build-windows-arm64   # bin/mutiauk-windows-arm64.exe
 
 ## Quick start
 
-1. Make sure the Muti Metroo agent on this host (or one reachable from it) has its SOCKS5 listener enabled. See [SOCKS5 Configuration](/configuration/socks5).
-2. Run the setup wizard and accept or change the defaults:
+1. Make sure an ingress agent that this workstation can reach has its SOCKS5 listener enabled, on an address the workstation can connect to and with authentication turned on. See [SOCKS5 Configuration](/configuration/socks5), and [Connecting the workstation to a remote ingress](/suite-overview#connecting-the-workstation-to-a-remote-ingress) for securing the connection.
+2. Run the setup wizard. Enter the agent's SOCKS5 address (the default `127.0.0.1:1080` fits only an agent on the same host) and credentials, and accept or change the other defaults:
 
    ```bash
    sudo mutiauk setup
@@ -232,7 +232,7 @@ tun:
   name: tun0
   address: 10.200.200.1/24
 socks5:
-  server: 127.0.0.1:1080
+  server: wss://relay.example.com:8443/socks5
   username: ops
 EOF
 
@@ -258,7 +258,9 @@ tun:
   address: 10.200.200.1/24
 
 socks5:
-  server: 127.0.0.1:1080
+  server: wss://relay.example.com:8443/socks5
+  username: ops
+  password: yourpassword
 
 routes:
   - destination: 10.0.0.0/8
@@ -581,7 +583,7 @@ The `max_streams_per_key` and `max_buffered_bytes` limits protect the host from 
 
 ## WebSocket transport
 
-When raw TCP to the SOCKS5 port is blocked but HTTPS is allowed, Mutiauk can carry SOCKS5 over a WebSocket connection. Either give a URL:
+Mutiauk can carry SOCKS5 over a WebSocket connection. With `wss://`, the connection between the workstation and the ingress agent is encrypted with TLS; plain SOCKS5 over TCP sends the credentials and the traffic in clear text up to the agent. Use the WebSocket transport whenever the workstation reaches the agent across a network you do not trust, and also when raw TCP to the SOCKS5 port is blocked but HTTPS is allowed. Either give a URL:
 
 ```yaml
 socks5:
@@ -825,7 +827,8 @@ tun:
   address: 10.200.200.1/24
 
 socks5:
-  server: 127.0.0.1:1080
+  server: 192.168.1.10:1080
+  username: operator
 
 routes:
   - destination: 192.168.50.0/24
@@ -846,7 +849,8 @@ Let the agent decide which networks are reachable, and resolve mesh hostnames:
 
 ```yaml
 socks5:
-  server: 127.0.0.1:1080
+  server: wss://relay.example.com:8443/socks5
+  username: operator
 
 autoroutes:
   enabled: true
@@ -857,6 +861,12 @@ sudo mutiauk daemon start
 mutiauk route list
 mutiauk host list
 ```
+
+The password comes from `MUTIAUK_SOCKS5_PASSWORD` or `socks5.password` in both examples.
+
+### Mutiauk and an agent on the same host
+
+Mutiauk can connect to an agent on the same host at `127.0.0.1:1080`. Do not route a network into the TUN interface when that agent opens connections to it as an exit, or dials peers inside it: the agent's own connections would follow the TUN route back into Mutiauk. Mutiauk protects only the address of `socks5.server` this way. Running the agents on separate mesh nodes avoids the problem.
 
 ### Route containers or VMs
 
@@ -880,10 +890,10 @@ sudo modprobe tun
 ### No connectivity through the tunnel
 
 1. Run `sudo mutiauk status` and look for the failing component.
-2. Confirm that the agent's SOCKS5 listener works on its own:
+2. Confirm that the agent's SOCKS5 listener works on its own, from the workstation (replace the address and credentials with those in `socks5.server`):
 
    ```bash
-   curl -x socks5h://localhost:1080 http://example.com/
+   curl -x socks5h://operator:password@192.168.1.10:1080 http://example.com/
    ```
 
 3. Confirm that the destination is covered by a route: `mutiauk route trace <ip>`.

@@ -1,6 +1,6 @@
 ---
 title: Your First Mesh
-description: Connect an ingress agent to an exit agent so SOCKS5 traffic leaves the mesh from a remote host, then add a transit agent between them.
+description: Connect an ingress agent to an exit agent, reach the mesh from an operator workstation with Mutiauk, then add a transit agent between the agents.
 sidebar_position: 5
 ---
 
@@ -10,23 +10,24 @@ sidebar_position: 5
 
 # Your First Mesh
 
-This guide connects two agents so that traffic entering one leaves the mesh from the other:
+This guide connects two agents so that traffic entering one leaves the mesh from the other, then connects an operator workstation to them with Mutiauk:
 
-- **Agent A** (ingress) runs where your applications are. It accepts SOCKS5 connections.
+- **Agent A** (ingress) runs on a host that your workstation can reach. It accepts SOCKS5 connections.
 - **Agent B** (exit) runs on the remote network. It opens connections to destinations.
+- **The workstation** runs [Mutiauk](/mutiauk), which sends traffic for the mesh's networks to Agent A's SOCKS5 listener.
 
-A later section adds a third agent as a transit relay between them.
+A later section adds a third agent as a transit relay between the two agents.
 
 <div className="tunnel-diagram">
 
 ```mermaid
 flowchart LR
-    C["Client<br/>(curl, SSH, browser)"]
+    C["Workstation<br/>(Mutiauk)"]
     A["Agent A<br/>(Ingress)"]
     B["Agent B<br/>(Exit)"]
     I((Destinations))
 
-    C -->|"SOCKS5<br/>localhost:1080"| A
+    C -->|"SOCKS5<br/>192.168.1.10:1080"| A
     A -->|"QUIC<br/>192.168.1.20:4433"| B
     B -->|TCP| I
 ```
@@ -35,12 +36,13 @@ flowchart LR
 
 ## Prerequisites
 
-- `muti-metroo` [installed](/getting-started/installation) on both hosts.
+- `muti-metroo` [installed](/getting-started/installation) on both agent hosts.
+- For the workstation step, [Mutiauk](/mutiauk#download) installed on the workstation, and root or Administrator rights there.
 - Agent A can reach Agent B on UDP port 4433. Only the dialing side needs to reach the listening side; Agent B never connects to Agent A.
 
 You can also run both agents on one machine. Give each agent its own data directory, and use different ports for the listener and HTTP API.
 
-The examples use `192.168.1.20` as Agent B's address. Replace it with the real address of your exit host.
+The examples use `192.168.1.10` as Agent A's address and `192.168.1.20` as Agent B's address. Replace them with the real addresses of your hosts.
 
 ## Step 1: Initialize Agent B
 
@@ -179,9 +181,9 @@ curl -s http://localhost:8080/api/dashboard | jq '.routes'
 ]
 ```
 
-## Step 5: Send traffic through the mesh
+## Step 5: Test the mesh from Agent A
 
-On Agent A's host:
+Before connecting the workstation, test the mesh with a SOCKS client on Agent A's host:
 
 ```bash
 curl -x socks5h://localhost:1080 https://example.com
@@ -193,13 +195,65 @@ The page comes back through the mesh. The connection to `example.com` is opened 
 ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@server.example.com
 ```
 
-To use the mesh from a browser, set its SOCKS5 proxy to `localhost:1080` and enable DNS through the proxy.
+## Step 6: Connect the workstation with Mutiauk
+
+Mutiauk on the workstation connects to Agent A over the network, so Agent A's SOCKS5 listener must listen on a reachable address and require a password. Generate a password hash on Agent A's host with `muti-metroo hash`, then change the `socks5` section of `config-a.yaml`:
+
+```yaml
+socks5:
+  enabled: true
+  address: "0.0.0.0:1080"
+  auth:
+    enabled: true
+    users:
+      - username: "operator"
+        password_hash: "$2a$12$GiitCO3IBCFV2/QmQ4BzNOQGykcLM1DtPyvfMB7kF5qZLDGk6BtnS"
+```
+
+Restart Agent A. The local test in Step 5 now needs the credentials: `curl -x socks5h://operator:password@localhost:1080 https://example.com`.
+
+Mutiauk's [autoroutes](/mutiauk#autoroutes) installs the CIDR routes that the mesh advertises, but never a default route such as Agent B's `0.0.0.0/0`. Add the networks the workstation should reach through Agent B to its `exit.routes`, for example a `10.20.0.0/16` network behind it, and restart Agent B:
+
+```yaml
+exit:
+  enabled: true
+  routes:
+    - "0.0.0.0/0"
+    - "10.20.0.0/16"
+```
+
+On the workstation, write `/etc/mutiauk/config.yaml` (or run `sudo mutiauk setup`, which asks for the same values):
+
+```yaml
+tun:
+  name: tun0
+  address: 10.200.200.1/24
+
+socks5:
+  server: 192.168.1.10:1080
+  username: operator
+  password: password
+
+autoroutes:
+  enabled: true
+```
+
+Start Mutiauk and check the routes it received:
+
+```bash
+sudo mutiauk daemon start
+sudo mutiauk route list
+```
+
+`10.20.0.0/16` is listed with source `auto`. Applications on the workstation now reach that network through the mesh without proxy settings, for example `ssh admin@10.20.0.5`.
+
+Plain SOCKS5 is not encrypted between the workstation and Agent A. Over a network you do not trust, use the [WebSocket transport](/mutiauk#websocket-transport) with TLS instead; see [Connecting the workstation to a remote ingress](/suite-overview#connecting-the-workstation-to-a-remote-ingress).
 
 ## How the traffic flows
 
-When you run `curl -x socks5h://localhost:1080 https://example.com`:
+When you run `curl -x socks5h://localhost:1080 https://example.com` on Agent A's host:
 
-1. curl connects to Agent A's SOCKS5 proxy and asks for `example.com:443`.
+1. curl connects to Agent A's SOCKS5 proxy and asks for `example.com:443`. (From the workstation, Mutiauk does the same for each connection, with the IP address the workstation already resolved.)
 2. Agent A resolves `example.com`, takes the first address the resolver returns, and looks it up in its route table. For an IPv4 address the only match is `0.0.0.0/0`, advertised by Agent B.
 3. Agent A opens an end-to-end encrypted stream to Agent B.
 4. Agent B opens a TCP connection to the destination and relays data in both directions.
@@ -210,7 +264,7 @@ If the first address is IPv6 and no route covers it, Agent A opens the connectio
 
 ## Add a transit agent
 
-A transit agent relays traffic between other agents. It needs no SOCKS5 or exit configuration. This section puts Agent C between A and B.
+A transit agent relays traffic between other agents. It needs no SOCKS5 or exit configuration, and the workstation keeps using Agent A. This section puts Agent C between A and B.
 
 ```mermaid
 flowchart LR
@@ -293,7 +347,7 @@ See [Connectivity](/troubleshooting/connectivity) for more.
 
 - [Architecture](/concepts/architecture): agent roles, routing, and encryption in depth
 - [Peers](/configuration/peers): peer connection options, including TLS
-- [Listeners](/configuration/listeners): QUIC, HTTP/2, and WebSocket listener options
 - [Exit Routing](/features/exit-routing): CIDR and domain routes
+- [Mutiauk](/mutiauk): autoroutes, mesh DNS, and the WebSocket transport on the workstation
 - [Deployment Scenarios](/deployment/scenarios): topologies for real deployments
 - [Best Practices](/security/best-practices): hardening a mesh for production

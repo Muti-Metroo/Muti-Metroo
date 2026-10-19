@@ -2,7 +2,7 @@ import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
 
 /**
  * Sidebar configuration for Muti Metroo documentation.
- * Organized by reader journey: learn, install, understand, use, configure,
+ * Organized by reader journey: learn, install, meet the suite, understand, use, configure,
  * deploy, secure, look up (CLI and HTTP API reference), troubleshoot.
  */
 const sidebars: SidebarsConfig = {
@@ -20,6 +20,12 @@ const sidebars: SidebarsConfig = {
         "getting-started/interactive-setup",
         "getting-started/first-mesh",
       ],
+    },
+    {
+      type: "category",
+      label: "Muti Metroo Suite",
+      collapsed: false,
+      items: ["suite-overview", "mutiauk", "muti-metroo-manager"],
     },
     {
       type: "category",
@@ -101,11 +107,6 @@ const sidebars: SidebarsConfig = {
         "security/access-control",
         "security/best-practices",
       ],
-    },
-    {
-      type: "category",
-      label: "Companion Tools",
-      items: ["suite-overview", "mutiauk", "muti-metroo-manager"],
     },
     {
       type: "category",

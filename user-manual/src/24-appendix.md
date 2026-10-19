@@ -26,7 +26,7 @@
 | `muti-metroo probe listen`               | Start test listener for probing          |
 | `muti-metroo mesh-test`                  | Test connectivity to all mesh agents     |
 
-The legacy aliases `muti-metroo peers` and `muti-metroo routes` still work but print a deprecation warning -- prefer the `peer`/`route` subcommand groups above.
+The legacy aliases `muti-metroo peers` and `muti-metroo routes` still work but print a deprecation warning; prefer the `peer`/`route` subcommand groups above.
 
 ### Remote Operations
 
@@ -45,7 +45,7 @@ The legacy aliases `muti-metroo peers` and `muti-metroo routes` still work but p
 | `muti-metroo service install -c config.yaml` | Install as service                                                                                                                           |
 | `muti-metroo service uninstall`              | Uninstall service                                                                                                                            |
 | `muti-metroo service status`                 | Check service status                                                                                                                         |
-| `muti-metroo stop [-t <id>]`                 | Gracefully stop the local (or remote) agent; signed. A service manager may restart it -- run `service uninstall` first for permanent removal |
+| `muti-metroo stop [-t <id>]`                 | Gracefully stop the local (or remote) agent; signed. A service manager may restart it; run `service uninstall` first for permanent removal |
 | `muti-metroo listener add\|remove\|list`     | Manage transport listeners at runtime                                                                                                        |
 | `muti-metroo host add\|remove\|list`         | Manage mesh-host registry                                                                                                                    |
 | `muti-metroo display-name set\|get`          | Manage the agent's display name                                                                                                              |
@@ -57,6 +57,23 @@ The legacy aliases `muti-metroo peers` and `muti-metroo routes` still work but p
 | `muti-metroo management-key generate`        | Generate management keypair                                                                                                                  |
 | `muti-metroo signing-key generate`           | Generate Ed25519 signing keypair                                                                                                             |
 | `muti-metroo signing-key public`             | Derive signing public key from private                                                                                                       |
+
+### Mutiauk (Operator Workstation)
+
+| Command                                  | Description                                          |
+| ---------------------------------------- | ---------------------------------------------------- |
+| `sudo mutiauk setup`                     | Interactive setup wizard                             |
+| `sudo mutiauk config generate --from <f>` | Write a config non-interactively                    |
+| `sudo mutiauk daemon start`              | Start the daemon (foreground)                        |
+| `sudo mutiauk status`                    | Component status and connectivity probes             |
+| `sudo mutiauk route list`                | Active routes (config, auto, manual)                 |
+| `sudo mutiauk route trace <ip\|hostname>` | Show the matching route and mesh path              |
+| `sudo mutiauk dns status`                | Mesh DNS backend, active suffixes, probes            |
+| `sudo mutiauk host list`                 | Mesh hostnames received from the agent               |
+| `sudo mutiauk service install`           | Install as a service                                 |
+| `sudo mutiauk cleanup`                   | Remove TUN, PID file, socket; revert host DNS        |
+
+On Windows, run the same commands without `sudo` from an elevated prompt.
 
 ## Configuration Cheatsheet
 
@@ -129,7 +146,7 @@ exit:
   routes:
     - "0.0.0.0/0"
   # dns.servers defaults to [] (use system resolver). Override only when
-  # the host's stub resolver is wrong for your network -- do NOT paste
+  # the host's stub resolver is wrong for your network. Do NOT paste
   # public DNS (8.8.8.8, 1.1.1.1) into compliance-bound deployments.
 ```
 
@@ -158,7 +175,10 @@ management:
 | 8443 | TCP      | HTTP/2 transport (convention; no code default)                    |
 | 443  | TCP      | WebSocket transport (convention; pick whatever your edge expects) |
 | 1080 | TCP      | SOCKS5 proxy (code default for `socks5.address`)                  |
+| 8443 | TCP      | SOCKS5 WebSocket listener (convention in examples; `socks5.websocket.address` has no default) |
 | 8080 | TCP      | HTTP API (code default for `http.address`)                        |
+| 3000 | TCP      | Muti Metroo Manager web UI (code default for `-addr`)             |
+| 48088 | TCP     | Mutiauk local admin interface (default, loopback only)            |
 
 Listener and peer ports are operator-chosen; nothing in the binary forces 4433/8443/443. The values above are widely used in examples and the wizard suggests them, but you can pick anything that suits your network.
 
@@ -263,7 +283,7 @@ management:
 
 | Role    | Config Section | Purpose                   |
 | ------- | -------------- | ------------------------- |
-| Ingress | `socks5:`      | Accept client connections |
+| Ingress | `socks5:`      | Accept Mutiauk and SOCKS client connections |
 | Transit | (implicit)     | Relay between peers       |
 | Exit    | `exit:`        | Open external connections |
 
@@ -293,7 +313,7 @@ muti-metroo hash
 
 # With custom cost
 # Default bcrypt cost is 12 (OWASP 2024). Pass --cost N (4-31) to override.
-muti-metroo hash
+muti-metroo hash --cost 14
 
 # From argument (not recommended; ends up in shell history)
 muti-metroo hash "password"
@@ -316,7 +336,7 @@ muti-metroo management-key public --stdin < ./secrets/management-private.key
 ```
 
 The `--private <hex>` flag still exists but is hidden and triggers a stderr
-warning -- passing a private key on the command line records it in shell
+warning: passing a private key on the command line records it in shell
 history, so use the prompt or `--stdin` form in scripts.
 
 ## Signing Key Generation
@@ -344,7 +364,7 @@ curl http://localhost:8080/healthz | jq
 curl -X POST http://localhost:8080/routes/advertise
 ```
 
-### Test SOCKS5
+### Test the SOCKS5 Listener Directly
 
 ```bash
 curl -x socks5://localhost:1080 https://example.com

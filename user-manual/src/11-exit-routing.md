@@ -5,7 +5,7 @@ Exit nodes advertise routes and open TCP connections to external destinations. T
 - **CIDR routes**: Match destinations by IP address (e.g., `10.0.0.0/8`)
 - **Domain routes**: Match destinations by domain name (e.g., `*.example.com`)
 
-**Note:** Domain routes only work with **SOCKS5 clients** that send the destination hostname. The Mutiauk TUN interface operates at Layer 3 (IP) and only sees IP addresses after DNS resolution, so it can only use **CIDR routes**. Mutiauk's autoroutes feature fetches only CIDR routes from Muti Metroo.
+**Note:** Domain routes only work with **SOCKS5 clients** that send the destination hostname, such as `curl -x socks5h://...` pointed directly at an ingress agent's SOCKS5 listener. Mutiauk, the usual operator entry point, operates at Layer 3 (IP) and only sees IP addresses after DNS resolution, so it can only use **CIDR routes**. Mutiauk's autoroutes feature installs only CIDR routes.
 
 ## Configuration
 
@@ -277,7 +277,7 @@ The output lists every matching CIDR with the winner and the reason each loser l
 
 ## Mesh-Local Hostnames
 
-Each Muti Metroo agent can publish a registry of symbolic names that map to in-mesh IPs (for example `target-11.mesh -> 10.8.0.11`). Static seed entries live in the agent's `mesh_hosts:` block; runtime entries added through `muti-metroo host` or the `/hosts/manage` HTTP endpoint are journalled to `agent.data_dir` and replayed on the next start. The merged list is exposed via `/api/dashboard` so Mutiauk's in-process DNS server can pick it up automatically whenever Mutiauk's autoroutes feature is enabled (Chapter 10).
+Each Muti Metroo agent can publish a registry of symbolic names that map to in-mesh IPs (for example `target-11.mesh -> 10.8.0.11`). Static seed entries live in the agent's `mesh_hosts:` block; runtime entries added through `muti-metroo host` or the `/hosts/manage` HTTP endpoint are journalled to `agent.data_dir` and replayed on the next start. The merged list is exposed via `/api/dashboard` and pushed to Mutiauk over the SOCKS5 route-watch stream, so Mutiauk's in-process DNS server picks it up whenever Mutiauk's autoroutes feature is enabled (Chapter 10).
 
 The registry only translates names to IPs - it does not install any routes. The IP a name resolves to must already be reachable through Muti Metroo via a static route or autoroute; otherwise the name resolves but traffic falls back to the kernel's default interface.
 
@@ -296,7 +296,7 @@ mesh_hosts:
     comment: "edge worker"
 ```
 
-Mutiauk fetches the active suffix list from the agent's `/api/dashboard` poll on every refresh, so operators do not configure suffixes on the Mutiauk side -- they only need to keep `autoroutes.enabled: true` (default). Each `name` must either equal an active suffix (e.g. `mesh -> 1.2.3.4`) or end with one under a label prefix; every dot-separated piece must be a valid RFC 1035 label, and at least one of `ipv4` / `ipv6` is required. The active set can be widened or narrowed at runtime with `muti-metroo host suffix add|remove|list` -- mutations are journalled and survive restart.
+Mutiauk receives the active suffix list from the agent over the SOCKS5 route-watch stream whenever it changes, so operators do not configure suffixes on the Mutiauk side; they only need `autoroutes.enabled: true` in the Mutiauk config (autoroutes is off by default). Each `name` must either equal an active suffix (e.g. `mesh -> 1.2.3.4`) or end with one under a label prefix; every dot-separated piece must be a valid RFC 1035 label, and at least one of `ipv4` / `ipv6` is required. The active set can be widened or narrowed at runtime with `muti-metroo host suffix add|remove|list` -- mutations are journalled and survive restart.
 
 ### CLI
 

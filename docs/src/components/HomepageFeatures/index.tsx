@@ -50,15 +50,15 @@ const FeatureList: FeatureItem[] = [
     ),
   },
   {
-    title: 'SOCKS5 and TUN Interface',
+    title: 'TUN Access from Your Workstation',
     image: '/img/mole-escalator.png',
     imageAlt: 'Mole on escalator',
-    link: '/features/socks5-proxy',
+    link: '/mutiauk',
     description: (
       <>
-        SOCKS proxy for application-level integration, or a TUN interface via
-        the Mutiauk companion tool for transparent routing without per-app
-        configuration.
+        Mutiauk puts the mesh's routes on a TUN interface, so ssh, curl, and
+        browsers reach mesh networks without proxy settings. SOCKS-aware
+        applications can also use the agent's SOCKS listener directly.
       </>
     ),
   },

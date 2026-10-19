@@ -119,7 +119,9 @@ SOCKS5:       true
 Exit Handler: true
 ```
 
-## Step 5: Send traffic through the proxy
+## Step 5: Send traffic through the agent
+
+Test the agent with a SOCKS client:
 
 ```bash
 curl -x socks5h://localhost:1080 https://example.com
@@ -131,29 +133,11 @@ With `socks5h://`, curl sends the hostname to the proxy and the agent resolves i
 ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@server.example.com
 ```
 
-## Connect to an existing exit instead
+## From a test agent to a deployment
 
-On a laptop or other client that only needs to reach an exit agent someone else runs, skip the listener and the exit section and dial the exit as a peer:
+This single agent is both ingress and exit, which is convenient for a test. In a deployment, agents run on the mesh nodes, and the operator's workstation reaches the mesh through [Mutiauk](/mutiauk): a TUN interface that receives the mesh's routes from an ingress agent and forwards connections to its SOCKS5 listener, so applications need no proxy settings. [Your First Mesh](/getting-started/first-mesh) builds a two-agent mesh and connects a workstation to it with Mutiauk.
 
-```yaml
-agent:
-  data_dir: "./data"
-
-peers:
-  - id: "auto"
-    transport: quic
-    address: "exit.example.com:4433"
-
-socks5:
-  enabled: true
-  address: "127.0.0.1:1080"
-```
-
-`id: "auto"` accepts whatever agent ID the peer presents. Set it to the exit agent's 32-character ID to refuse any other agent. The peer address and port must match a listener on the exit agent. See [Peers](/configuration/peers) for TLS options.
-
-## Route all traffic without proxy settings
-
-[Mutiauk](/mutiauk) creates a TUN interface and forwards IP traffic into this agent's SOCKS5 proxy, so applications reach the mesh without any proxy configuration. It runs on Linux, macOS, and Windows and requires root or Administrator. The Mutiauk guide covers installation and configuration.
+Do not point Mutiauk at an exit agent on the same host for networks that the agent itself dials: the agent's own connections to those networks would follow the TUN routes back into Mutiauk.
 
 ## Troubleshooting
 
@@ -174,6 +158,7 @@ See [Common Issues](/troubleshooting/common-issues) for more.
 
 - [Your First Mesh](/getting-started/first-mesh): connect an ingress agent to a remote exit agent
 - [Configuration Overview](/configuration/overview): every configuration section and its defaults
+- [Mutiauk](/mutiauk): the TUN interface for the operator's workstation
 - [SOCKS5 Proxy](/features/socks5-proxy): authentication, UDP, and client examples
 - [Exit Routing](/features/exit-routing): CIDR and domain routes, and where DNS is resolved
 - [`run` command](/cli/run): flags for running the agent

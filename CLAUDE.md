@@ -18,7 +18,7 @@ Muti Metroo is a userspace mesh networking agent written in Go that builds VPN-l
 - Multi-hop path routing via flood-based route propagation
 - Stream multiplexing with half-close support
 
-Muti Metroo is part of a three-component suite: **Muti Metroo** (mesh agent), **Mutiauk** (TUN interface), and **Muti Metroo Manager** (web dashboard). Each is a standalone binary that can be used independently.
+Muti Metroo is part of a three-component suite: **Muti Metroo** (mesh agent), **Mutiauk** (TUN interface), and **Muti Metroo Manager** (web dashboard). Present them as one suite, not separate products: agents run on the mesh nodes (relays, gateways, transit, exits; the SOCKS5 ingress is usually a mesh node such as a public relay), while the operator's workstation runs Mutiauk (the primary entry point, forwarding TUN traffic into an ingress agent's SOCKS5 listener and receiving routes/mesh DNS over it) and Muti Metroo Manager. Pointing SOCKS-aware applications directly at the SOCKS5 listener is the secondary path (quick tests, single apps, no root, domain routes).
 
 ## Related Projects
 

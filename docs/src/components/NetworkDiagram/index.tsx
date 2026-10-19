@@ -4,12 +4,9 @@ import styles from './styles.module.css';
 
 const diagramDefinition = `
 flowchart LR
-    subgraph client["Client Application"]
-        C[("10.1.2.3")]
-    end
-
-    subgraph tun["Mutiauk TUN"]
-        T["Transparent<br/>Interception"]
+    subgraph ws["Operator Workstation"]
+        C[("ssh, curl,<br/>browser")]
+        T["Mutiauk TUN"]
     end
 
     subgraph ingress["Ingress Agent"]
@@ -29,8 +26,8 @@ flowchart LR
         D[("example.com")]
     end
 
-    C -->|"Traffic"| T
-    T -->|"Forward"| S
+    C -->|"10.1.2.3"| T
+    T -->|"SOCKS5"| S
     S -->|"Encrypted<br/>Stream"| TR1
     TR1 -->|"Relay"| TR2
     TR2 -->|"Relay"| E

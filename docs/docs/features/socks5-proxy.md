@@ -1,6 +1,6 @@
 ---
 title: SOCKS Proxy
-description: Route TCP applications such as curl, SSH, browsers, and Git through the mesh using the agent's SOCKS4, SOCKS4a, and SOCKS5 listener.
+description: The agent's SOCKS4, SOCKS4a, and SOCKS5 listener, where Mutiauk and SOCKS-aware applications such as curl, SSH, and browsers send traffic into the mesh.
 sidebar_position: 1
 ---
 
@@ -10,12 +10,19 @@ sidebar_position: 1
 
 # SOCKS Proxy
 
-The SOCKS listener is the main way applications send traffic into the mesh. Any TCP client that can use a SOCKS proxy (curl, SSH, browsers, database clients, Git) connects to the ingress agent's listener, and the agent carries the connection through the mesh to an exit agent that opens the real TCP connection. The listener accepts SOCKS4, SOCKS4a, and SOCKS5, detected per connection.
+The SOCKS listener is where traffic enters the mesh. A client connects to the ingress agent's listener, and the agent carries the connection through the mesh to an exit agent that opens the real TCP connection. The listener accepts SOCKS4, SOCKS4a, and SOCKS5, detected per connection.
+
+Two kinds of client use it:
+
+- **[Mutiauk](/mutiauk)** on the operator's workstation. This is the usual way in: Mutiauk captures traffic on a TUN interface and carries its TCP connections, UDP datagrams, and pings over SOCKS5, so applications on the workstation need no proxy settings. Over the same listener, the agent pushes the mesh's routes and hostnames to Mutiauk.
+- **SOCKS-aware applications** connecting directly, such as curl, SSH through `nc`, browsers, and proxychains. Use them to test a mesh, to send a single application through it, on machines where you cannot run Mutiauk as root or Administrator, or for names that only a [domain route](/features/exit-routing#route-types) can reach.
 
 ```bash
 curl -x socks5h://localhost:1080 https://internal.example.com
 ssh -o ProxyCommand='nc -x localhost:1080 %h %p' user@192.168.1.20
 ```
+
+The examples on this page connect to `localhost:1080`. When the listener runs on another host, use that host's address and the SOCKS credentials.
 
 Enable the listener in the `socks5` section of the agent configuration. Bind address, authentication, connection limits, and the optional WebSocket transport are described in [SOCKS5 Configuration](/configuration/socks5).
 
@@ -32,6 +39,8 @@ When a client connects, the ingress agent picks a path for the destination:
 Step 4 means a SOCKS client can reach anything the ingress host itself can reach, not only the networks advertised by exits. Bind the listener to `127.0.0.1` or enable authentication, and use `muti-metroo route trace <destination>` to check whether a destination goes through the mesh.
 :::
 
+Mutiauk sends only IP addresses, because the workstation has already resolved the name before the traffic reaches the TUN interface. Domain routes therefore apply only to SOCKS clients that send hostnames. Mesh hostnames still work with Mutiauk: its own [mesh DNS](/mutiauk#mesh-dns) resolver answers them on the workstation.
+
 ### socks5 versus socks5h
 
 With `socks5://`, curl resolves the hostname on your machine and sends only an IP to the proxy, so domain routes and mesh hostnames never apply. With `socks5h://`, curl sends the hostname to the agent, which applies the order above. Use `socks5h://` (or SOCKS4a) for internal names that your machine cannot resolve.
@@ -41,6 +50,8 @@ curl -x socks5h://localhost:1080 https://internal.example.com
 ```
 
 ## Client examples
+
+These examples connect SOCKS-aware applications directly to the listener. To route a whole workstation instead, see [Mutiauk](/mutiauk).
 
 ### curl
 
@@ -124,10 +135,6 @@ proxychains4 curl https://example.com
 proxychains4 ssh admin@192.168.1.20
 ```
 
-### Applications without SOCKS support
-
-[Mutiauk](/mutiauk) creates a TUN interface that sends traffic for selected routes to the SOCKS listener, so applications need no proxy settings. It runs on Linux, macOS, and Windows and requires administrator privileges.
-
 ## UDP and ICMP
 
 SOCKS5 UDP ASSOCIATE carries UDP datagrams (DNS, NTP) through the same listener; see [UDP Relay](/features/udp-relay). Ping uses a separate path; see [ICMP Relay](/features/icmp-relay).
@@ -196,5 +203,5 @@ curl tried to resolve the name locally because the proxy URL used `socks5://`. U
 - [Exit Routing](/features/exit-routing): make destinations reachable through an exit agent
 - [Mesh Hostnames](/features/mesh-hostnames): give in-mesh IPs names that SOCKS clients can use
 - [UDP Relay](/features/udp-relay): send UDP traffic through the SOCKS5 listener
-- [Mutiauk](/mutiauk): transparent proxying for applications without SOCKS support
+- [Mutiauk](/mutiauk): the TUN interface that operators use to reach the mesh through this listener
 - [Common Issues](/troubleshooting/common-issues): broader troubleshooting

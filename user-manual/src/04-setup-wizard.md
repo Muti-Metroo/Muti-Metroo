@@ -24,7 +24,7 @@ Choose one or more roles for your agent:
 
 | Role        | Description                               |
 | ----------- | ----------------------------------------- |
-| **Ingress** | SOCKS5 proxy for client connections       |
+| **Ingress** | SOCKS5 listener that Mutiauk and SOCKS clients connect to |
 | **Transit** | Relay traffic between peers               |
 | **Exit**    | Open connections to external destinations |
 
@@ -65,6 +65,8 @@ If ingress role is selected:
 
 - **Listen address**: Where to accept SOCKS5 connections
 - **Authentication**: Enable/disable, add username and password
+
+The wizard does not prompt for the SOCKS5 WebSocket listener. To let Mutiauk on a remote workstation connect over TLS, add the `socks5.websocket` block to the generated config (Chapter 9).
 
 ### Step 7: Exit Configuration (Exit Role)
 
@@ -362,7 +364,7 @@ curl http://localhost:8080/health
 curl http://localhost:8080/healthz | jq
 
 # Test SOCKS5 (if exit is enabled)
-curl -x socks5://localhost:1080 https://example.com
+curl -x socks5h://localhost:1080 https://example.com
 ```
 
 ## Re-running the Wizard

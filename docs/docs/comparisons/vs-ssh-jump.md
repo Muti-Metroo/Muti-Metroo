@@ -20,7 +20,7 @@ SSH jump hosts (`ProxyJump`, `ssh -J`) and Muti Metroo both let you reach hosts 
 | **Privileges on each hop** | An account on the host; installing `sshd` needs administrator rights | None; the agent runs as an unprivileged user |
 | **Topology** | A linear chain, given per connection | Any topology; routes propagate automatically |
 | **Traffic types** | TCP (port forwards, `ssh -D` SOCKS proxy) | TCP and UDP through the SOCKS5 proxy; ICMP echo through `muti-metroo ping` |
-| **Application access** | SSH-aware tools, explicit port forwards, or a SOCKS proxy | A SOCKS proxy, port forwards, or all traffic through [Mutiauk](/mutiauk) (which needs root or Administrator) |
+| **Application access** | SSH-aware tools, explicit port forwards, or a SOCKS proxy | All traffic from the workstation through [Mutiauk](/mutiauk) (which needs root or Administrator), a SOCKS proxy, or port forwards |
 | **Authentication** | SSH keys or passwords, per hop and per user | TLS between agents (CA verification and mutual TLS optional), agent ID pinning, optional SOCKS username/password |
 | **Encryption** | SSH session encryption | TLS 1.3 on every peer link, plus end-to-end encryption between ingress and exit |
 | **Transports** | SSH over TCP, any port; through HTTP proxies with `ProxyCommand` | QUIC, HTTP/2, or WebSocket; WebSocket through HTTP proxies |

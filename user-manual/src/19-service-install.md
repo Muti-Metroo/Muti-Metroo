@@ -341,7 +341,7 @@ muti-metroo service uninstall
 
 ## Windows: Quick Background Start (--detach)
 
-If you only need the agent to keep running after an SSH session ends — without installing a service or requiring any special tools — use the `--detach` flag:
+If you only need the agent to keep running after an SSH session ends, without installing a service or requiring any special tools, use the `--detach` flag:
 
 ```cmd
 muti-metroo.exe run --detach -c config.yaml
@@ -357,7 +357,7 @@ tasklist | findstr muti-metroo
 taskkill /im muti-metroo.exe /f
 ```
 
-This approach requires no admin rights, no DLL, no Task Scheduler, and no Registry changes. It works even on machines where those tools are blocked. The trade-off is that the agent does not survive a reboot — use the Registry Run or Windows Service methods for persistence across reboots.
+This approach requires no admin rights, no DLL, no Task Scheduler, and no Registry changes. It works even on machines where those tools are blocked. The trade-off is that the agent does not survive a reboot. Use the Registry Run or Windows Service methods for persistence across reboots.
 
 Because the detached process has no console, log output is discarded. Verify the agent started by polling the HTTP health endpoint (`curl http://127.0.0.1:8080/health`) or checking `muti-metroo status`.
 

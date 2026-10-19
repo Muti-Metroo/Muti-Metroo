@@ -150,7 +150,9 @@ ssh -o ProxyCommand='ncat --proxy localhost:1080 --proxy-type socks5 --proxy-aut
 - Usernames are case-sensitive.
 - SOCKS4 and SOCKS4a clients are refused when authentication is enabled, because those protocols carry no password.
 - Failed logins are not logged.
-- The same credentials gate UDP relay and Mutiauk's `expose` registrations, which both start on the SOCKS listener.
+- The same credentials gate UDP relay, and Mutiauk's traffic, autoroutes stream, and `expose` registrations, which all start on the SOCKS listener.
+
+Mutiauk sends the credentials from `socks5.username` and `socks5.password` in its config, or the password from the `MUTIAUK_SOCKS5_PASSWORD` environment variable. Over the WebSocket listener it sends them as HTTP Basic credentials on the upgrade as well. Plain SOCKS5 sends the password unencrypted, so use the WebSocket listener with TLS across untrusted networks. See [Mutiauk](/mutiauk#config-socks5).
 
 See [SOCKS5 Configuration](/configuration/socks5#authentication) for all options.
 
