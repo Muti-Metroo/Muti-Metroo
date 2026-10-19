@@ -141,10 +141,21 @@ jobs:
           # Remove the generated header file (not needed for distribution)
           Remove-Item -Force "${BINARY_NAME}.h" -ErrorAction SilentlyContinue
 
+      # UPX comes from its pinned GitHub release rather than Chocolatey: a
+      # Chocolatey feed outage makes `choco install` exit 0 without
+      # installing anything, which left the release without its DLL.
       - name: Install UPX
         shell: pwsh
+        env:
+          UPX_VERSION: "5.2.1"
+          UPX_SHA256: "eabc6792a347d45e945be7748423e7868fd01b0d2bcaa2f4b1031fd71ff69bda"
         run: |
-          choco install upx -y
+          $zip = Join-Path $env:RUNNER_TEMP "upx.zip"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v$env:UPX_VERSION/upx-$env:UPX_VERSION-win64.zip" -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($hash -ne $env:UPX_SHA256) { throw "UPX checksum mismatch: $hash" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\upx-$env:UPX_VERSION-win64" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Compress DLL with UPX
         shell: pwsh
