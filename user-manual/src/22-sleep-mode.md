@@ -154,7 +154,7 @@ The agent will:
 3. Remain idle until explicitly woken
 
 Because step 2 fires before peers connect, an agent with `auto_sleep_on_start: true`
-will never establish outbound peer sessions on its own -- it relies on the
+will never establish outbound peer sessions on its own. It relies on the
 deterministic poll windows or an inbound wake command to attach to the mesh.
 
 ## HTTP API
@@ -175,7 +175,7 @@ curl http://localhost:8080/sleep/status
 ## Scheduled Sleep
 
 Use cron to schedule sleep/wake cycles. The `curl` form below works directly
-against the HTTP API; if you prefer the CLI, remember to pass `--yes` -- a
+against the HTTP API; if you prefer the CLI, remember to pass `--yes`, because a
 bare `muti-metroo sleep` in cron has no TTY and will refuse with exit code 6.
 
 ```bash

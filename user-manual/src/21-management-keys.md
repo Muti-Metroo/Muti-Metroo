@@ -147,10 +147,10 @@ Response includes full decrypted topology:
 
 When `public_key` is configured but `private_key` is not, the agent forwards encrypted topology blobs through the mesh but refuses to relay queries it cannot decrypt. The following endpoints are restricted to local-only data on such agents and reject remote fan-out (HTTP 403):
 
-- `/api/topology`, `/api/dashboard`, `/api/nodes` -- already shown above
+- `/api/topology`, `/api/dashboard`, `/api/nodes`: already shown above
 - `/agents/{id}` and every `/agents/{id}/...` sub-path (peers, routes, shell, file, probe, etc.)
-- `/api/mesh-test` -- runs only against local peers
-- `/route/trace` and `/agents/{id}/route/trace` -- traces only the local routing table
+- `/api/mesh-test`: runs only against local peers
+- `/route/trace` and `/agents/{id}/route/trace`: traces only the local routing table
 
 This protects the integrity of the compartmentalization: an operator who cannot decrypt topology cannot use a field agent as a relay to learn about it either. To enable full mesh visibility on a node, give it both keys.
 
@@ -238,13 +238,13 @@ Separate from topology encryption, signing keys authenticate **every privileged 
 
 - **Management commands** (`muti-metroo shell ...`)
 - **File transfer** (`muti-metroo upload`, `muti-metroo download`, file browse)
-- **Dynamic config mutations** -- routes, peers, forward listeners, forward endpoints, transport listeners, hosts, and display name (every `add`, `remove`, and `set_comment` action exposed by `muti-metroo route`, `muti-metroo peer`, `muti-metroo forward`, `muti-metroo listener`, `muti-metroo host`, and `muti-metroo display-name`)
+- **Dynamic config mutations**: routes, peers, forward listeners, forward endpoints, transport listeners, hosts, and display name (every `add`, `remove`, and `set_comment` action exposed by `muti-metroo route`, `muti-metroo peer`, `muti-metroo forward`, `muti-metroo listener`, `muti-metroo host`, and `muti-metroo display-name`)
 - **Sleep / wake** (`muti-metroo sleep`, `muti-metroo wake`)
 - **Agent shutdown** (`muti-metroo stop`)
 
 Each operation has its own opaque op tag bound into the signed envelope, so a captured signature for one operation cannot be replayed as another. Mutation envelopes additionally bind the body hash, so `add X` cannot be replayed as `remove Y`. Signatures expire after a 5-minute timestamp window.
 
-There is no separate per-feature password for any of these operations. Agents configured with the public key reject unsigned, expired, or incorrectly signed requests; agents without the private key cannot issue them; agents without either cannot use these features at all. (Sleep and wake have a narrow backward-compatibility carve-out -- see [Backward Compatibility](#backward-compatibility) below.)
+There is no separate per-feature password for any of these operations. Agents configured with the public key reject unsigned, expired, or incorrectly signed requests; agents without the private key cannot issue them; agents without either cannot use these features at all. (Sleep and wake have a narrow backward-compatibility carve-out; see [Backward Compatibility](#backward-compatibility) below.)
 
 ### Purpose
 
@@ -333,13 +333,13 @@ management:
 
 ### Backward Compatibility
 
-Agents without `signing_public_key` configured fall through to legacy unsigned acceptance for sleep/wake. Every other privileged operation -- management commands, file transfer, dynamic mutations -- requires the public key on the target and rejects requests without it. For full protection, deploy the public key to every agent in your mesh.
+Agents without `signing_public_key` configured fall through to legacy unsigned acceptance for sleep/wake. Every other privileged operation (management commands, file transfer, dynamic mutations) requires the public key on the target and rejects requests without it. For full protection, deploy the public key to every agent in your mesh.
 
 ### Capability Reporting
 
 The agent's `/healthz` endpoint reports two boolean flags so dashboards can light up management actions only on agents that support them:
 
-- `can_sign_management` -- this agent has a signing private key, so it can issue signed commands.
-- `accepts_signed_management` -- this agent has a signing public key, so it can verify and execute signed commands.
+- `can_sign_management`: this agent has a signing private key, so it can issue signed commands.
+- `accepts_signed_management`: this agent has a signing public key, so it can verify and execute signed commands.
 
 Muti Metroo Manager reads these flags and hides management actions on agents where they would always 403.

@@ -154,7 +154,7 @@ Probed shells by platform:
 - **Linux/macOS**: bash, sh, zsh, fish, ash, dash, ksh
 - **Windows**: powershell.exe, pwsh.exe, cmd.exe
 
-Shell detection is separate from the command whitelist. A detected shell only reports what is installed -- the whitelist controls what is allowed to execute.
+Shell detection is separate from the command whitelist. A detected shell only reports what is installed; the whitelist controls what is allowed to execute.
 
 ### Windows PowerShell
 
@@ -238,4 +238,4 @@ muti-metroo shell --tty abc123 vim
 
 ### Piped Command Hangs
 
-If a remote command that consumes stdin hangs despite your pipe closing, make sure both the gateway and the target agent are on Muti Metroo v4.0.0 or later -- stdin EOF propagation was added in that release. Older servers silently drop the stdin-close message.
+If a remote command that consumes stdin hangs despite your pipe closing, make sure both the gateway and the target agent are on Muti Metroo v4.0.0 or later, because stdin EOF propagation was added in that release. Older servers silently drop the stdin-close message.

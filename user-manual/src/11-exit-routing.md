@@ -68,19 +68,19 @@ exit:
 
 How the binding is applied depends on the source IP and the platform:
 
-- **No `source_ip`, or a `source_ip` already assigned to the interface** -- the
+- **No `source_ip`, or a `source_ip` already assigned to the interface**: the
   exit binds the dial to an address on that interface
   (`net.Dialer.LocalAddr`). This is portable and unprivileged: it works on
   Linux, macOS, and Windows without root. The source _address_ is set; the
   egress device then follows the host routing table.
-- **A `source_ip` that is _not_ assigned to the interface** -- e.g. a
+- **A `source_ip` that is _not_ assigned to the interface**: e.g. a
   floating/anycast address that lives on loopback while packets must leave via
   `ens192`. This requires
   `SO_BINDTODEVICE` + `IP_FREEBIND` and is therefore **Linux + root only**. On
   macOS/Windows, or on Linux as a non-root user, an off-interface `source_ip`
   paired with `interface:` is rejected with a clear error.
 
-Like `source_ip`, `interface` is **local-only** -- it is never advertised to
+Like `source_ip`, `interface` is **local-only**; it is never advertised to
 other agents. The same field is accepted on `POST /routes/manage` and as
 `--interface` on `muti-metroo route add`; the dedicated `muti-metroo route interface <cidr>
 <name>` action sets or clears it on a config-seeded or dynamic route at runtime
@@ -161,8 +161,8 @@ This is useful after configuration changes to speed up route propagation.
 The exit node's DNS resolver has two modes:
 
 1. **System resolver (default, `dns.servers: []`).** Uses the host's stub
-   resolver -- `/etc/resolv.conf` on Linux, `scutil` / `mDNSResponder` on
-   macOS, `Dnsapi.dll` on Windows. This automatically handles split-horizon
+   resolver (`/etc/resolv.conf` on Linux, `scutil` / `mDNSResponder` on
+   macOS, `Dnsapi.dll` on Windows). This automatically handles split-horizon
    DNS, `.local` / mDNS, search domains, and any internal resolvers the
    host operator has already configured. This is the recommended setting
    for hospital, spacecraft, and compliance-bound deployments.
@@ -208,7 +208,7 @@ Connections to other IPs will be rejected with "no route to host".
 ### Internet Gateway
 
 Route all traffic to the internet. The exit uses the host's system resolver
-by default -- only add an explicit `dns:` block if you need to force
+by default. Only add an explicit `dns:` block if you need to force
 particular upstreams, and never paste public DNS (`8.8.8.8`, `1.1.1.1`)
 into a compliance-bound deployment (see warning above).
 
@@ -296,7 +296,7 @@ mesh_hosts:
     comment: "edge worker"
 ```
 
-Mutiauk receives the active suffix list from the agent over the SOCKS5 route-watch stream whenever it changes, so operators do not configure suffixes on the Mutiauk side; they only need `autoroutes.enabled: true` in the Mutiauk config (autoroutes is off by default). Each `name` must either equal an active suffix (e.g. `mesh -> 1.2.3.4`) or end with one under a label prefix; every dot-separated piece must be a valid RFC 1035 label, and at least one of `ipv4` / `ipv6` is required. The active set can be widened or narrowed at runtime with `muti-metroo host suffix add|remove|list` -- mutations are journalled and survive restart.
+Mutiauk receives the active suffix list from the agent over the SOCKS5 route-watch stream whenever it changes, so operators do not configure suffixes on the Mutiauk side; they only need `autoroutes.enabled: true` in the Mutiauk config (autoroutes is off by default). Each `name` must either equal an active suffix (e.g. `mesh -> 1.2.3.4`) or end with one under a label prefix; every dot-separated piece must be a valid RFC 1035 label, and at least one of `ipv4` / `ipv6` is required. The active set can be widened or narrowed at runtime with `muti-metroo host suffix add|remove|list`; mutations are journalled and survive restart.
 
 ### CLI
 
@@ -395,7 +395,7 @@ curl -X POST http://localhost:8080/routes/manage \
 
 ### Signing Key Authorization
 
-Route mutations (`add`, `remove`, `set_comment`) are authenticated using the mesh management **signing key** (Ed25519, configured under `management.signing_public_key` / `signing_private_key`). The same key authorizes every privileged operation in the mesh -- management commands, file transfer, all dynamic mutations, and sleep/wake.
+Route mutations (`add`, `remove`, `set_comment`) are authenticated using the mesh management **signing key** (Ed25519, configured under `management.signing_public_key` / `signing_private_key`). The same key authorizes every privileged operation in the mesh: management commands, file transfer, all dynamic mutations, and sleep/wake.
 
 - Agents configured with `signing_public_key` reject unsigned or incorrectly signed mutations (HTTP 403).
 - Operator nodes need the matching `signing_private_key` to issue mutations; the local API also gates on this and refuses to forward an unsigned request to a remote agent.

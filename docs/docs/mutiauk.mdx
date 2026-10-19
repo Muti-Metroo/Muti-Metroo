@@ -4,6 +4,9 @@ title: Mutiauk TUN Interface
 description: Install, configure, and operate Mutiauk, the operator's TUN interface into a Muti Metroo mesh, which sends IP traffic for the mesh's networks through an ingress agent's SOCKS5 listener without per-application proxy settings.
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 export const DownloadButton = ({ href, children, primary }) => (
   <a
     href={href}
@@ -47,7 +50,7 @@ The agents run on the mesh nodes; the ingress agent is usually a relay or gatewa
 | Traffic          | How Mutiauk forwards it                                                            |
 | ---------------- | ---------------------------------------------------------------------------------- |
 | TCP              | One SOCKS5 CONNECT per connection                                                  |
-| UDP              | SOCKS5 UDP ASSOCIATE (see [UDP Relay](/features/udp-relay))                        |
+| UDP              | Datagrams framed on the SOCKS5 connection (UDP STREAM), or SOCKS5 UDP ASSOCIATE with agents that do not support it (see [UDP Relay](/features/udp-relay#udp-over-the-socks-connection)) |
 | ICMP echo (ping) | Muti Metroo SOCKS5 extension; needs an ICMP-capable exit (see [ICMP echo](#icmp-echo)) |
 
 Besides traffic forwarding, Mutiauk can receive routes and mesh hostnames from the agent ([autoroutes](#autoroutes)), answer DNS queries for mesh hostnames ([mesh DNS](#mesh-dns)), and publish local folders or TCP services to the mesh ([expose](#expose-publishing-local-services)).
@@ -66,24 +69,50 @@ On macOS, `tun.name` values `tun0` and `utun` let the kernel pick the next free 
 
 ## Download
 
-Release builds are published for Linux:
+Release builds are published for Linux, macOS, and Windows on amd64 and arm64:
+
+<Tabs groupId="mutiauk-os">
+  <TabItem value="macos" label="macOS" default>
 
 <DownloadButtonGroup>
-  <DownloadButton
-    href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64"
-    primary
-  >
-    Download for Linux (amd64)
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-darwin-arm64" primary>
+    Apple Silicon
+  </DownloadButton>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-darwin-amd64">
+    Intel
   </DownloadButton>
 </DownloadButtonGroup>
 
+  </TabItem>
+  <TabItem value="linux" label="Linux">
+
 <DownloadButtonGroup>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64" primary>
+    x86_64 (amd64)
+  </DownloadButton>
   <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-arm64">
-    Download for Linux (arm64)
+    ARM64
   </DownloadButton>
 </DownloadButtonGroup>
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+<DownloadButtonGroup>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-windows-amd64.exe" primary>
+    x86_64 (amd64)
+  </DownloadButton>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-windows-arm64.exe">
+    ARM64
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+</Tabs>
 
 Each release also carries `checksums.txt` with SHA-256 sums of the binaries.
+
+On Linux and macOS, install the binary in your `PATH`:
 
 ```bash
 curl -L -o mutiauk https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64
@@ -91,21 +120,20 @@ chmod +x mutiauk
 sudo mv mutiauk /usr/local/bin/
 ```
 
-The releases do not include macOS or Windows binaries. Build them from source with Go and `make`:
+Replace `mutiauk-linux-amd64` with `mutiauk-darwin-arm64` (Apple Silicon) or `mutiauk-darwin-amd64` (Intel) on macOS. The macOS binaries are not signed; a file downloaded with a web browser is quarantined, so remove the attribute with `sudo xattr -d com.apple.quarantine /usr/local/bin/mutiauk`. On Windows, save `mutiauk-windows-amd64.exe` (or the arm64 build) as `mutiauk.exe` in a directory in `PATH`; the Wintun driver is embedded in the executable.
+
+To build from source, use Go and `make`:
 
 ```bash
 git clone https://github.com/Muti-Metroo/Mutiauk.git
 cd Mutiauk
-make build-darwin          # bin/mutiauk-darwin-arm64
-make build-darwin-amd64    # bin/mutiauk-darwin-amd64
-make build-windows         # bin/mutiauk-windows-amd64.exe
-make build-windows-arm64   # bin/mutiauk-windows-arm64.exe
+make build-all             # every platform, in bin/
 ```
 
 ## Quick start
 
 1. Make sure an ingress agent that this workstation can reach has its SOCKS5 listener enabled, on an address the workstation can connect to and with authentication turned on. See [SOCKS5 Configuration](/configuration/socks5), and [Connecting the workstation to a remote ingress](/suite-overview#connecting-the-workstation-to-a-remote-ingress) for securing the connection.
-2. Run the setup wizard. Enter the agent's SOCKS5 address (the default `127.0.0.1:1080` fits only an agent on the same host) and credentials, and accept or change the other defaults:
+2. Run the setup wizard. Enter the agent's SOCKS5 endpoint, either `host:port` or a `wss://` URL (the default `127.0.0.1:1080` fits only an agent on the same host), and credentials, and accept or change the other defaults:
 
    ```bash
    sudo mutiauk setup
@@ -133,7 +161,7 @@ The wizard covers, in order:
 
 1. **Configuration file**: the path to write (default per [platform](#platform-support)). It offers to create the directory and asks before overwriting an existing file.
 2. **TUN interface**: name (`tun0`), MTU (`1400`), IPv4 address (`10.200.200.1/24`), optional IPv6 address.
-3. **SOCKS5 proxy**: server address (`127.0.0.1:1080`) and optional username and password.
+3. **SOCKS5 proxy**: the agent's SOCKS5 endpoint, as `host:port` (default `127.0.0.1:1080`) or a `ws://` / `wss://` URL for the [WebSocket transport](#websocket-transport), and an optional username and password. For a plain `host:port` that is not a loopback address, the wizard notes that the connection is unencrypted. When you edit an existing config, `transport`, `ws_path`, `timeout`, and `keepalive` are kept.
 4. **Automatic routes**: whether to enable [autoroutes](#autoroutes) (default yes).
 5. **Routes**: asked only when autoroutes is off. Offers `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, then custom routes with comments.
 6. **Service installation**: installs and starts the system service when run as root or Administrator; otherwise prints the `service install` command to run later.
@@ -145,7 +173,7 @@ Example session (non-root, defaults accepted):
 ======================================================================
                          Mutiauk Setup Wizard
 ======================================================================
-                     TUN-based SOCKS5 Proxy Agent
+                    TUN interface for Muti Metroo
 
 This wizard will help you configure Mutiauk.
 Press Enter to accept default values shown in [brackets].
@@ -174,7 +202,7 @@ SOCKS5 Proxy
 ----------------------------------------------------------------------
 Configure the upstream SOCKS5 proxy server.
 
-SOCKS5 server address [127.0.0.1:1080]:
+SOCKS5 server (host:port, or wss://host:port/path) [127.0.0.1:1080]:
 Does the SOCKS5 server require authentication? [y/N]:
 
 ----------------------------------------------------------------------
@@ -197,9 +225,10 @@ Configuration Summary
   TUN address:     10.200.200.1/24
   MTU:             1400
   SOCKS5 server:   127.0.0.1:1080
+  Transport:       plain SOCKS5 over TCP (unencrypted)
   Autoroutes:      enabled (routes received over the SOCKS5 endpoint)
   Mesh DNS:        follows autoroutes; suffixes come from the agent.
-                   systemd-resolved is configured automatically on each poll.
+                   host DNS is updated automatically on each agent snapshot.
 
 To start Mutiauk manually:
   sudo mutiauk daemon start -c /etc/mutiauk/config.yaml
@@ -618,6 +647,8 @@ socks5:
 ```
 
 When the agent requires authentication, Mutiauk sends `socks5.username` and `socks5.password` twice: as HTTP Basic credentials on the WebSocket upgrade, and again in the SOCKS5 username/password handshake.
+
+TCP, UDP, ping, autoroutes, and expose all travel inside the WebSocket connection. UDP uses [UDP STREAM](/features/udp-relay#udp-over-the-socks-connection); with an agent that does not support it, Mutiauk falls back to UDP ASSOCIATE, which sends datagrams to a separate UDP socket on the agent and does not work when only the WebSocket port is reachable.
 
 ## ICMP echo
 

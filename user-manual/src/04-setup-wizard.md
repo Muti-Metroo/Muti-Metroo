@@ -136,9 +136,9 @@ When you choose to embed config, the wizard **automatically** embeds the identit
 - `agent.private_key` is set to the generated X25519 private key
 - `agent.data_dir` is cleared (not needed)
 
-The resulting binary can run without any external files -- true single-file deployment.
+The resulting binary can run without any external files, which makes it a true single-file deployment.
 
-When editing a target binary (`setup -c /path/to/binary`), the delivery step is skipped -- config is always embedded back into the target binary.
+When editing a target binary (`setup -c /path/to/binary`), the delivery step is skipped: config is always embedded back into the target binary.
 
 ### Service Installation (Optional)
 

@@ -5,10 +5,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 )
+
+// MaxStreamDatagramFrame is the largest UDP STREAM frame body (RFC 1928 UDP
+// header plus payload), bounded by the 2-byte length prefix.
+const MaxStreamDatagramFrame = 0xFFFF
 
 var (
 	// ErrFragmentedDatagram is returned when a fragmented UDP datagram is received.
@@ -50,8 +55,14 @@ type UDPAssociation struct {
 	// TCP control connection (lifetime tied to association)
 	TCPConn net.Conn
 
-	// Local UDP relay socket
+	// Local UDP relay socket (nil in stream mode)
 	UDPConn *net.UDPConn
+
+	// Stream mode (UDP STREAM): datagrams are length-prefixed frames on
+	// TCPConn instead of packets on UDPConn. streamWriteMu serializes
+	// frame writes.
+	stream        bool
+	streamWriteMu sync.Mutex
 
 	// Expected client address (from UDP ASSOCIATE request)
 	ExpectedClientAddr *net.UDPAddr
@@ -102,6 +113,19 @@ func NewUDPAssociation(tcpConn net.Conn, handler UDPAssociationHandler, bindIP n
 	}, nil
 }
 
+// NewStreamUDPAssociation creates a UDP association whose datagrams are
+// framed on conn (UDP STREAM) instead of a separate UDP relay socket.
+func NewStreamUDPAssociation(conn net.Conn, handler UDPAssociationHandler) *UDPAssociation {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &UDPAssociation{
+		TCPConn: conn,
+		Handler: handler,
+		stream:  true,
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+}
+
 // LocalAddr returns the local address of the UDP relay socket.
 func (a *UDPAssociation) LocalAddr() *net.UDPAddr {
 	return a.UDPConn.LocalAddr().(*net.UDPAddr)
@@ -139,6 +163,12 @@ func (a *UDPAssociation) Close() error {
 	// Close UDP socket
 	if a.UDPConn != nil {
 		a.UDPConn.Close()
+	}
+
+	// In stream mode the client connection carries the datagrams, so closing
+	// it is what tells the client the association is gone.
+	if a.stream && a.TCPConn != nil {
+		a.TCPConn.Close()
 	}
 
 	// Notify handler
@@ -223,11 +253,64 @@ func (a *UDPAssociation) ReadLoop() {
 	}
 }
 
+// StreamReadLoop reads framed datagrams from the client connection of a
+// stream-mode association and relays them through the mesh. It returns when
+// the connection fails or a frame is malformed at the framing level.
+func (a *UDPAssociation) StreamReadLoop() {
+	var lenBuf [2]byte
+	buf := make([]byte, MaxStreamDatagramFrame)
+
+	for {
+		if _, err := io.ReadFull(a.TCPConn, lenBuf[:]); err != nil {
+			return
+		}
+		n := int(binary.BigEndian.Uint16(lenBuf[:]))
+		if _, err := io.ReadFull(a.TCPConn, buf[:n]); err != nil {
+			return
+		}
+
+		header, payload, err := ParseUDPHeader(buf[:n])
+		if err != nil {
+			// Same as the socket path: drop the datagram, keep the association.
+			continue
+		}
+
+		a.mu.RLock()
+		streamID := a.StreamID
+		handler := a.Handler
+		a.mu.RUnlock()
+
+		if handler != nil && streamID != 0 {
+			destAddr := &net.UDPAddr{IP: header.Address, Port: int(header.Port)}
+			handler.RelayUDPDatagram(streamID, destAddr, header.Port, header.AddrType, header.RawAddr, payload)
+		}
+	}
+}
+
 // WriteToClient sends a datagram back to the SOCKS5 client.
 // The data should be the raw UDP payload (will be wrapped with SOCKS5 header).
 func (a *UDPAssociation) WriteToClient(addrType byte, addr []byte, port uint16, data []byte) error {
 	if a.IsClosed() {
 		return errors.New("association closed")
+	}
+
+	// Build SOCKS5 UDP header
+	header := BuildUDPHeader(addrType, addr, port)
+
+	if a.stream {
+		size := len(header) + len(data)
+		if size > MaxStreamDatagramFrame {
+			return fmt.Errorf("datagram too large for stream frame: %d bytes", size)
+		}
+		frame := make([]byte, 2+size)
+		binary.BigEndian.PutUint16(frame, uint16(size))
+		copy(frame[2:], header)
+		copy(frame[2+len(header):], data)
+
+		a.streamWriteMu.Lock()
+		defer a.streamWriteMu.Unlock()
+		_, err := a.TCPConn.Write(frame)
+		return err
 	}
 
 	a.mu.RLock()
@@ -237,9 +320,6 @@ func (a *UDPAssociation) WriteToClient(addrType byte, addr []byte, port uint16, 
 	if clientAddr == nil {
 		return errors.New("no client address")
 	}
-
-	// Build SOCKS5 UDP header
-	header := BuildUDPHeader(addrType, addr, port)
 
 	// Combine header and data
 	packet := make([]byte, len(header)+len(data))

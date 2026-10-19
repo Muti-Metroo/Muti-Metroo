@@ -34,7 +34,7 @@ flowchart LR
 | **Multi-Hop Mesh**        | Traffic routes through the mesh to reach any exit                                       |
 | **TUN Interface**         | Mutiauk forwards IP traffic for mesh routes from the operator workstation (Linux, macOS, Windows) |
 | **Autoroutes and Mesh DNS** | Mutiauk receives CIDR routes, mesh hostnames, and DNS suffixes from the ingress agent |
-| **SOCKS Proxy**           | SOCKS4, SOCKS4a, and SOCKS5; TCP CONNECT and UDP ASSOCIATE with optional authentication |
+| **SOCKS Proxy**           | SOCKS4, SOCKS4a, and SOCKS5; TCP CONNECT, UDP ASSOCIATE, and UDP STREAM with optional authentication |
 | **Flexible Routing**      | CIDR and domain-based exit routes                                                       |
 | **Multiple Transports**   | QUIC/TLS 1.3, HTTP/2, and WebSocket for network traversal                               |
 | **Port Forwarding**       | Expose local services through reverse tunnels                                           |

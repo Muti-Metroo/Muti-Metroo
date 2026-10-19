@@ -106,7 +106,7 @@ The ingress agent connects to the destination directly from its own host. Use `m
 
 ### Which SOCKS features are supported?
 
-SOCKS5, SOCKS4, and SOCKS4a on the same listener, detected automatically. SOCKS5 supports CONNECT and UDP ASSOCIATE, IPv4, IPv6, and domain name destinations, and either no authentication or username and password. BIND is not supported. See [SOCKS5 Proxy](/features/socks5-proxy) and [UDP Relay](/features/udp-relay).
+SOCKS5, SOCKS4, and SOCKS4a on the same listener, detected automatically. SOCKS5 supports CONNECT, UDP ASSOCIATE, and the UDP STREAM extension that Mutiauk uses, IPv4, IPv6, and domain name destinations, and either no authentication or username and password. BIND is not supported. See [SOCKS5 Proxy](/features/socks5-proxy) and [UDP Relay](/features/udp-relay).
 
 ### How do I use the SOCKS listener with SSH?
 

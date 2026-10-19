@@ -2,8 +2,11 @@ package socks5
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestParseUDPHeader_IPv4(t *testing.T) {
@@ -337,5 +340,154 @@ func TestHandler_UDPAssociate_Disabled(t *testing.T) {
 	err := h.Handle(server)
 	if err != ErrUDPDisabled {
 		t.Errorf("Error = %v, want ErrUDPDisabled", err)
+	}
+}
+
+// recordingUDPHandler captures relayed datagrams and the linked association.
+type recordingUDPHandler struct {
+	mockUDPHandler
+	assocCh   chan *UDPAssociation
+	relayedCh chan []byte
+	closedCh  chan uint64
+}
+
+func newRecordingUDPHandler() *recordingUDPHandler {
+	return &recordingUDPHandler{
+		mockUDPHandler: mockUDPHandler{enabled: true},
+		assocCh:        make(chan *UDPAssociation, 1),
+		relayedCh:      make(chan []byte, 4),
+		closedCh:       make(chan uint64, 1),
+	}
+}
+
+func (r *recordingUDPHandler) SetSOCKS5UDPAssociation(streamID uint64, assoc *UDPAssociation) {
+	r.assocCh <- assoc
+}
+
+func (r *recordingUDPHandler) RelayUDPDatagram(streamID uint64, destAddr net.Addr, destPort uint16, addrType byte, rawAddr []byte, data []byte) error {
+	r.relayedCh <- append([]byte(destAddr.String()+"|"), data...)
+	return nil
+}
+
+func (r *recordingUDPHandler) CloseUDPAssociation(streamID uint64) {
+	r.closedCh <- streamID
+}
+
+// udpStreamHandshake performs the no-auth greeting and sends UDP STREAM,
+// returning the reply code.
+func udpStreamHandshake(t *testing.T, client net.Conn) byte {
+	t.Helper()
+	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatalf("write greeting: %v", err)
+	}
+	resp := make([]byte, 2)
+	if _, err := io.ReadFull(client, resp); err != nil {
+		t.Fatalf("read method: %v", err)
+	}
+	if _, err := client.Write([]byte{0x05, CmdUDPStream, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	return reply[1]
+}
+
+func TestHandler_UDPStream_RoundTrip(t *testing.T) {
+	rec := newRecordingUDPHandler()
+	h := NewHandler(nil, nil)
+	h.SetUDPHandler(rec)
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- h.Handle(server) }()
+
+	if code := udpStreamHandshake(t, client); code != ReplySucceeded {
+		t.Fatalf("reply = 0x%02x, want success", code)
+	}
+
+	// Client -> mesh: one framed datagram to 10.0.0.5:53.
+	dgram := append(BuildUDPHeader(AddrTypeIPv4, []byte{10, 0, 0, 5}, 53), []byte("hello")...)
+	frame := make([]byte, 2+len(dgram))
+	binary.BigEndian.PutUint16(frame, uint16(len(dgram)))
+	copy(frame[2:], dgram)
+	if _, err := client.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	select {
+	case got := <-rec.relayedCh:
+		if string(got) != "10.0.0.5:53|hello" {
+			t.Errorf("relayed = %q, want %q", got, "10.0.0.5:53|hello")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("datagram was not relayed")
+	}
+
+	// Mesh -> client: a response is written as a frame on the stream.
+	assoc := <-rec.assocCh
+	go assoc.WriteToClient(AddrTypeIPv4, []byte{10, 0, 0, 5}, 53, []byte("world"))
+
+	lenBuf := make([]byte, 2)
+	if _, err := io.ReadFull(client, lenBuf); err != nil {
+		t.Fatalf("read frame length: %v", err)
+	}
+	body := make([]byte, binary.BigEndian.Uint16(lenBuf))
+	if _, err := io.ReadFull(client, body); err != nil {
+		t.Fatalf("read frame body: %v", err)
+	}
+	header, payload, err := ParseUDPHeader(body)
+	if err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if !header.Address.Equal(net.IPv4(10, 0, 0, 5)) || header.Port != 53 || string(payload) != "world" {
+		t.Errorf("response = %v:%d %q", header.Address, header.Port, payload)
+	}
+
+	// Closing the client connection ends the association.
+	client.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Handle error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+	select {
+	case <-rec.closedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mesh association was not closed")
+	}
+}
+
+func TestHandler_UDPStream_Disabled(t *testing.T) {
+	h := NewHandler(nil, nil)
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- h.Handle(server) }()
+
+	if code := udpStreamHandshake(t, client); code != ReplyCmdNotSupported {
+		t.Errorf("reply = 0x%02x, want command not supported", code)
+	}
+	if err := <-done; err != ErrUDPDisabled {
+		t.Errorf("Error = %v, want ErrUDPDisabled", err)
+	}
+}
+
+func TestUDPAssociation_StreamCloseClosesConn(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+
+	assoc := NewStreamUDPAssociation(server, &mockUDPHandler{enabled: true})
+	assoc.Close()
+
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Error("client read should fail after the stream association closes")
 	}
 }

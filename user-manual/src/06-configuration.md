@@ -239,7 +239,7 @@ cat /tmp/keys/agent_id                 # paste as agent.id
 cat /tmp/keys/agent_key                # paste as agent.private_key (hex)
 ```
 
-`muti-metroo init` deliberately creates only the agent_id file -- the X25519
+`muti-metroo init` deliberately creates only the agent_id file. The X25519
 keypair (`agent_key`, `agent_key.pub`) is created lazily on the first
 `muti-metroo run` so that the on-disk format and the runtime path stay identical.
 
@@ -444,11 +444,11 @@ http:
 
 ## Dynamic Config Persistence
 
-Runtime changes made through the CLI and HTTP API -- `muti-metroo peer add`, `muti-metroo forward add`, `muti-metroo route add`, `muti-metroo display-name set`, and their `remove` counterparts -- are persisted to a journal file alongside the agent identity, so they survive restarts.
+Runtime changes made through the CLI and HTTP API (`muti-metroo peer add`, `muti-metroo forward add`, `muti-metroo route add`, `muti-metroo display-name set`, and their `remove` counterparts) are persisted to a journal file alongside the agent identity, so they survive restarts.
 
 Persistence is automatic: when `agent.data_dir` is set, every mutation is appended to `<data_dir>/dynamic-config.log` in JSON Lines format. On the next startup the agent replays the journal through the same code paths that originally handled the commands, restoring every dynamic change and preserving the config-vs-dynamic distinction (replayed entries still appear with `dynamic: true` in `list` output).
 
-When `agent.data_dir` is not configured, or the journal file cannot be written (wrong permissions, read-only filesystem, disk full), the runtime mutation still succeeds but stays ephemeral -- exactly the pre-3.4 behavior. A warning is logged so operators can diagnose the write failure.
+When `agent.data_dir` is not configured, or the journal file cannot be written (wrong permissions, read-only filesystem, disk full), the runtime mutation still succeeds but stays ephemeral, exactly the pre-3.4 behavior. A warning is logged so operators can diagnose the write failure.
 
 **What gets persisted:**
 

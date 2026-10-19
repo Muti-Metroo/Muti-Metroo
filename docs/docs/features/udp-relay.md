@@ -1,6 +1,6 @@
 ---
 title: UDP Relay
-description: Send UDP traffic such as DNS and NTP through the mesh with SOCKS5 UDP ASSOCIATE.
+description: Send UDP traffic such as DNS and NTP through the mesh with SOCKS5 UDP ASSOCIATE or the UDP STREAM extension that carries datagrams on the SOCKS connection.
 sidebar_position: 2
 ---
 
@@ -10,7 +10,7 @@ sidebar_position: 2
 
 # UDP Relay
 
-The SOCKS5 listener also relays UDP datagrams with the standard UDP ASSOCIATE command. A client opens a TCP control connection to the ingress agent, receives a local UDP relay address, and sends datagrams there. The ingress agent forwards each datagram through the mesh to the exit agent that has a route for its destination, and the exit sends it from its own host.
+The SOCKS5 listener also relays UDP datagrams, with the standard UDP ASSOCIATE command or with UDP STREAM, a Muti Metroo extension that carries the datagrams on the SOCKS connection itself. [Mutiauk](/mutiauk) uses UDP STREAM. With UDP ASSOCIATE, a client opens a TCP control connection to the ingress agent, receives a local UDP relay address, and sends datagrams there. The ingress agent forwards each datagram through the mesh to the exit agent that has a route for its destination, and the exit sends it from its own host.
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,8 @@ Datagram payloads are end-to-end encrypted between the ingress and the exit. Des
 - The ingress agent has the SOCKS5 listener enabled. See [SOCKS5 Configuration](/configuration/socks5).
 - The exit agent has UDP relay enabled. It is enabled by default; see [UDP Configuration](/configuration/udp).
 - The ingress agent has a CIDR route for each destination. Unlike TCP, UDP is never sent directly from the ingress host when no route matches.
-- The ingress agent has a route that covers `0.0.0.0` (in practice, a `0.0.0.0/0` default route somewhere in the mesh). UDP ASSOCIATE is refused without one, even if every destination you plan to use has a more specific route.
+- The route's exit is a different agent from the ingress. An agent does not relay UDP to its own exit routes, so a single agent that is both ingress and exit does not relay UDP.
+- The ingress agent has a route that covers `0.0.0.0` (in practice, a `0.0.0.0/0` default route somewhere in the mesh). UDP ASSOCIATE and UDP STREAM are refused without one, even if every destination you plan to use has a more specific route.
 
 The relay socket listens on the same IP address as the SOCKS5 TCP listener, so a listener on `127.0.0.1:1080` only accepts datagrams from the local host. The relay is IPv4.
 
@@ -79,6 +80,16 @@ ctrl.close()
 61-byte DNS response, answer count 2
 ```
 
+## UDP over the SOCKS connection
+
+UDP STREAM (SOCKS5 command `0x08`) is UDP ASSOCIATE without the separate relay socket. After the success reply, each datagram travels on the SOCKS connection in both directions as a 2-byte big-endian length followed by the same SOCKS5 UDP header and payload that UDP ASSOCIATE uses. Compared with UDP ASSOCIATE:
+
+- It works over the [WebSocket listener](/configuration/socks5#websocket-listener), and with TLS the datagrams are encrypted between the client and the ingress agent. The UDP ASSOCIATE relay socket is plain UDP, and only reachable where the client can send UDP to the ingress host.
+- No UDP port on the ingress host needs to be reachable from the client.
+- Datagrams share the connection's TCP ordering, so a lost packet on that connection delays the datagrams behind it.
+
+An agent that does not support it, or has UDP relay disabled, replies with "command not supported" (reply code 7). Mutiauk then falls back to UDP ASSOCIATE. The limits below apply to both commands, with the connection taking the place of the control connection.
+
 ## Limits
 
 | Limit | Default | Notes |
@@ -97,7 +108,7 @@ The ingress agent has no route that covers `0.0.0.0`. Run `muti-metroo route tra
 
 ### Datagrams get no reply
 
-- Run `muti-metroo route trace <destination-ip>` on the ingress agent and confirm a route exists.
+- Run `muti-metroo route trace <destination-ip>` on the ingress agent and confirm a route exists, and that its exit is another agent.
 - Confirm the exit agent has `udp.enabled: true` and has not reached `udp.max_associations`.
 - Keep the payload at or below `udp.max_datagram_size`.
 - Check that the application does not set the SOCKS5 `FRAG` field.

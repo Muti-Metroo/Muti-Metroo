@@ -155,7 +155,7 @@ muti-metroo run -c config.yaml
 ```
 
 Authorization for management commands, file transfer, dynamic config mutations, and
-sleep/wake all flow through `management.signing_*_key` -- there is no
+sleep/wake all flow through `management.signing_*_key`. There is no
 per-feature password, so do not paste a `shell.password_hash` or
 `file_transfer.password_hash` into a current config (those fields are
 legacy and are not verified by the runtime).

@@ -427,7 +427,7 @@ tail -f /var/log/muti-metroo.log
 tail -f /var/log/muti-metroo.err.log
 ```
 
-The log file is `muti-metroo.log`, not `muti-metroo.out.log` -- launchd's
+The log file is `muti-metroo.log`, not `muti-metroo.out.log`, because launchd's
 `StandardOutPath` is set directly without a separate `.out` suffix.
 
 ### Uninstall

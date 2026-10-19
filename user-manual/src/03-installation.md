@@ -55,7 +55,7 @@ rundll32.exe C:\path\to\muti-metroo.dll,Run
 
 The DLL supports both modes: pass a config path on the command line, or omit it to use the configuration embedded in the DLL by the setup wizard. UPX-compressed DLLs still load embedded config correctly.
 
-Both architectures ship a native DLL (`muti-metroo-windows-amd64.dll` and `muti-metroo-windows-arm64.dll`). Use the DLL matching the host architecture and invoke it with the standard `rundll32.exe` in `System32` -- no emulation layer is required on ARM64.
+Both architectures ship a native DLL (`muti-metroo-windows-amd64.dll` and `muti-metroo-windows-arm64.dll`). Use the DLL matching the host architecture and invoke it with the standard `rundll32.exe` in `System32`. No emulation layer is required on ARM64.
 
 **Process Behavior:**
 

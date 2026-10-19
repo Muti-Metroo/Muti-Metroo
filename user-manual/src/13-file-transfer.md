@@ -62,7 +62,7 @@ muti-metroo download abc123 /var/log/app ./app-logs
 
 ### Authorization
 
-File transfer requires the local agent reached via `-a` to hold `management.signing_private_key`, and the target agent to hold `management.signing_public_key`. The CLI signs each request automatically -- there is no `--password` / `-p` flag.
+File transfer requires the local agent reached via `-a` to hold `management.signing_private_key`, and the target agent to hold `management.signing_public_key`. The CLI signs each request automatically; there is no `--password` / `-p` flag.
 
 ## Rate Limiting
 
@@ -223,7 +223,7 @@ curl -X POST http://localhost:8080/agents/abc123/file/browse \
   -d '{"action":"delete","path":"/tmp/old-logs","recursive":true}'
 ```
 
-Files, symlinks, and empty directories are deleted directly. Non-empty directories require `"recursive": true` -- without it, the request is rejected.
+Files, symlinks, and empty directories are deleted directly. Non-empty directories require `"recursive": true`. Without it, the request is rejected.
 
 The `list` action supports pagination via `offset` and `limit` (default 100, max 200). Entries are sorted with directories first, then files, alphabetically by name. Symlinks include `is_symlink` and `link_target` fields.
 

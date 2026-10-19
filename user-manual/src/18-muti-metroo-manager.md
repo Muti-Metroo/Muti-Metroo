@@ -13,7 +13,7 @@ flowchart LR
 
 ## Get the Binary
 
-Get the file matching your platform:
+Download the release asset matching your platform from the latest release at `https://github.com/Muti-Metroo/Muti-Metroo-Manager/releases/latest`:
 
 | Platform              | Filename                           |
 | --------------------- | ---------------------------------- |
@@ -24,15 +24,20 @@ Get the file matching your platform:
 | Windows (amd64)       | `metroo-manager-windows-amd64.exe` |
 | Windows (arm64)       | `metroo-manager-windows-arm64.exe` |
 
+Each release also carries `checksums.txt` with SHA-256 sums of the binaries.
+
+The release assets are named `metroo-manager-<os>-<arch>`, but the program itself is `muti-metroo-manager`. The rest of this chapter assumes you saved or renamed the downloaded file to `muti-metroo-manager` (`muti-metroo-manager.exe` on Windows).
+
 ## Quick Start
 
-Once you have the binary in your working directory (example: Linux amd64):
+Download the binary, save it as `muti-metroo-manager`, and start it (example: Linux amd64):
 
 ```bash
-chmod +x metroo-manager-linux-amd64
+curl -L -o muti-metroo-manager https://github.com/Muti-Metroo/Muti-Metroo-Manager/releases/latest/download/metroo-manager-linux-amd64
+chmod +x muti-metroo-manager
 
 # Launch on loopback, connected to an agent's HTTP API
-./metroo-manager-linux-amd64 -addr 127.0.0.1:3000 -agent http://192.168.1.10:8080
+./muti-metroo-manager -addr 127.0.0.1:3000 -agent http://192.168.1.10:8080
 
 # Open http://127.0.0.1:3000 in your browser
 ```
@@ -213,7 +218,7 @@ The agent panel's **Connectivity** tab carries two sub-tabs. **Peers** lists the
 
 Run commands on any reachable agent from the browser. Supports streaming mode (simple commands) and interactive mode (htop, vim). When a session ends or errors, a **Reconnect** button reopens it. The target agent must have management commands enabled.
 
-![PowerShell session on a Windows workstation](./10-agent-shell-powershell.png)
+![Shell tab with a bash session on exit-datacenter](./10-agent-shell.png)
 
 ### File Transfer
 

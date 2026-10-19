@@ -646,7 +646,7 @@ muti-metroo route list -a localhost:8080
 ```
 
 The legacy top-level aliases `muti-metroo peers` / `muti-metroo routes` still work but
-print a deprecation warning -- prefer the `peer`/`route` subcommand groups.
+print a deprecation warning. Prefer the `peer`/`route` subcommand groups.
 
 ## Security Recommendations
 

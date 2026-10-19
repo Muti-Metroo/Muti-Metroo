@@ -35,6 +35,7 @@ const (
 	CmdRouteWatch   = 0x05 // Custom command: stream dashboard snapshots on change
 	CmdSnapshot     = 0x06 // Custom command: one-shot dashboard snapshot
 	CmdExpose       = 0x07 // Custom command: run an expose session over the raw stream
+	CmdUDPStream    = 0x08 // Custom command: UDP ASSOCIATE with datagrams framed on the stream
 )
 
 // Address types.
@@ -223,6 +224,8 @@ func (h *Handler) Handle(conn net.Conn) error {
 		return h.handleConnect(pc, req)
 	case CmdUDPAssociate:
 		return h.handleUDPAssociate(pc, req)
+	case CmdUDPStream:
+		return h.handleUDPStream(pc, req)
 	case CmdICMPEcho:
 		return h.handleICMPEcho(pc, req)
 	case CmdRouteWatch:
@@ -430,6 +433,61 @@ func (h *Handler) handleUDPAssociate(conn net.Conn, req *Request) error {
 	}
 
 	// Clean up
+	h.udpAssocMu.Lock()
+	delete(h.udpAssociations, streamID)
+	h.udpAssocMu.Unlock()
+
+	assoc.Close()
+	return nil
+}
+
+// handleUDPStream handles UDP STREAM commands (custom command 0x08).
+//
+// It is UDP ASSOCIATE without the separate UDP relay socket: after the
+// success reply, each datagram travels on the SOCKS connection itself,
+// framed as a 2-byte big-endian length followed by an RFC 1928 UDP request
+// header and payload, in both directions. This works over the WebSocket
+// listener, needs no extra port reachable from the client, and inherits the
+// TLS of a WebSocket connection. The association ends when the connection
+// closes.
+func (h *Handler) handleUDPStream(conn net.Conn, req *Request) error {
+	if h.udpHandler == nil || !h.udpHandler.IsUDPEnabled() {
+		h.sendReply(conn, ReplyCmdNotSupported, nil, 0)
+		return ErrUDPDisabled
+	}
+
+	assoc := NewStreamUDPAssociation(conn, h.udpHandler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	streamID, err := h.udpHandler.CreateUDPAssociation(ctx, nil)
+	if err != nil {
+		assoc.Close()
+		h.sendReply(conn, ReplyServerFailure, nil, 0)
+		return fmt.Errorf("create mesh association: %w", err)
+	}
+	assoc.SetStreamID(streamID)
+	h.udpHandler.SetSOCKS5UDPAssociation(streamID, assoc)
+
+	h.udpAssocMu.Lock()
+	h.udpAssociations[streamID] = assoc
+	h.udpAssocMu.Unlock()
+
+	// Reply before any datagram frame so the client sees the reply first.
+	// WriteToClient takes the same write lock, so a response arriving from
+	// the mesh cannot interleave with the reply.
+	assoc.streamWriteMu.Lock()
+	err = h.sendReply(conn, ReplySucceeded, nil, 0)
+	assoc.streamWriteMu.Unlock()
+	if err == nil {
+		// The association lives as long as the connection, so drop the
+		// server's idle deadline. Blocks until the client closes the
+		// connection or a frame cannot be read.
+		conn.SetDeadline(time.Time{})
+		assoc.StreamReadLoop()
+	}
+
 	h.udpAssocMu.Lock()
 	delete(h.udpAssociations, streamID)
 	h.udpAssocMu.Unlock()

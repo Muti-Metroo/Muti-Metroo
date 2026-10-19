@@ -34,7 +34,7 @@ flowchart LR
 | ------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | **Transparent Proxying** | No application changes required                                                                             |
 | **TCP Support**          | Full TCP connection forwarding                                                                              |
-| **UDP Support**          | UDP via SOCKS5 UDP ASSOCIATE                                                                                |
+| **UDP Support**          | UDP datagrams framed on the SOCKS5 connection (UDP STREAM), or SOCKS5 UDP ASSOCIATE with agents that do not support it |
 | **ICMP Support**         | Ping forwarding via ICMP relay                                                                              |
 | **Route-Based**          | Only intercept configured destinations                                                                      |
 | **Autoroutes**           | Receive CIDR routes, mesh hostnames, and DNS suffixes from the ingress agent over the SOCKS5 endpoint      |
@@ -44,30 +44,44 @@ flowchart LR
 
 ## Get the Binary
 
-Obtain the Mutiauk binary from the distribution channel your team uses. Release builds are published for Linux:
+Download Mutiauk from the Mutiauk releases page (`https://github.com/Muti-Metroo/Mutiauk/releases/latest`). Release builds are published for Linux, macOS, and Windows on amd64 and arm64:
 
-| Platform      | Filename                  |
-| ------------- | ------------------------- |
-| Linux (amd64) | `mutiauk-linux-amd64` |
-| Linux (arm64) | `mutiauk-linux-arm64` |
+| Platform                | Filename                    |
+| ----------------------- | --------------------------- |
+| Linux (amd64)           | `mutiauk-linux-amd64`       |
+| Linux (arm64)           | `mutiauk-linux-arm64`       |
+| macOS (Apple Silicon)   | `mutiauk-darwin-arm64`      |
+| macOS (Intel)           | `mutiauk-darwin-amd64`      |
+| Windows (amd64)         | `mutiauk-windows-amd64.exe` |
+| Windows (arm64)         | `mutiauk-windows-arm64.exe` |
 
-Then install (example: Linux amd64):
+Each release also carries `checksums.txt` with SHA-256 sums of the binaries.
+
+On Linux and macOS, install the binary in your `PATH` (example: Linux amd64):
 
 ```bash
-chmod +x mutiauk-linux-amd64
-sudo mv mutiauk-linux-amd64 /usr/local/bin/mutiauk
+curl -L -o mutiauk https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64
+chmod +x mutiauk
+sudo mv mutiauk /usr/local/bin/
 ```
 
-macOS and Windows binaries are built from the Mutiauk source tree with Go and `make`:
+Replace `mutiauk-linux-amd64` with `mutiauk-darwin-arm64` (Apple Silicon) or `mutiauk-darwin-amd64` (Intel) on macOS. The macOS binaries are not signed; a file downloaded with a web browser is quarantined, so remove the attribute:
 
 ```bash
-make build-darwin          # bin/mutiauk-darwin-arm64
-make build-darwin-amd64    # bin/mutiauk-darwin-amd64
-make build-windows         # bin/mutiauk-windows-amd64.exe
-make build-windows-arm64   # bin/mutiauk-windows-arm64.exe
+sudo xattr -d com.apple.quarantine /usr/local/bin/mutiauk
 ```
 
-These targets pin `GOTOOLCHAIN=go1.25.5`; the gVisor dependency does not compile with Go 1.26. The Windows binary embeds the Wintun driver. On Windows, run Mutiauk commands from an elevated prompt; the configuration lives at `%ProgramData%\Mutiauk\config.yaml`.
+On Windows, save `mutiauk-windows-amd64.exe` (or the arm64 build) as `mutiauk.exe` in a directory in `PATH`. The Wintun driver is embedded in the executable, so no separate driver install is needed. Run Mutiauk commands from an elevated prompt; the configuration lives at `%ProgramData%\Mutiauk\config.yaml`.
+
+Building from source is optional. With Go and `make`:
+
+```bash
+git clone https://github.com/Muti-Metroo/Mutiauk.git
+cd Mutiauk
+make build-all             # every platform, in bin/
+```
+
+The macOS and Windows targets pin `GOTOOLCHAIN=go1.25.5`; the gVisor dependency does not compile with Go 1.26.
 
 ## Quick Start
 
@@ -80,11 +94,11 @@ sudo mutiauk setup
 The wizard configures:
 
 - TUN interface settings (name, MTU, IP address)
-- SOCKS5 server address and credentials
+- SOCKS5 server (`host:port` or a `ws://` / `wss://` URL) and credentials
 - Autoroutes, or a static route list
 - Optional service installation
 
-The wizard asks for the SOCKS5 server as `host:port` (plain TCP). To connect over the SOCKS5 WebSocket listener with TLS, set `socks5.server` to a `wss://` URL with `mutiauk config generate --socks5-server`, with the Mutiauk config wizard in Muti Metroo Manager (Chapter 18), or by editing the config file.
+The SOCKS5 prompt reads `SOCKS5 server (host:port, or wss://host:port/path) [127.0.0.1:1080]:`. Enter a `host:port` for plain SOCKS5 over TCP, or a `ws://` / `wss://` URL to connect over the agent's SOCKS5 WebSocket listener (see "Connecting to a Remote Ingress Agent" below). The default `127.0.0.1:1080` fits only an agent on the same host. For a plain `host:port` that is not a loopback address, the wizard notes that the connection is unencrypted. Point the wizard at an existing config to edit it: the current values become the defaults, `transport`, `ws_path`, `timeout`, and `keepalive` are kept, and sections the wizard does not ask about are left as they are. The configuration summary at the end includes a `Transport:` line, for example `plain SOCKS5 over TCP (unencrypted)`.
 
 `mutiauk setup` is interactive and requires a TTY. For unattended deploys, use `mutiauk config generate` instead, which writes a config file non-interactively. It accepts `--from <answers.yaml>`, `--output`/`-o`, `--force`, `--json`, and per-field overrides (`--tun-name`, `--tun-address`, `--tun-address6`, `--socks5-server`, `--socks5-username`, `--autoroutes-enabled`). Per-field flags override the answers file, which overrides the built-in defaults. The SOCKS5 password comes from the `MUTIAUK_SOCKS5_PASSWORD` environment variable so it never appears in the answers file or process listing. Install the service as a separate `mutiauk service install` step.
 

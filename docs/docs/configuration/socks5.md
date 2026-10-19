@@ -102,6 +102,7 @@ The WebSocket listener carries the SOCKS5 protocol inside a WebSocket connection
 - Without `plaintext`, it serves TLS with the agent certificate from [`tls`](/configuration/tls-certificates), or a generated self-signed certificate.
 - With `plaintext: true`, it serves plain HTTP; bind it to loopback and put a TLS-terminating reverse proxy in front.
 - When `auth.enabled` is true, the WebSocket upgrade also requires HTTP Basic authentication with the same credentials, before the SOCKS5 handshake.
+- UDP works over the WebSocket listener with [UDP STREAM](/features/udp-relay#udp-over-the-socks-connection), which Mutiauk uses. Standard UDP ASSOCIATE still needs the UDP relay socket, which opens on the IP of `address`, not of the WebSocket listener.
 - Requests to `/` return a plain splash page; only `path` accepts upgrades.
 
 [Mutiauk](/mutiauk) connects to this listener with its [WebSocket transport](/mutiauk#websocket-transport) and a `wss://` URL. Mutiauk verifies the server certificate against the workstation's system trust store, so a self-signed or private-CA certificate fails unless the workstation trusts it. A TLS-terminating reverse proxy with a public certificate in front of a `plaintext: true` listener avoids this.

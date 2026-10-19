@@ -140,7 +140,7 @@ http:
 The usual operator setup runs the ingress agent on a mesh node, for example a relay on a public server, and runs Mutiauk on the workstation:
 
 1. On the ingress agent, enable SOCKS5 authentication and the SOCKS5 WebSocket listener with a TLS certificate the workstation trusts (Chapter 9).
-2. On the workstation, create a Mutiauk configuration whose `socks5.server` points at the agent, for example `wss://relay.example.com:8443/socks5`, with `autoroutes.enabled: true`, and start the Mutiauk daemon (Chapter 10). The Mutiauk config wizard in Muti Metroo Manager and `mutiauk config generate` both accept a `wss://` server; the interactive `mutiauk setup` wizard asks for a plain `host:port`.
+2. On the workstation, create a Mutiauk configuration whose `socks5.server` points at the agent, for example `wss://relay.example.com:8443/socks5`, with `autoroutes.enabled: true`, and start the Mutiauk daemon (Chapter 10). The interactive `mutiauk setup` wizard, `mutiauk config generate`, and the Mutiauk config wizard in Muti Metroo Manager all accept a `wss://` server.
 3. Optionally run Muti Metroo Manager on the workstation against an agent's HTTP API for the topology view and management actions (Chapter 18).
 
 After that, ordinary tools reach mesh networks with no proxy settings:

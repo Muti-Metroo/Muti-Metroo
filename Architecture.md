@@ -2894,6 +2894,20 @@ Both use the same `socks5.auth.users` configuration. Compatible clients (like Mu
 
 ---
 
+### 11.6 UDP Stream Extension (CmdUDPStream 0x08)
+
+A fourth custom SOCKS5 command is UDP ASSOCIATE without the separate UDP relay socket. It reuses the SOCKS5 greeting/auth and request layout; the request address is unused (`ATYP=0x01, 0.0.0.0:0`). The reply is a standard SOCKS5 reply: `REP=0x00` (with `BND=0.0.0.0:0`), or `REP=0x07` (command not supported) when UDP relay is disabled or the agent predates the command. Clients (Mutiauk) send UDP STREAM first and fall back to UDP ASSOCIATE on `0x07` or when the server drops the connection.
+
+After the success reply, datagrams travel on the SOCKS5 connection itself in both directions:
+
+```
+[len:u16 BE][RSV:2][FRAG:1][ATYP:1][ADDR][PORT:2][DATA]
+```
+
+The body after `len` is exactly an RFC 1928 UDP request datagram, so it is parsed by the same `ParseUDPHeader` / `BuildUDPHeader` code as the socket path, and it feeds the same `UDPAssociationHandler` (mesh association, per-destination exit paths, E2E encryption). `FRAG` must be 0. Malformed bodies are dropped and the association stays up; a framing read error ends it. The association lives exactly as long as the connection (the server's idle deadline is cleared after the reply), and `UDPAssociation.Close` closes the connection so the client sees the end.
+
+Why it exists: the RFC 1928 relay socket is a second, unencrypted, UDP port on the ingress host. It does not work when a client can reach the agent only through the WebSocket listener (CDN, TCP-only proxy), and it is not covered by `wss://` TLS. Framing on the stream fixes both, at the cost of TCP head-of-line blocking for UDP.
+
 ## 12. Data Plane
 
 ### 12.1 Frame Processing
@@ -3963,7 +3977,7 @@ muti-metroo/
 │   │   ├── handler.go              # SOCKS5 command handler
 │   │   ├── socks4.go               # SOCKS4/4a request handling
 │   │   ├── auth.go                 # Authentication
-│   │   ├── udp.go                  # UDP ASSOCIATE handler
+│   │   ├── udp.go                  # UDP ASSOCIATE and UDP STREAM (0x08) associations
 │   │   ├── icmp.go                 # ICMP ping integration (CmdICMPEcho 0x04)
 │   │   ├── routewatch.go           # Route-watch/snapshot (CmdRouteWatch 0x05 / CmdSnapshot 0x06)
 │   │   ├── expose.go               # Expose-over-SOCKS5 dispatch (CmdExpose 0x07)

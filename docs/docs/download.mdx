@@ -249,16 +249,48 @@ The user manual collects installation, configuration, features, and deployment i
 
 ## Mutiauk
 
-Mutiauk runs on the operator's workstation. It creates a TUN interface, installs the mesh's routes, and forwards IP traffic through an ingress agent's SOCKS5 listener, so applications need no proxy settings. It requires root or Administrator. Release binaries are published for Linux; see the [Mutiauk guide](/mutiauk) for details.
+Mutiauk runs on the operator's workstation. It creates a TUN interface, installs the mesh's routes, and forwards IP traffic through an ingress agent's SOCKS5 listener, so applications need no proxy settings. It requires root or Administrator. See the [Mutiauk guide](/mutiauk) for details.
+
+<Tabs groupId="mutiauk-os">
+  <TabItem value="macos" label="macOS" default>
+
+<DownloadButtonGroup>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-darwin-arm64" primary>
+    Apple Silicon
+  </DownloadButton>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-darwin-amd64">
+    Intel
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+  <TabItem value="linux" label="Linux">
 
 <DownloadButtonGroup>
   <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-amd64" primary>
-    Linux x86_64 (amd64)
+    x86_64 (amd64)
   </DownloadButton>
   <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-linux-arm64">
-    Linux ARM64
+    ARM64
   </DownloadButton>
 </DownloadButtonGroup>
+
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+<DownloadButtonGroup>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-windows-amd64.exe" primary>
+    x86_64 (amd64)
+  </DownloadButton>
+  <DownloadButton href="https://github.com/Muti-Metroo/Mutiauk/releases/latest/download/mutiauk-windows-arm64.exe">
+    ARM64
+  </DownloadButton>
+</DownloadButtonGroup>
+
+  </TabItem>
+</Tabs>
+
+The Windows binary embeds the Wintun driver. The macOS binary is unsigned, like the agent; see the Gatekeeper note above.
 
 ## Muti Metroo Manager
 

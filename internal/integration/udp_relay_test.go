@@ -544,3 +544,63 @@ func TestUDPRelay_MaxAssociationsLimit(t *testing.T) {
 	}
 	t.Logf("%d/%d associations succeeded under limit=%d", successes, limit+1, limit)
 }
+
+// TestUDPRelay_StreamAssociate verifies the UDP STREAM extension (0x08):
+// datagrams framed on the SOCKS5 connection travel client -> ingress ->
+// mesh -> exit -> upstream echo server and back, with no UDP relay
+// socket involved. Closing the connection ends the association.
+//
+// Covers the UDP STREAM row.
+func TestUDPRelay_StreamAssociate(t *testing.T) {
+	echo, echoCleanup := startUDPEchoServer(t)
+	t.Cleanup(echoCleanup)
+	echoAddr := echo.Addr()
+
+	conn := socks5Handshake(t, startUDPChain(t, nil))
+	t.Cleanup(func() { conn.Close() })
+
+	req := []byte{socks5.SOCKS5Version, socks5.CmdUDPStream, 0x00, socks5.AddrTypeIPv4, 0, 0, 0, 0, 0, 0}
+	if _, err := conn.Write(req); err != nil {
+		t.Fatalf("write UDP STREAM: %v", err)
+	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		t.Fatalf("read UDP STREAM reply: %v", err)
+	}
+	if reply[1] != socks5.ReplySucceeded {
+		t.Fatalf("UDP STREAM rejected: reply code %d", reply[1])
+	}
+
+	payload := []byte("hello via udp stream")
+	dgram := wrapSOCKS5UDPDatagram(echoAddr.IP, uint16(echoAddr.Port), payload)
+	frame := make([]byte, 2+len(dgram))
+	binary.BigEndian.PutUint16(frame, uint16(len(dgram)))
+	copy(frame[2:], dgram)
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	lenBuf := make([]byte, 2)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		t.Fatalf("read frame length: %v", err)
+	}
+	body := make([]byte, binary.BigEndian.Uint16(lenBuf))
+	if _, err := io.ReadFull(conn, body); err != nil {
+		t.Fatalf("read frame body: %v", err)
+	}
+	header, got, err := socks5.ParseUDPHeader(body)
+	if err != nil {
+		t.Fatalf("ParseUDPHeader: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("payload mismatch: got %q want %q", got, payload)
+	}
+	if !header.Address.Equal(echoAddr.IP) || header.Port != uint16(echoAddr.Port) {
+		t.Fatalf("response source mismatch: got %s:%d want %s", header.Address, header.Port, echoAddr)
+	}
+	if echo.Received() == 0 {
+		t.Fatal("upstream echo server received 0 datagrams")
+	}
+}

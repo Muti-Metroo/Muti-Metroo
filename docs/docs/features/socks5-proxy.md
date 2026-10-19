@@ -137,7 +137,7 @@ proxychains4 ssh admin@192.168.1.20
 
 ## UDP and ICMP
 
-SOCKS5 UDP ASSOCIATE carries UDP datagrams (DNS, NTP) through the same listener; see [UDP Relay](/features/udp-relay). Ping uses a separate path; see [ICMP Relay](/features/icmp-relay).
+UDP datagrams (DNS, NTP) go through the same listener, with SOCKS5 UDP ASSOCIATE or the UDP STREAM extension that Mutiauk uses; see [UDP Relay](/features/udp-relay). Ping uses a separate path; see [ICMP Relay](/features/icmp-relay).
 
 ## Verifying the proxy
 

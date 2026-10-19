@@ -120,6 +120,8 @@ socks5:
 
 The matching Mutiauk setting is `socks5.server: wss://relay.example.com:8443/socks5`.
 
+**UDP:** UDP works over the WebSocket listener with UDP STREAM (Chapter 14), which Mutiauk uses. Standard UDP ASSOCIATE still needs the UDP relay socket, which opens on the IP of `address`, not of the WebSocket listener.
+
 **Certificate:** The WebSocket listener uses the agent's global `tls.cert` / `tls.key` (or `cert_pem` / `key_pem`). The certificate must be ECDSA. When no certificate is configured, the agent generates a self-signed certificate at startup. Mutiauk verifies the server certificate against the workstation's system trust store and has no option to skip verification, so a self-signed certificate does not work. Use one of these:
 
 - A certificate from a public CA for the relay's hostname (ECDSA key).
@@ -203,7 +205,7 @@ proxychains4 ssh admin@target
 
 ## UDP Support
 
-For UDP traffic tunneling (DNS, NTP, etc.), see Chapter 14 (UDP Relay). UDP relay uses SOCKS5 UDP ASSOCIATE and requires configuration on the exit agent. Mutiauk uses UDP ASSOCIATE for UDP traffic captured on its TUN interface.
+For UDP traffic tunneling (DNS, NTP, etc.), see Chapter 14 (UDP Relay). The listener relays UDP with the standard UDP ASSOCIATE command or with UDP STREAM, a Muti Metroo extension that carries the datagrams on the SOCKS connection itself. UDP relay must be enabled on the exit agent (it is by default). Mutiauk uses UDP STREAM for UDP traffic captured on its TUN interface and falls back to UDP ASSOCIATE with agents that do not support it.
 
 ## Security Considerations
 

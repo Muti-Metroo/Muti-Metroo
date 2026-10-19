@@ -228,7 +228,7 @@ The `ssh -D` SOCKS proxy handles TCP connections only. UDP and ICMP, for example
 
 ### Muti Metroo
 
-The SOCKS5 proxy handles TCP connections and UDP (SOCKS5 UDP ASSOCIATE). ICMP echo is available from the CLI, through a chosen agent:
+The SOCKS5 proxy handles TCP connections and UDP (SOCKS5 UDP ASSOCIATE, or the UDP STREAM extension that Mutiauk uses). ICMP echo is available from the CLI, through a chosen agent:
 
 ```bash
 # TCP through the SOCKS proxy

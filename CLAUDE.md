@@ -250,11 +250,11 @@ An agent can serve multiple roles simultaneously:
 | `service`      | Cross-platform service management - systemd (Linux), launchd (macOS), Windows Service                                                                                         |
 | `shell`        | Management commands - interactive (PTY) and streaming command execution, whitelist, authentication                                                                            |
 | `sleep`        | Mesh hibernation - state machine, jittered polling, command deduplication, persistence, deterministic windows                                                                 |
-| `socks5`       | SOCKS proxy server (SOCKS4/4a/5 auto-detected) with no-auth and username/password methods, optional WebSocket transport                                                       |
+| `socks5`       | SOCKS proxy server (SOCKS4/4a/5 auto-detected) with no-auth and username/password methods, optional WebSocket transport, UDP ASSOCIATE plus the UDP STREAM extension (0x08, datagrams framed on the connection) |
 | `stream`       | Stream state machine (Opening->Open->HalfClosed->Closed), buffered I/O                                                                                                        |
 | `sysinfo`      | System information collection for node info advertisements                                                                                                                    |
 | `transport`    | Transport abstraction with QUIC, HTTP/2, and WebSocket implementations, TLS fingerprinting                                                                                    |
-| `udp`          | UDP relay handler for SOCKS5 UDP ASSOCIATE - association lifecycle, datagram forwarding                                                                                       |
+| `udp`          | UDP relay handler for SOCKS5 UDP ASSOCIATE and UDP STREAM - association lifecycle, datagram forwarding                                                                        |
 | `wizard`       | Interactive setup wizard with certificate generation                                                                                                                          |
 
 ## Configuration

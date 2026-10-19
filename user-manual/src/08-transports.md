@@ -159,7 +159,7 @@ listeners:
 
 ### Advertising a Listener to the Mesh
 
-Add an optional `advertise:` block to publish a listener's public dial target across the mesh. Other agents -- including agents that have never directly peered with this one -- can then see and reach the listener through their topology view.
+Add an optional `advertise:` block to publish a listener's public dial target across the mesh. Other agents, including agents that have never directly peered with this one, can then see and reach the listener through their topology view.
 
 ```yaml
 listeners:
@@ -171,7 +171,7 @@ listeners:
       # path defaults to listener.path; transport defaults to listener.transport
 ```
 
-`advertise` is opt-in. Without it, the listener is not propagated -- bind-only or NAT-shielded listeners must not be auto-advertised. `advertise.address` may not be a loopback or unspecified address (`0.0.0.0`, `127.0.0.1`, `::`, `::1`). Override `advertise.path` or `advertise.transport` only when a reverse proxy maps the public path or transport differently from the local listener.
+`advertise` is opt-in. Without it, the listener is not propagated, because bind-only or NAT-shielded listeners must not be auto-advertised. `advertise.address` may not be a loopback or unspecified address (`0.0.0.0`, `127.0.0.1`, `::`, `::1`). Override `advertise.path` or `advertise.transport` only when a reverse proxy maps the public path or transport differently from the local listener.
 
 ### Dynamic Transport Listeners
 
@@ -195,7 +195,7 @@ Dynamic listeners reuse the agent's global TLS certificate and mTLS setting; `--
 
 ## TLS ClientHello Profiles
 
-Outbound HTTP/2 and WebSocket peer connections can present a browser-compatible TLS ClientHello, which improves compatibility with strict proxies and servers that expect specific TLS client behavior. The feature is disabled by default -- enable it under `tls.fingerprint.preset`. QUIC peer connections use Go's internal TLS 1.3 stack and ignore the preset (a warning is logged). Note: some WAFs treat a browser-like ClientHello combined with non-browser HTTP request shapes as a bot signal and will reject the dial, so test before enabling on peers behind strict middleboxes.
+Outbound HTTP/2 and WebSocket peer connections can present a browser-compatible TLS ClientHello, which improves compatibility with strict proxies and servers that expect specific TLS client behavior. The feature is disabled by default; enable it under `tls.fingerprint.preset`. QUIC peer connections use Go's internal TLS 1.3 stack and ignore the preset (a warning is logged). Note: some WAFs treat a browser-like ClientHello combined with non-browser HTTP request shapes as a bot signal and will reject the dial, so test before enabling on peers behind strict middleboxes.
 
 Available presets: `disabled` (default), `go`, `chrome`, `firefox`, `safari`, `edge`, `ios`, `android`, `random`. `disabled` and `go` both use Go's standard library ClientHello; the named browsers / `random` engage uTLS. Configure under `tls.fingerprint.preset` and apply only to peer dials, not listeners. See Chapter 20 (Privacy & Security Configuration) for the full preset table, transport-support matrix, and combined-with-protocol-identifiers usage notes.
 
