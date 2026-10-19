@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.0](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.11.0...muti-metroo-v4.12.0) (2026-10-19)
+
+
+### Features
+
+* file API for mounted shares, and sign management requests over their body ([83c3351](https://github.com/Muti-Metroo/Muti-Metroo/commit/83c3351e68e4aca1fdbc056e6d0bf9e097200a44))
+
 ## [4.11.0](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.10.11...muti-metroo-v4.11.0) (2026-10-19)
 
 
