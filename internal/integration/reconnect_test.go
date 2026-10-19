@@ -38,7 +38,7 @@ func TestPeerReconnection(t *testing.T) {
 	os.WriteFile(certFileB, certPEMB, 0600)
 	os.WriteFile(keyFileB, keyPEMB, 0600)
 
-	addrB := "127.0.0.1:33000"
+	addrB := fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t))
 
 	// Create Agent B (listener)
 	cfgB := config.Default()
@@ -170,7 +170,7 @@ func TestPeerReconnection_MaxRetries(t *testing.T) {
 		{
 			ID:        "auto",
 			Transport: "quic",
-			Address:   "127.0.0.1:39999", // Non-existent
+			Address:   fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t)), // Nothing listens here
 			TLS:       config.TLSConfig{},
 		},
 	}
@@ -222,7 +222,7 @@ func TestPeerReconnection_RouteWithdrawal(t *testing.T) {
 	os.WriteFile(certFileB, certPEMB, 0600)
 	os.WriteFile(keyFileB, keyPEMB, 0600)
 
-	addrB := "127.0.0.1:34000"
+	addrB := fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t))
 
 	// B is exit node with routes
 	cfgB := config.Default()
@@ -322,7 +322,11 @@ func TestPeerReconnection_MultiHop(t *testing.T) {
 	tmpDirs := make([]string, 3)
 	certFiles := make([]string, 3)
 	keyFiles := make([]string, 3)
-	addrs := []string{"127.0.0.1:35000", "127.0.0.1:35001", "127.0.0.1:35002"}
+	addrs := []string{
+		fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t)),
+		fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t)),
+		fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t)),
+	}
 
 	for i := 0; i < 3; i++ {
 		tmpDirs[i], _ = os.MkdirTemp("", fmt.Sprintf("multihop-%d-", i))

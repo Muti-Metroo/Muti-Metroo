@@ -30,11 +30,35 @@ type MultiTransportChain struct {
 	Addresses  [4]string
 	TLSCerts   [4]CertPair
 	AgentIDs   [4]string // Stored after agent creation
-	socks5Port int       // Fixed SOCKS5 port for Docker testing
+	socks5Port int       // Fixed SOCKS5 port for Docker testing (mesh runner)
+}
+
+// freeTCPUDPPort returns a loopback port that is currently free for both TCP
+// and UDP, so it suits QUIC as well as HTTP/2 and WebSocket listeners.
+func freeTCPUDPPort(t *testing.T) int {
+	t.Helper()
+	for i := 0; i < 50; i++ {
+		tl, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen tcp: %v", err)
+		}
+		port := tl.Addr().(*net.TCPAddr).Port
+		ul, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+		tl.Close()
+		if err == nil {
+			ul.Close()
+			return port
+		}
+	}
+	t.Fatal("no port free for both TCP and UDP")
+	return 0
 }
 
 // NewMultiTransportChain creates a chain with mixed transports for testing.
-func NewMultiTransportChain(t *testing.T, portBase int) *MultiTransportChain {
+// Each agent listens on a port that is free for both TCP and UDP, chosen at
+// run time: fixed port ranges collided with other tests and the runner's
+// ephemeral ports.
+func NewMultiTransportChain(t *testing.T) *MultiTransportChain {
 	chain := &MultiTransportChain{}
 	names := []string{"A", "B", "C", "D"}
 
@@ -45,7 +69,7 @@ func NewMultiTransportChain(t *testing.T, portBase int) *MultiTransportChain {
 			t.Fatalf("Failed to create temp dir for %s: %v", names[i], err)
 		}
 		chain.DataDirs[i] = tmpDir
-		chain.Addresses[i] = fmt.Sprintf("127.0.0.1:%d", portBase+i)
+		chain.Addresses[i] = fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t))
 
 		// Generate TLS certificates
 		certPEM, keyPEM, err := transport.GenerateSelfSignedCert("agent-"+names[i], 24*time.Hour)
@@ -240,7 +264,7 @@ func TestMultiTransport_MixedTransportChain(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	chain := NewMultiTransportChain(t, 40000)
+	chain := NewMultiTransportChain(t)
 	defer chain.Close()
 
 	// D has specific route, C has catch-all
@@ -274,7 +298,7 @@ func TestMultiTransport_RouteLongestPrefixMatch(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	chain := NewMultiTransportChain(t, 40100)
+	chain := NewMultiTransportChain(t)
 	defer chain.Close()
 
 	// D has specific route for kreata.ee, C has catch-all
@@ -333,7 +357,7 @@ func TestMultiTransport_SOCKS5ThroughMesh(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	chain := NewMultiTransportChain(t, 40200)
+	chain := NewMultiTransportChain(t)
 	defer chain.Close()
 
 	chain.CreateAgents(t, []string{"178.33.49.65/32"})
@@ -449,7 +473,7 @@ func TestMultiTransport_SSHToKreata(t *testing.T) {
 		t.Skip("Skipping 5-minute SSH test. Set SSH_LONG_TEST=1 to run.")
 	}
 
-	chain := NewMultiTransportChain(t, 40300)
+	chain := NewMultiTransportChain(t)
 	defer chain.Close()
 
 	// Agent D: 178.33.49.65/32 (kreata.ee specific)
@@ -695,7 +719,7 @@ func TestMultiTransport_SSHToKreata_Short(t *testing.T) {
 		t.Skip("Skipping SSH test. Set SSH_TEST=1 to run.")
 	}
 
-	chain := NewMultiTransportChain(t, 40400)
+	chain := NewMultiTransportChain(t)
 	defer chain.Close()
 
 	chain.CreateAgents(t, []string{"178.33.49.65/32"})

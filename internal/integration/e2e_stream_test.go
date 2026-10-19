@@ -433,7 +433,7 @@ func NewMeshChain(t *testing.T) *MeshChain {
 			t.Fatalf("Failed to create agent %s: %v", name, err)
 		}
 		chain.Agents[i] = agent
-		chain.Addresses[i] = fmt.Sprintf("127.0.0.1:%d", 20000+i)
+		chain.Addresses[i] = fmt.Sprintf("127.0.0.1:%d", freeTCPUDPPort(t))
 
 		if err := agent.Listen(chain.Addresses[i]); err != nil {
 			t.Fatalf("Failed to listen on %s: %v", name, err)
