@@ -10,7 +10,7 @@ Datagram payloads are end-to-end encrypted between the ingress and the exit. Des
 - The exit agent has UDP relay enabled. It is enabled by default.
 - The ingress agent has a CIDR route for each destination. Unlike TCP, UDP is never sent directly from the ingress host when no route matches.
 - The route's exit is a different agent from the ingress. An agent does not relay UDP to its own exit routes, so a single agent that is both ingress and exit does not relay UDP.
-- The ingress agent has a route that covers `0.0.0.0` (in practice, a `0.0.0.0/0` default route somewhere in the mesh). UDP ASSOCIATE and UDP STREAM are refused without one, even if every destination you plan to use has a more specific route.
+- The ingress agent has at least one CIDR route. UDP ASSOCIATE and UDP STREAM are refused when it has none; datagrams to a destination without a route are dropped.
 
 The UDP ASSOCIATE relay socket listens on the same IP address as the SOCKS5 TCP listener, so a listener on `127.0.0.1:1080` only accepts datagrams from the local host. The relay is IPv4.
 
@@ -120,7 +120,7 @@ socks5:
 
 ### UDP ASSOCIATE or UDP STREAM Fails with Reply Code 1
 
-The ingress agent has no route that covers `0.0.0.0`. Run `muti-metroo route trace 0.0.0.0`. Add a default route on an exit (`muti-metroo route add 0.0.0.0/0`) or ask the mesh operator for one.
+The ingress agent has no CIDR routes at all. Check `muti-metroo route status` on the ingress agent, and that the exit agents are connected and advertise routes.
 
 ### Association Timeout
 

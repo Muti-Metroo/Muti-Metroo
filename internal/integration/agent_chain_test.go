@@ -88,6 +88,7 @@ type AgentChain struct {
 	ForwardListeners map[int][]config.ForwardListener
 	// ExitDomainRoutes, when non-empty, sets cfg.Exit.DomainRoutes on the exit node (D).
 	ExitDomainRoutes []string
+	ExitRoutes       []string // CIDRs advertised by D instead of 0.0.0.0/0
 	// ExitDNSServers, when non-empty, sets cfg.Exit.DNS.Servers on the exit node (D).
 	ExitDNSServers []string
 	// HTTPConfigure, when non-nil, is invoked against the HTTP config on agent
@@ -252,6 +253,12 @@ func (c *AgentChain) buildConfig(i int) *config.Config {
 	if i == 3 {
 		cfg.Exit.Enabled = true
 		cfg.Exit.Routes = []config.RouteConfig{{CIDR: "0.0.0.0/0"}} // Allow all destinations
+		if len(c.ExitRoutes) > 0 {
+			cfg.Exit.Routes = nil
+			for _, cidr := range c.ExitRoutes {
+				cfg.Exit.Routes = append(cfg.Exit.Routes, config.RouteConfig{CIDR: cidr})
+			}
+		}
 
 		// Enable shell on exit node if configured
 		if c.ShellConfig != nil {

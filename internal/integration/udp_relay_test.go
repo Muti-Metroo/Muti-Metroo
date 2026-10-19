@@ -604,3 +604,77 @@ func TestUDPRelay_StreamAssociate(t *testing.T) {
 		t.Fatal("upstream echo server received 0 datagrams")
 	}
 }
+
+// TestUDPRelay_SpecificRouteOnly verifies UDP relay when the mesh advertises
+// only a specific network and no default route, the usual setup behind
+// Mutiauk autoroutes. UDP ASSOCIATE and UDP STREAM must both be accepted
+// and deliver datagrams to the routed destination.
+func TestUDPRelay_SpecificRouteOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	echo, echoCleanup := startUDPEchoServer(t)
+	t.Cleanup(echoCleanup)
+	echoAddr := echo.Addr()
+
+	chain := NewAgentChain(t)
+	chain.ExitRoutes = []string{"127.0.0.0/8"}
+	chain.UDPConfigure = func(c *config.UDPConfig) {
+		c.Enabled = true
+		c.MaxDatagramSize = 1472
+	}
+	chain.CreateAgents(t)
+	chain.StartAgents(t)
+	t.Cleanup(chain.Close)
+	if !chain.WaitForRoutes(t) {
+		t.Fatal("Route propagation failed")
+	}
+	socksAddr := chain.Agents[0].SOCKS5Address().String()
+
+	// UDP ASSOCIATE
+	relay, ctrl := socks5UDPAssociate(t, socksAddr)
+	t.Cleanup(func() { ctrl.Close() })
+	client, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close() })
+	if _, err := client.WriteTo(wrapSOCKS5UDPDatagram(echoAddr.IP, uint16(echoAddr.Port), []byte("associate")), relay); err != nil {
+		t.Fatal(err)
+	}
+	if _, got := readSOCKS5UDPResponse(t, client, 5*time.Second); string(got) != "associate" {
+		t.Errorf("UDP ASSOCIATE payload = %q", got)
+	}
+
+	// UDP STREAM
+	conn := socks5Handshake(t, socksAddr)
+	t.Cleanup(func() { conn.Close() })
+	if _, err := conn.Write([]byte{socks5.SOCKS5Version, socks5.CmdUDPStream, 0x00, socks5.AddrTypeIPv4, 0, 0, 0, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		t.Fatalf("read UDP STREAM reply: %v", err)
+	}
+	if reply[1] != socks5.ReplySucceeded {
+		t.Fatalf("UDP STREAM rejected without a default route: reply code %d", reply[1])
+	}
+	dgram := wrapSOCKS5UDPDatagram(echoAddr.IP, uint16(echoAddr.Port), []byte("stream"))
+	frame := append(binary.BigEndian.AppendUint16(nil, uint16(len(dgram))), dgram...)
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	lenBuf := make([]byte, 2)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	body := make([]byte, binary.BigEndian.Uint16(lenBuf))
+	if _, err := io.ReadFull(conn, body); err != nil {
+		t.Fatal(err)
+	}
+	if _, got, err := socks5.ParseUDPHeader(body); err != nil || string(got) != "stream" {
+		t.Errorf("UDP STREAM payload = %q (%v)", got, err)
+	}
+}

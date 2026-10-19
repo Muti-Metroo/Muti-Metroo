@@ -82,8 +82,10 @@ func generateUDPRequestID() uint64 {
 // Called when a SOCKS5 client requests UDP ASSOCIATE.
 // This creates a lazy association container - actual mesh paths are created on first datagram.
 func (a *Agent) CreateUDPAssociation(ctx context.Context, clientAddr *net.UDPAddr) (uint64, error) {
-	// Verify at least one route exists (sanity check)
-	if a.routeMgr.Lookup(net.IPv4zero) == nil {
+	// Refuse only when there is no CIDR route at all. Each datagram is
+	// routed by its own destination later, so a mesh that advertises only
+	// specific networks (no default route) still relays UDP to them.
+	if a.routeMgr.Table().Size() == 0 {
 		return 0, ErrUDPNoRoute
 	}
 

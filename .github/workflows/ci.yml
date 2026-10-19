@@ -36,6 +36,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # The ICMP tests open unprivileged ICMP sockets, which Linux only
+      # allows for groups in net.ipv4.ping_group_range (empty by default on
+      # the runner). Exit agents need the same setting in production.
+      - name: Allow unprivileged ICMP
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+
       # Includes the in-process integration tests in internal/integration
       # (multi-agent meshes over loopback).
       - name: go test

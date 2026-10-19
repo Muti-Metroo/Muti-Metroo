@@ -43,6 +43,7 @@ UDP-Relay,Max datagram size enforcement,max_datagram_size truncation/rejection,2
 UDP-Relay,Frag rejection (frag > 0),SOCKS5 UDP fragment field nonzero -> rejected,2,L,udp_relay::FragRejection,-,Full,Low,Hand-built FRAG=1 datagram silently dropped at ingress
 UDP-Relay,Association tied to TCP control conn,Closing TCP control channel kills all associations,2,M,udp_relay::AssociationTiedToTCPClose,-,Full,Med,Closing TCP control conn tears down the UDP relay socket; subsequent datagrams produce no echo
 UDP-Relay,SOCKS5 UDP STREAM (0x08),UDP datagrams framed on the SOCKS5 connection (no relay socket),2,M,udp_relay::StreamAssociate,-,Full,High,Echo server receive-counter assertion; used by Mutiauk so UDP works over the WebSocket listener
+UDP-Relay,UDP without a default route,UDP ASSOCIATE and UDP STREAM accepted when the mesh advertises only specific CIDRs,2,M,udp_relay::SpecificRouteOnly,-,Full,High,Regression: associations used to be refused unless a route covered 0.0.0.0
 Exit-CIDR,CIDR allow (single range),TCP dial to allowed destination succeeds,2,L,exit_cidr::CIDRFiltering,T5,Full,Low,Already covered
 Exit-CIDR,CIDR deny (rejection),Dial to non-allowed destination is refused,2,L,exit_cidr::CIDRFiltering,-,Full,Low,Already covered
 Exit-CIDR,Multiple CIDR ranges,Several allowed CIDRs combined,2,L,exit_cidr::MultipleRanges,-,Full,Low,Already covered
