@@ -1532,9 +1532,8 @@ func (a *Agent) ID() identity.AgentID {
 // signManagementEnvelope builds a fresh Ed25519-signed envelope for a
 // privileged operation. Returns an error when the agent has no signing
 // private key configured -- callers treat that as an authorization
-// failure rather than silently proceeding. bodyHash is nil for shell and
-// file-transfer operations (target policy enforces what they can do)
-// and sha256(canonical body) for dynamic-config mutations.
+// failure rather than silently proceeding. bodyHash is
+// crypto.CanonicalBodyHash of the request body; see signBody.
 func (a *Agent) signManagementEnvelope(target identity.AgentID, opTag string, bodyHash []byte) (*crypto.AuthEnvelope, error) {
 	if !a.cfg.CanSign() {
 		return nil, fmt.Errorf("management signing private key not configured (set management.signing_private_key)")
@@ -1548,12 +1547,29 @@ func (a *Agent) signManagementEnvelope(target identity.AgentID, opTag string, bo
 	return &env, nil
 }
 
+// signBody signs an envelope for v, a request struct, binding its JSON
+// encoding (without any "auth" field) into the signature. The target
+// verifies against the same canonical form of the bytes it receives. The
+// returned hash is that body hash.
+func (a *Agent) signBody(target identity.AgentID, opTag string, v any) (*crypto.AuthEnvelope, []byte, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode request: %w", err)
+	}
+	hash, err := crypto.CanonicalBodyHash(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	env, err := a.signManagementEnvelope(target, opTag, hash)
+	return env, hash, err
+}
+
 // verifyManagementAuthFor returns a verifier bound to the given operation
 // tag. The verifier rejects every request when this agent has no signing
 // public key configured -- the "locked down" state where privileged
 // operations are advertised but no mesh operator can authorize them.
-func (a *Agent) verifyManagementAuthFor(opTag string) func(*crypto.AuthEnvelope) error {
-	return func(env *crypto.AuthEnvelope) error {
+func (a *Agent) verifyManagementAuthFor(opTag string) func(env *crypto.AuthEnvelope, bodyHash []byte) error {
+	return func(env *crypto.AuthEnvelope, bodyHash []byte) error {
 		if !a.cfg.HasSigningKey() {
 			return fmt.Errorf("management signing public key not configured on this agent")
 		}
@@ -1564,7 +1580,7 @@ func (a *Agent) verifyManagementAuthFor(opTag string) func(*crypto.AuthEnvelope)
 		if err != nil {
 			return fmt.Errorf("load signing public key: %w", err)
 		}
-		return crypto.VerifyManagement(pubKey, a.id, *env, opTag, nil)
+		return crypto.VerifyManagement(pubKey, a.id, *env, opTag, bodyHash)
 	}
 }
 
@@ -1575,53 +1591,24 @@ func (a *Agent) CanSignManagement() bool {
 	return a.cfg.CanSign()
 }
 
-// StampBody signs an envelope bound only to (origin, target, timestamp,
-// opTag) and injects it as the "auth" field of the JSON body. Used for
-// file-op endpoints (browse) whose target-side verifier matches the
-// stream verifier (nil body hash). mutations that need payload binding
-// should use StampMutationBody instead.
-func (a *Agent) StampBody(target identity.AgentID, opTag string, body []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if err := json.Unmarshal(body, &obj); err != nil {
-		return nil, fmt.Errorf("parse body: %w", err)
-	}
-	env, err := a.signManagementEnvelope(target, opTag, nil)
-	if err != nil {
-		return nil, err
-	}
-	envJSON, err := json.Marshal(env)
-	if err != nil {
-		return nil, fmt.Errorf("marshal auth envelope: %w", err)
-	}
-	obj["auth"] = envJSON
-	return json.Marshal(obj)
-}
-
-// StampMutationBody parses body as a JSON object, computes sha256 over the
-// canonical body (with any existing "auth" key stripped), signs an
-// envelope for the given target + operation, and returns the re-serialized
-// JSON with "auth" set. Used by HTTP handlers that forward dynamic-config
-// mutations to remote agents via the control channel.
+// StampMutationBody parses body as a JSON object, signs an envelope for
+// the given target + operation bound to crypto.CanonicalBodyHash(body),
+// and returns the re-serialized JSON with "auth" set. Used by HTTP
+// handlers that forward signed requests (dynamic-config mutations, file
+// browse) to remote agents via the control channel.
 func (a *Agent) StampMutationBody(target identity.AgentID, opTag string, body []byte) ([]byte, error) {
 	obj := map[string]json.RawMessage{}
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, fmt.Errorf("parse mutation body: %w", err)
 	}
-	delete(obj, "auth")
-	canonical, err := json.Marshal(obj)
+	hash, err := crypto.CanonicalBodyHash(body)
 	if err != nil {
-		return nil, fmt.Errorf("canonicalize mutation body: %w", err)
+		return nil, err
 	}
-	hash := crypto.HashBody(canonical)
-	if !a.cfg.CanSign() {
-		return nil, fmt.Errorf("management signing private key not configured (set management.signing_private_key)")
-	}
-	privKey, err := a.cfg.GetSigningPrivateKey()
+	env, err := a.signManagementEnvelope(target, opTag, hash)
 	if err != nil {
-		return nil, fmt.Errorf("load signing private key: %w", err)
+		return nil, err
 	}
-	env := crypto.SignManagement(privKey, a.id, target, opTag, hash)
-	crypto.ZeroSigningKey(&privKey)
 	envJSON, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("marshal auth envelope: %w", err)
@@ -1651,16 +1638,11 @@ func (a *Agent) VerifyMutationBody(opTag string, body []byte) error {
 	if err := json.Unmarshal(authRaw, &env); err != nil {
 		return fmt.Errorf("parse auth envelope: %w", err)
 	}
-	delete(obj, "auth")
-	canonical, err := json.Marshal(obj)
+	hash, err := crypto.CanonicalBodyHash(body)
 	if err != nil {
-		return fmt.Errorf("canonicalize mutation body: %w", err)
+		return err
 	}
-	pubKey, err := a.cfg.GetSigningPublicKey()
-	if err != nil {
-		return fmt.Errorf("load signing public key: %w", err)
-	}
-	return crypto.VerifyManagement(pubKey, a.id, env, opTag, crypto.HashBody(canonical))
+	return a.verifyManagementAuthFor(opTag)(&env, hash)
 }
 
 // DisplayName returns the agent's display name, or falls back to the short ID.
@@ -3563,11 +3545,11 @@ func (a *Agent) handleDisplayNameManage(data []byte) ([]byte, bool) {
 	return resp, true
 }
 
-// BrowseFiles handles file browsing requests (list, stat, roots). Used on
-// the local path when a browse request targets this agent directly; the
-// HTTP gateway doesn't attach a signature, so stamp one here so the
-// stream handler's verifier sees an authorized request when we have the
-// private key. Remote-dispatched browses come in through handleFileBrowse,
+// BrowseFiles handles a file browse request that targets this agent
+// directly through its HTTP API. The API caller already holds this agent's
+// signing authority, so the request is signed here with this agent's own
+// key (replacing any envelope the caller sent) before it is verified like
+// any other. Remote-dispatched browses come in through handleFileBrowse,
 // which rejects unsigned requests instead of stamping them.
 //
 // Implements the health.FileBrowseProvider interface.
@@ -3575,23 +3557,23 @@ func (a *Agent) BrowseFiles(req *filetransfer.BrowseRequest) *filetransfer.Brows
 	if a.fileStreamHandler == nil {
 		return &filetransfer.BrowseResponse{Error: "file transfer is disabled"}
 	}
-	if req.Auth == nil {
-		env, err := a.signManagementEnvelope(a.id, crypto.OpFile, nil)
-		if err != nil {
-			return &filetransfer.BrowseResponse{
-				Error:     err.Error(),
-				ErrorCode: filetransfer.ErrCodeAuthRequired,
-			}
+	env, hash, err := a.signBody(a.id, crypto.OpFile, req)
+	if err != nil {
+		return &filetransfer.BrowseResponse{
+			Error:     err.Error(),
+			ErrorCode: filetransfer.ErrCodeAuthRequired,
 		}
-		req.Auth = env
 	}
+	req.Auth = env
+	req.BodyHash = hash
 	return a.fileStreamHandler.Browse(req)
 }
 
 // handleFileBrowse handles a file browse control request from the control channel.
 // Unlike the local HTTP gateway path (BrowseFiles), remote requests must
-// carry a management signature from the originating agent; an unsigned
-// request is rejected instead of being stamped with this agent's own key.
+// carry a management signature from the originating agent, bound to the
+// request body; an unsigned request is rejected instead of being stamped
+// with this agent's own key.
 func (a *Agent) handleFileBrowse(data []byte) ([]byte, bool) {
 	var req filetransfer.BrowseRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -3606,8 +3588,19 @@ func (a *Agent) handleFileBrowse(data []byte) ([]byte, bool) {
 		})
 		return resp, false
 	}
+	if a.fileStreamHandler == nil {
+		resp, _ := json.Marshal(&filetransfer.BrowseResponse{Error: "file transfer is disabled"})
+		return resp, false
+	}
 
-	result := a.BrowseFiles(&req)
+	hash, err := crypto.CanonicalBodyHash(data)
+	if err != nil {
+		resp, _ := json.Marshal(map[string]string{"error": "invalid request: " + err.Error()})
+		return resp, false
+	}
+	req.BodyHash = hash
+
+	result := a.fileStreamHandler.Browse(&req)
 	resp, _ := json.Marshal(result)
 	return resp, result.Error == ""
 }
@@ -6470,6 +6463,11 @@ func (a *Agent) handleFileTransferStreamData(peerID identity.AgentID, streamID u
 			a.closeFileTransferStream(peerID, streamID, protocol.ErrConnectionRefused, "invalid metadata", "")
 			return
 		}
+		// Bind the signature to the metadata bytes as received.
+		if meta.BodyHash, err = crypto.CanonicalBodyHash(plaintext); err != nil {
+			a.closeFileTransferStream(peerID, streamID, protocol.ErrConnectionRefused, "invalid metadata", "")
+			return
+		}
 		fts.Meta = meta
 		fts.MetaReceived = true
 
@@ -6479,7 +6477,7 @@ func (a *Agent) handleFileTransferStreamData(peerID identity.AgentID, streamID u
 				a.logger.Error("file upload validation failed",
 					logging.KeyStreamID, streamID,
 					logging.KeyError, err)
-				a.closeFileTransferStream(peerID, streamID, protocol.ErrNotAllowed, err.Error(), filetransfer.AuthErrorCode(err))
+				a.closeFileTransferStream(peerID, streamID, protocol.ErrNotAllowed, err.Error(), filetransfer.ErrorCode(err))
 				return
 			}
 
@@ -6505,7 +6503,7 @@ func (a *Agent) handleFileTransferStreamData(peerID identity.AgentID, streamID u
 				a.logger.Error("file download validation failed",
 					logging.KeyStreamID, streamID,
 					logging.KeyError, err)
-				a.closeFileTransferStream(peerID, streamID, protocol.ErrNotAllowed, err.Error(), filetransfer.AuthErrorCode(err))
+				a.closeFileTransferStream(peerID, streamID, protocol.ErrNotAllowed, err.Error(), filetransfer.ErrorCode(err))
 				return
 			}
 			// Start goroutine to send file data
@@ -6622,8 +6620,8 @@ func (a *Agent) sendFileDownload(fts *fileTransferStream) {
 	var err error
 	var originalSize int64
 
-	// Check if this is a resume request
-	if fts.Meta.Offset > 0 {
+	// Check if this is a resume or ranged request
+	if fts.Meta.Offset > 0 || fts.Meta.Length > 0 {
 		// Validate that file hasn't changed
 		info, statErr := os.Stat(fts.Meta.Path)
 		if statErr != nil {
@@ -6647,8 +6645,8 @@ func (a *Agent) sendFileDownload(fts *fileTransferStream) {
 		}
 
 		// Use offset-aware reader
-		reader, size, mode, isDir, err = a.fileStreamHandler.ReadFileForDownloadAtOffset(
-			ctx, fts.Meta.Path, fts.Meta.Offset, fts.Meta.Compress)
+		reader, size, mode, isDir, err = a.fileStreamHandler.ReadFileRange(
+			ctx, fts.Meta.Path, fts.Meta.Offset, fts.Meta.Length, fts.Meta.Compress)
 		if err != nil {
 			a.logger.Error("file download read at offset failed",
 				logging.KeyStreamID, fts.StreamID,
@@ -6847,6 +6845,10 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 		return fmt.Errorf("cannot access local path: %w", err)
 	}
 
+	if targetID == a.id {
+		return a.uploadLocal(ctx, info, localPath, remotePath, opts)
+	}
+
 	// Find path to target agent
 	nextHop, remainingPath, conn, err := a.findPathToAgent(targetID)
 	if err != nil {
@@ -6920,27 +6922,13 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 	sessionKey := crypto.DeriveSessionKey(sharedSecret, pending.RequestID, ephPub, result.RemoteEphemeral, true)
 	crypto.ZeroKey(&sharedSecret)
 
-	// Build metadata
-	var fileSize int64 = -1
-	isDirectory := info.IsDir()
-	var fileMode uint32 = uint32(info.Mode().Perm())
-	if !isDirectory {
-		fileSize = info.Size()
-	}
-
-	authEnv, err := a.signManagementEnvelope(targetID, crypto.OpFile, nil)
+	meta := uploadMetadata(info, remotePath, opts)
+	meta.Compress = true
+	meta.RateLimit = opts.RateLimit
+	meta.Auth, _, err = a.signBody(targetID, crypto.OpFile, meta)
 	if err != nil {
 		a.WriteStreamClose(nextHop, streamID)
 		return err
-	}
-	meta := &filetransfer.TransferMetadata{
-		Path:        remotePath,
-		Mode:        fileMode,
-		Size:        fileSize,
-		IsDirectory: isDirectory,
-		Auth:        authEnv,
-		Compress:    true,
-		RateLimit:   opts.RateLimit,
 	}
 
 	// Encode and encrypt metadata
@@ -6991,7 +6979,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 
 	// Stream file/directory content with E2E encryption
 	var written int64
-	if isDirectory {
+	if meta.IsDirectory {
 		// Tar and stream directory
 		pr, pw := io.Pipe()
 
@@ -7058,7 +7046,7 @@ func (a *Agent) UploadFile(ctx context.Context, targetID identity.AgentID, local
 				reader = filetransfer.NewRateLimitedReader(ctx, f, opts.RateLimit)
 			}
 
-			written, err = a.streamFileContent(ctx, nextHop, streamID, reader, fileSize, progress, sessionKey)
+			written, err = a.streamFileContent(ctx, nextHop, streamID, reader, meta.Size, progress, sessionKey)
 			if err != nil {
 				return fmt.Errorf("stream file: %w", err)
 			}
@@ -7191,18 +7179,18 @@ func (a *Agent) DownloadFile(ctx context.Context, targetID identity.AgentID, rem
 	crypto.ZeroKey(&sharedSecret)
 
 	// Send encrypted request metadata (path to download)
-	authEnv, err := a.signManagementEnvelope(targetID, crypto.OpFile, nil)
-	if err != nil {
-		a.WriteStreamClose(nextHop, streamID)
-		return err
-	}
 	meta := &filetransfer.TransferMetadata{
 		Path:         remotePath,
-		Auth:         authEnv,
 		Compress:     true,
 		RateLimit:    opts.RateLimit,
 		Offset:       opts.Offset,
+		Length:       opts.Length,
 		OriginalSize: opts.OriginalSize,
+	}
+	meta.Auth, _, err = a.signBody(targetID, crypto.OpFile, meta)
+	if err != nil {
+		a.WriteStreamClose(nextHop, streamID)
+		return err
 	}
 
 	metaData, err := filetransfer.EncodeMetadata(meta)
@@ -7273,6 +7261,123 @@ func (a *Agent) DownloadFile(ctx context.Context, targetID identity.AgentID, rem
 	return nil
 }
 
+// uploadMetadata builds the transfer metadata for uploading the local file or
+// directory described by info to remotePath. A single file is created with
+// opts.Mode when set, otherwise with the local file's mode.
+func uploadMetadata(info os.FileInfo, remotePath string, opts health.TransferOptions) *filetransfer.TransferMetadata {
+	meta := &filetransfer.TransferMetadata{
+		Path:        remotePath,
+		Mode:        uint32(info.Mode().Perm()),
+		Size:        -1,
+		IsDirectory: info.IsDir(),
+	}
+	if !meta.IsDirectory {
+		meta.Size = info.Size()
+		if opts.Mode != 0 {
+			meta.Mode = opts.Mode
+		}
+	}
+	return meta
+}
+
+// localTransferMeta signs meta with this agent's own key and runs it
+// through the same verification and path checks as a transfer arriving
+// from the mesh, so a local transfer is held to the same policy
+// (allowed_paths, max_file_size, signing key). Failures come back as
+// *filetransfer.RemoteError so the HTTP layer maps them like remote ones.
+func (a *Agent) localTransferMeta(meta *filetransfer.TransferMetadata, upload bool) error {
+	env, hash, err := a.signBody(a.id, crypto.OpFile, meta)
+	if err != nil {
+		return err
+	}
+	meta.Auth, meta.BodyHash = env, hash
+	if upload {
+		err = a.fileStreamHandler.ValidateUploadMetadata(meta)
+	} else {
+		err = a.fileStreamHandler.ValidateDownloadMetadata(meta)
+	}
+	return asRemoteError(err)
+}
+
+// asRemoteError wraps err as a *filetransfer.RemoteError carrying its wire
+// code, or returns nil for a nil err.
+func asRemoteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &filetransfer.RemoteError{Code: filetransfer.ErrorCode(err), Message: err.Error()}
+}
+
+// uploadLocal writes localPath to remotePath on this agent, for uploads
+// addressed to the agent's own ID.
+func (a *Agent) uploadLocal(ctx context.Context, info os.FileInfo, localPath, remotePath string, opts health.TransferOptions) error {
+	meta := uploadMetadata(info, remotePath, opts)
+	if err := a.localTransferMeta(meta, true); err != nil {
+		return err
+	}
+
+	var src io.Reader
+	if meta.IsDirectory {
+		pr, pw := io.Pipe()
+		go func() { pw.CloseWithError(filetransfer.TarDirectory(ctx, localPath, pw)) }()
+		defer pr.Close()
+		src = pr
+	} else {
+		f, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("open local file: %w", err)
+		}
+		defer f.Close()
+		src = f
+	}
+	_, err := a.fileStreamHandler.WriteUploadedFile(ctx, meta.Path, src, meta.Mode, meta.IsDirectory, false)
+	return asRemoteError(err)
+}
+
+// downloadLocal streams remotePath from this agent, for downloads
+// addressed to the agent's own ID.
+func (a *Agent) downloadLocal(ctx context.Context, remotePath string, opts health.TransferOptions) (*health.DownloadStreamResult, error) {
+	meta := &filetransfer.TransferMetadata{
+		Path:         remotePath,
+		Offset:       opts.Offset,
+		Length:       opts.Length,
+		OriginalSize: opts.OriginalSize,
+	}
+	if err := a.localTransferMeta(meta, false); err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(meta.Path)
+	if err != nil {
+		return nil, asRemoteError(err)
+	}
+	if info.IsDir() {
+		// The tar.gz stream is an *io.PipeReader; closing it stops the
+		// archiving goroutine.
+		reader, _, mode, _, err := a.fileStreamHandler.ReadFileForDownload(ctx, meta.Path, true)
+		if err != nil {
+			return nil, asRemoteError(err)
+		}
+		return &health.DownloadStreamResult{Reader: reader.(io.ReadCloser), Size: -1, Mode: mode, IsDirectory: true, Compressed: true}, nil
+	}
+	if opts.OriginalSize > 0 && info.Size() != opts.OriginalSize {
+		return nil, &filetransfer.RemoteError{Message: "file size changed"}
+	}
+
+	reader, size, mode, _, err := a.fileStreamHandler.ReadFileRange(ctx, meta.Path, opts.Offset, opts.Length, false)
+	if err != nil {
+		return nil, asRemoteError(err)
+	}
+	rc := reader.(io.ReadCloser)
+	if opts.RateLimit > 0 {
+		rc = struct {
+			io.Reader
+			io.Closer
+		}{filetransfer.NewRateLimitedReader(ctx, rc, opts.RateLimit), rc}
+	}
+	return &health.DownloadStreamResult{Reader: rc, Size: size, OriginalSize: info.Size(), Mode: mode}, nil
+}
+
 // DownloadFileStream opens a streaming download from a remote agent.
 // Returns a reader that streams file data directly without writing to disk.
 // The caller must call Close() on the result when done.
@@ -7280,6 +7385,10 @@ func (a *Agent) DownloadFileStream(ctx context.Context, targetID identity.AgentI
 	// Check if file transfer is enabled locally
 	if a.fileStreamHandler == nil {
 		return nil, fmt.Errorf("file transfer is disabled")
+	}
+
+	if targetID == a.id {
+		return a.downloadLocal(ctx, remotePath, opts)
 	}
 
 	// Find path to target agent
@@ -7356,18 +7465,18 @@ func (a *Agent) DownloadFileStream(ctx context.Context, targetID identity.AgentI
 	crypto.ZeroKey(&sharedSecret)
 
 	// Send encrypted request metadata (path to download)
-	authEnv, err := a.signManagementEnvelope(targetID, crypto.OpFile, nil)
-	if err != nil {
-		a.WriteStreamClose(nextHop, streamID)
-		return nil, err
-	}
 	meta := &filetransfer.TransferMetadata{
 		Path:         remotePath,
-		Auth:         authEnv,
 		Compress:     true,
 		RateLimit:    opts.RateLimit,
 		Offset:       opts.Offset,
+		Length:       opts.Length,
 		OriginalSize: opts.OriginalSize,
+	}
+	meta.Auth, _, err = a.signBody(targetID, crypto.OpFile, meta)
+	if err != nil {
+		a.WriteStreamClose(nextHop, streamID)
+		return nil, err
 	}
 
 	metaData, err := filetransfer.EncodeMetadata(meta)
@@ -7787,7 +7896,7 @@ func (a *Agent) OpenShellStream(ctx context.Context, targetID identity.AgentID, 
 	// Sign the metadata before we send anything on the wire. This is the
 	// authorization step: refusing here when the agent cannot sign keeps
 	// unauthenticated requests from ever reaching the remote.
-	env, err := a.signManagementEnvelope(targetID, crypto.OpShell, nil)
+	env, _, err := a.signBody(targetID, crypto.OpShell, meta)
 	if err != nil {
 		return nil, err
 	}

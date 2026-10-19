@@ -62,13 +62,15 @@ Results for some common entries:
 
 Because a parent directory match is enough, `/tmp/*` allows everything below `/tmp`, not only its direct children. Entries must be absolute: a relative pattern such as `*.log` matches nothing.
 
+A path must also stay allowed after symbolic links are resolved. A link inside an allowed directory that points outside it cannot be used to read, write, list, or change anything outside, whether it is the last path component or a parent directory. Deleting or renaming the link itself is allowed.
+
 :::danger
 `allowed_paths: ["*"]` gives signed callers read and write access to every file the agent's user can access. Use it only on test systems.
 :::
 
 ## Transfers
 
-Directories are sent as gzip-compressed tar archives that keep the permission bits of the files inside them. A single file uploaded through the HTTP API, which the CLI uses, is written with mode `0600`. The CLI can resume interrupted downloads with `--resume`; see [file transfer CLI](/cli/file-transfer).
+Directories are sent as gzip-compressed tar archives that keep the permission bits of the files inside them. A new file uploaded through the HTTP API, which the CLI uses, is written with mode `0600` unless the request sets another mode; overwriting an existing file keeps its mode. Directories created with the browse `mkdir` action get mode `0700`. The CLI can resume interrupted downloads with `--resume`; see [file transfer CLI](/cli/file-transfer).
 
 ## Examples
 

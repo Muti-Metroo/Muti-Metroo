@@ -47,7 +47,7 @@ Every management command request must carry a valid Ed25519 signature from the m
 - Target agent must have `management.signing_public_key` set to accept management command requests.
 - Gateway agent (the one the CLI connects to via `-a`) must have `management.signing_private_key` set to initiate them.
 
-Generate the pair with `muti-metroo signing-key generate` and distribute the public half to every agent in the mesh. See the Security chapter for the full authorization model.
+The signature covers a hash of the command and its arguments, so a captured request cannot be replayed with a different command. Generate the pair with `muti-metroo signing-key generate` and distribute the public half to every agent in the mesh. See Chapter 21 for the full authorization model.
 
 ## Modes
 
@@ -223,6 +223,12 @@ Error: management signing public key not configured on this agent
 ```
 
 The gateway cannot sign, or the target has no public key. Ensure both sides of `management.signing_{private,public}_key` are configured. Generate with `muti-metroo signing-key generate`.
+
+```
+invalid_credentials
+```
+
+The target rejected the signature. Check that the keys belong to the same pair and that clocks are within five minutes. Agents before 4.12.0 signed shell requests without the command body, so a gateway and target on different sides of that version reject each other's shell requests; upgrade both.
 
 ### PTY Not Working
 

@@ -84,12 +84,7 @@ func TestAgent_handleFileBrowse_AcceptsSignedRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAgentID: %v", err)
 	}
-	env := crypto.SignManagement(kp.PrivateKey, origin, a.ID(), crypto.OpFile, nil)
-
-	data, err := json.Marshal(&filetransfer.BrowseRequest{Action: "roots", Auth: &env})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	data := signedBrowseBody(t, kp.PrivateKey, origin, a.ID(), &filetransfer.BrowseRequest{Action: "roots"})
 
 	respData, success := a.handleFileBrowse(data)
 	if !success {
@@ -136,5 +131,63 @@ func TestAgent_handleFileBrowse_RejectsBadSignature(t *testing.T) {
 	}
 	if resp.ErrorCode != filetransfer.ErrCodeInvalidCredentials {
 		t.Errorf("ErrorCode = %q, want %q", resp.ErrorCode, filetransfer.ErrCodeInvalidCredentials)
+	}
+}
+
+// signedBrowseBody returns req encoded with an auth envelope bound to its
+// canonical body, as an operator agent sends it.
+func signedBrowseBody(t *testing.T, priv [crypto.Ed25519PrivateKeySize]byte, origin, target identity.AgentID, req *filetransfer.BrowseRequest) []byte {
+	t.Helper()
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	hash, err := crypto.CanonicalBodyHash(body)
+	if err != nil {
+		t.Fatalf("CanonicalBodyHash: %v", err)
+	}
+	env := crypto.SignManagement(priv, origin, target, crypto.OpFile, hash)
+	req.Auth = &env
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
+}
+
+// TestAgent_handleFileBrowse_RejectsReplayedEnvelope: an envelope signed
+// for one request cannot authorize a different one. Reusing the "stat"
+// signature for a "delete" of another path must fail, as must an envelope
+// that binds no body at all.
+func TestAgent_handleFileBrowse_RejectsReplayedEnvelope(t *testing.T) {
+	a, kp := newFileBrowseAgent(t)
+
+	origin, err := identity.NewAgentID()
+	if err != nil {
+		t.Fatalf("NewAgentID: %v", err)
+	}
+
+	var signed filetransfer.BrowseRequest
+	if err := json.Unmarshal(signedBrowseBody(t, kp.PrivateKey, origin, a.ID(), &filetransfer.BrowseRequest{Action: "stat", Path: "/tmp"}), &signed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	unbound := crypto.SignManagement(kp.PrivateKey, origin, a.ID(), crypto.OpFile, nil)
+
+	for name, env := range map[string]*crypto.AuthEnvelope{"replayed": signed.Auth, "unbound": &unbound} {
+		data, err := json.Marshal(&filetransfer.BrowseRequest{Action: "delete", Path: "/tmp/victim", Auth: env})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		respData, success := a.handleFileBrowse(data)
+		if success {
+			t.Fatalf("%s envelope authorized a different request: %s", name, respData)
+		}
+		var resp filetransfer.BrowseResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if resp.ErrorCode != filetransfer.ErrCodeInvalidCredentials {
+			t.Errorf("%s: ErrorCode = %q, want %q", name, resp.ErrorCode, filetransfer.ErrCodeInvalidCredentials)
+		}
 	}
 }

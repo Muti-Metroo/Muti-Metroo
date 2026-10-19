@@ -16,11 +16,12 @@ import (
 	"github.com/Muti-Metroo/Muti-Metroo/internal/protocol"
 )
 
-// AuthVerifier checks a shell request's management signature. Returning
-// nil means the request is authorized; any error rejects it. Implementations
-// typically wrap crypto.VerifyManagement with the agent's configured public
-// key and self ID.
-type AuthVerifier func(env *crypto.AuthEnvelope) error
+// AuthVerifier checks a shell request's management signature. bodyHash is
+// crypto.CanonicalBodyHash of the META payload as received, which the
+// signature must cover. Returning nil means the request is authorized; any
+// error rejects it. Implementations typically wrap crypto.VerifyManagement
+// with the agent's configured public key and self ID.
+type AuthVerifier func(env *crypto.AuthEnvelope, bodyHash []byte) error
 
 // DataWriter is the interface for sending data to a stream.
 type DataWriter interface {
@@ -273,7 +274,12 @@ func (h *Handler) handleMetadata(ss *ShellStream, data []byte) {
 	ss.Meta = meta
 	ss.MetaReceived = true
 
-	if err := h.verify(meta.Auth); err != nil {
+	bodyHash, err := crypto.CanonicalBodyHash(payload)
+	if err != nil {
+		fail("invalid metadata: "+err.Error(), 0)
+		return
+	}
+	if err := h.verify(meta.Auth, bodyHash); err != nil {
 		switch {
 		case errors.Is(err, crypto.ErrAuthMissing):
 			fail("management signature required", ErrCodeAuthRequired)

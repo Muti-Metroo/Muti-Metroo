@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"runtime"
@@ -15,7 +16,7 @@ import (
 // allowAllVerifier is an AuthVerifier that accepts every envelope.
 // Tests that do not exercise the auth path use it so NewHandler has a
 // valid verifier without constructing a real keypair.
-func allowAllVerifier(_ *crypto.AuthEnvelope) error { return nil }
+func allowAllVerifier(_ *crypto.AuthEnvelope, _ []byte) error { return nil }
 
 // testEphemeralKey generates a test ephemeral key pair for testing.
 func testEphemeralKey(t *testing.T) [crypto.KeySize]byte {
@@ -574,7 +575,7 @@ func TestHandler_HandleMetadata_AuthMissing(t *testing.T) {
 		Whitelist:   []string{"*"},
 	})
 
-	rejectMissing := func(env *crypto.AuthEnvelope) error {
+	rejectMissing := func(env *crypto.AuthEnvelope, _ []byte) error {
 		if env == nil || len(env.Signature) == 0 {
 			return crypto.ErrAuthMissing
 		}
@@ -614,7 +615,7 @@ func TestHandler_HandleMetadata_BadSignature(t *testing.T) {
 		Whitelist:   []string{"*"},
 	})
 
-	alwaysReject := func(_ *crypto.AuthEnvelope) error { return crypto.ErrAuthBadSignature }
+	alwaysReject := func(_ *crypto.AuthEnvelope, _ []byte) error { return crypto.ErrAuthBadSignature }
 	handler := NewHandler(exec, writer, alwaysReject, logger)
 	defer handler.Close()
 
@@ -661,12 +662,7 @@ func TestHandler_HandleMetadata_AuthSuccess(t *testing.T) {
 	}
 	origin := mustNewAgentID(t)
 	self := mustNewAgentID(t)
-	verify := func(env *crypto.AuthEnvelope) error {
-		if env == nil {
-			return crypto.ErrAuthMissing
-		}
-		return crypto.VerifyManagement(kp.PublicKey, self, *env, crypto.OpShell, nil)
-	}
+	verify := realShellVerifier(kp, self)
 	handler := NewHandler(exec, writer, verify, logger)
 	defer handler.Close()
 
@@ -676,12 +672,9 @@ func TestHandler_HandleMetadata_AuthSuccess(t *testing.T) {
 
 	sessionKey := openStreamWithSessionKey(t, handler, peerID, streamID, requestID, false)
 
-	env := crypto.SignManagement(kp.PrivateKey, origin, self, crypto.OpShell, nil)
-	sendEncryptedMeta(t, handler, sessionKey, peerID, streamID, &ShellMeta{
-		Command: "echo",
-		Args:    []string{"hi"},
-		Auth:    &env,
-	})
+	meta := &ShellMeta{Command: "echo", Args: []string{"hi"}}
+	meta.Auth = signShellMeta(t, kp, origin, self, meta)
+	sendEncryptedMeta(t, handler, sessionKey, peerID, streamID, meta)
 
 	// Expect ACK as first decrypted message
 	deadline := time.Now().Add(2 * time.Second)
@@ -710,6 +703,65 @@ func TestHandler_HandleMetadata_AuthSuccess(t *testing.T) {
 	}
 	if !gotAck {
 		t.Fatal("did not receive MsgAck for valid signature")
+	}
+}
+
+// realShellVerifier verifies against kp exactly as the agent does,
+// including the body hash the handler computes from the META payload.
+func realShellVerifier(kp *crypto.SigningKeypair, self identity.AgentID) AuthVerifier {
+	return func(env *crypto.AuthEnvelope, bodyHash []byte) error {
+		if env == nil {
+			return crypto.ErrAuthMissing
+		}
+		return crypto.VerifyManagement(kp.PublicKey, self, *env, crypto.OpShell, bodyHash)
+	}
+}
+
+// signShellMeta signs meta (auth unset) the way a gateway agent does.
+func signShellMeta(t *testing.T, kp *crypto.SigningKeypair, origin, self identity.AgentID, meta *ShellMeta) *crypto.AuthEnvelope {
+	t.Helper()
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+	hash, err := crypto.CanonicalBodyHash(body)
+	if err != nil {
+		t.Fatalf("CanonicalBodyHash: %v", err)
+	}
+	env := crypto.SignManagement(kp.PrivateKey, origin, self, crypto.OpShell, hash)
+	return &env
+}
+
+// TestHandler_HandleMetadata_TamperedCommand: an envelope signed for one
+// command must not authorize another. The signature covers the command and
+// its arguments, so swapping them is rejected as invalid credentials.
+func TestHandler_HandleMetadata_TamperedCommand(t *testing.T) {
+	writer := newMockDataWriter()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	exec := NewExecutor(Config{Enabled: true, MaxSessions: 10, Whitelist: []string{"*"}})
+
+	kp, err := crypto.GenerateSigningKeypair()
+	if err != nil {
+		t.Fatalf("generate keypair: %v", err)
+	}
+	origin, self := mustNewAgentID(t), mustNewAgentID(t)
+	handler := NewHandler(exec, writer, realShellVerifier(kp, self), logger)
+	defer handler.Close()
+
+	peerID := mustNewAgentID(t)
+	sessionKey := openStreamWithSessionKey(t, handler, peerID, 1, 1, false)
+
+	signed := &ShellMeta{Command: "echo", Args: []string{"hi"}}
+	env := signShellMeta(t, kp, origin, self, signed)
+	sendEncryptedMeta(t, handler, sessionKey, peerID, 1, &ShellMeta{
+		Command: "rm",
+		Args:    []string{"-rf", "/tmp/victim"},
+		Auth:    env,
+	})
+
+	shellErr := waitForShellError(t, writer, sessionKey, 1)
+	if shellErr.Code != ErrCodeInvalidCredentials {
+		t.Errorf("ShellError.Code = %d, want %d (ErrCodeInvalidCredentials)", shellErr.Code, ErrCodeInvalidCredentials)
 	}
 }
 

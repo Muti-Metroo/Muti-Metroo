@@ -131,7 +131,9 @@ File,Disabled state rejection,file_transfer.enabled=false returns error,2,L,file
 File,Directory upload (tar+gz),Upload a directory tree,2,M,file_transfer::DirectoryUpload,-,Full,High,"Client uses filetransfer.TarDirectory; server untars into the allowed path"
 File,Directory download (tar+gz),Download a directory tree,2,M,file_transfer::DirectoryDownload,-,Full,High,"Server streams plain tar (streamReader decompresses gzip internally); test extracts with tar.NewReader"
 File,Permission preservation,Mode bits preserved on round-trip,2,M,file_transfer::DirectoryPermissions,-,Full,Med,0644/0600/0755 files survive upload and download round-trip
-File,Browse / list directory,POST /agents/{id}/file/browse,2,L,-,-,None,Med,Endpoint with no test
+File,Browse / list directory,POST /agents/{id}/file/browse,2,L,file_share_ops::ShareOperations,-,Partial,Med,mkdir and rename (with duplicate/escape errors) and list through a symlink exercised; list/stat/chmod/delete success paths only in unit tests
+File,Ranged download and self-targeted transfers,offset+length download from remote and from the gateway itself; upload to the gateway's own ID,2,M,file_share_ops::ShareOperations,-,Full,Med,Used by the Muti Metroo Manager WebDAV file share gateway
+File,Symlinked-parent escape refused,Browse and download through a symlinked parent directory pointing outside allowed_paths are refused,2,M,file_share_ops::ShareOperations,-,Full,High,Security: previously only a symlinked final component was checked
 File,Concurrent uploads,Multiple uploads in parallel do not corrupt,2,M,-,-,None,Med,Concurrency
 ICMP,Echo request basic,muti-metroo ping <agent> <ip> single echo,2,M,icmp::Basic,-,Full,High,SOCKS5 ICMP_ECHO round-trip via 4-agent chain to 127.0.0.1; verifies sequence and payload (identifier is rewritten by unprivileged ICMP socket so not asserted)
 ICMP,Echo with count + interval,-c 4 -i 500ms semantics,2,L,icmp::CountAndInterval,-,Full,Med,4 echoes with 50ms interval; all replies returned in order

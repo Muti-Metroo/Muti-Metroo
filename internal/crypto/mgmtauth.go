@@ -3,6 +3,7 @@ package crypto
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -64,10 +65,9 @@ var (
 )
 
 // ManagementSignable returns the canonical bytes covered by the envelope
-// signature. bodyHash may be nil -- shell and file-transfer bind only to
-// the (origin, target, timestamp, opTag) tuple since target-side policy
-// (command whitelist, allowed paths, size limits) constrains what the
-// operation can actually do.
+// signature. Every operation binds its request body through bodyHash
+// (see CanonicalBodyHash), so a captured envelope cannot be replayed with
+// a different path, command, or payload within the timestamp window.
 func ManagementSignable(env AuthEnvelope, opTag string, bodyHash []byte) []byte {
 	out := make([]byte, 0, identity.IDSize+identity.IDSize+8+len(opTag)+len(bodyHash))
 	out = append(out, env.OriginAgent[:]...)
@@ -120,10 +120,26 @@ func VerifyManagement(publicKey [Ed25519PublicKeySize]byte, selfID identity.Agen
 	return nil
 }
 
-// HashBody returns sha256(b). Convenience for mutation handlers binding
-// the JSON request body (with the auth envelope stripped) into the
-// signature.
+// HashBody returns sha256(b).
 func HashBody(b []byte) []byte {
 	h := sha256.Sum256(b)
 	return h[:]
+}
+
+// CanonicalBodyHash returns the body hash bound into a management
+// signature: sha256 over body, a JSON object, re-serialized with its
+// "auth" key removed (encoding/json sorts the keys). The signer hashes the
+// bytes it sends and the verifier the bytes it receives, so fields that
+// one side does not know about are still covered.
+func CanonicalBodyHash(body []byte) ([]byte, error) {
+	obj := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil, fmt.Errorf("parse body: %w", err)
+	}
+	delete(obj, "auth")
+	canonical, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize body: %w", err)
+	}
+	return HashBody(canonical), nil
 }

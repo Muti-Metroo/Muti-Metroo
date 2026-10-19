@@ -175,9 +175,11 @@ type DownloadStreamResult struct {
 // Authentication is not represented here -- the implementing agent stamps
 // the outgoing transfer metadata with a management-key signature.
 type TransferOptions struct {
-	RateLimit    int64 // Max bytes per second (0 = unlimited)
-	Offset       int64 // Resume from this byte offset (for downloads)
-	OriginalSize int64 // Expected file size for resume validation
+	RateLimit    int64  // Max bytes per second (0 = unlimited)
+	Offset       int64  // Resume from this byte offset (for downloads)
+	Length       int64  // Read at most this many bytes from Offset (downloads; 0 = to end)
+	OriginalSize int64  // Expected file size for resume validation
+	Mode         uint32 // Permission bits for a newly created file (uploads; 0 = the local file's mode)
 }
 
 // PeerDetails contains detailed information about a connected peer.
@@ -788,14 +790,20 @@ func writeFileTransferError(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &remoteErr) {
 		return false
 	}
-	status := fileTransferAuthStatus(remoteErr.Code)
-	if status == 0 {
+	if remoteErr.Code == "" {
 		return false
+	}
+	status, msg := fileTransferAuthStatus(remoteErr.Code), remoteErr.Message
+	if status == 0 {
+		// A refusal with a stable code (not_found, not_allowed, ...) keeps
+		// the 502 and "remote error: ..." text of other target failures,
+		// and adds the code.
+		status, msg = http.StatusBadGateway, "remote error: "+remoteErr.Message
 	}
 	writeJSON(w, status, map[string]interface{}{
 		"success": false,
 		"code":    remoteErr.Code,
-		"error":   remoteErr.Message,
+		"error":   msg,
 	})
 	return true
 }
@@ -1100,15 +1108,11 @@ func (s *Server) SetDisplayNameManageProvider(provider DisplayNameManageProvider
 // forwarding them.
 type MgmtAuthProvider interface {
 	CanSignManagement() bool
-	// StampMutationBody is used for dynamic-config mutations; the
-	// signature binds the canonical body hash so a signed "add route X"
-	// cannot be replayed as "remove route Y".
+	// StampMutationBody signs body for the target and operation. The
+	// signature binds the canonical body hash, so a signed "add route X"
+	// cannot be replayed as "remove route Y", nor a browse of one path as
+	// a delete of another.
 	StampMutationBody(target identity.AgentID, opTag string, body []byte) ([]byte, error)
-	// StampBody is used for file browse and other file operations whose
-	// target-side verifier expects an envelope without a body hash
-	// (target policy -- allowed_paths, max_file_size -- constrains what
-	// the operation can do).
-	StampBody(target identity.AgentID, opTag string, body []byte) ([]byte, error)
 }
 
 // SetMgmtAuthProvider sets the management-auth provider used by mutation
@@ -1488,6 +1492,8 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 //   - file: the file to upload (can be a tar archive for directories)
 //   - path: remote destination path (required)
 //   - directory: "true" if uploading a directory tar (optional)
+//   - mode: octal permission bits for a newly created file (optional,
+//     default 0600; an existing file keeps its mode)
 //
 // Response: JSON with success, error, bytes_written
 func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, targetID identity.AgentID) {
@@ -1509,6 +1515,16 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, target
 	}
 
 	isDirectory := r.FormValue("directory") == "true"
+
+	var mode uint32
+	if m := r.FormValue("mode"); m != "" {
+		parsed, err := filetransfer.ParseOctalMode(m)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mode = uint32(parsed)
+	}
 
 	// Parse rate limit
 	var rateLimit int64
@@ -1585,6 +1601,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request, target
 	opts := TransferOptions{
 		RateLimit:    rateLimit,
 		OriginalSize: originalSize,
+		Mode:         mode,
 	}
 
 	// Perform stream-based upload. Bind ctx to agent stop so a wedged mesh
@@ -1639,6 +1656,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request, targ
 		Path         string `json:"path"`
 		RateLimit    int64  `json:"rate_limit,omitempty"`
 		Offset       int64  `json:"offset,omitempty"`
+		Length       int64  `json:"length,omitempty"`
 		OriginalSize int64  `json:"original_size,omitempty"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -1661,6 +1679,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request, targ
 	opts := TransferOptions{
 		RateLimit:    req.RateLimit,
 		Offset:       req.Offset,
+		Length:       req.Length,
 		OriginalSize: req.OriginalSize,
 	}
 
@@ -1945,20 +1964,8 @@ func (s *Server) handleMeshHostSuffixManage(w http.ResponseWriter, r *http.Reque
 // forwardRemoteControl forwards a control request body to a remote agent and relays the response.
 // Used by both route and forward management remote handlers.
 func (s *Server) forwardRemoteControl(w http.ResponseWriter, r *http.Request, targetID identity.AgentID, controlType uint8, featureName string) {
-	s.forwardRemoteControlWithStatus(w, r, targetID, controlType, featureName, nil, nil, signWithBodyHash)
+	s.forwardRemoteControlWithStatus(w, r, targetID, controlType, featureName, nil, nil)
 }
-
-// signStrategy selects how a forwarded request is stamped. Mutations
-// bind the canonical body hash (so swapping fields invalidates the
-// signature); file operations sign only the (origin, target, timestamp,
-// op) tuple to match the verifier used by shell and file-transfer
-// streams.
-type signStrategy int
-
-const (
-	signWithBodyHash signStrategy = iota
-	signWithoutBodyHash
-)
 
 // forwardRemoteControlMutation is forwardRemoteControl for mutation
 // endpoints: it requires the local agent to hold the management signing
@@ -1966,7 +1973,7 @@ const (
 // forwarding. opTagFor returns the crypto.Op* tag for a given action
 // string (e.g. "add", "remove") or "" if the action is not a mutation.
 func (s *Server) forwardRemoteControlMutation(w http.ResponseWriter, r *http.Request, targetID identity.AgentID, controlType uint8, featureName string, opTagFor func(action string) string) {
-	s.forwardRemoteControlWithStatus(w, r, targetID, controlType, featureName, nil, opTagFor, signWithBodyHash)
+	s.forwardRemoteControlWithStatus(w, r, targetID, controlType, featureName, nil, opTagFor)
 }
 
 // forwardRemoteControlWithStatus is forwardRemoteControl with an optional
@@ -1974,9 +1981,8 @@ func (s *Server) forwardRemoteControlMutation(w http.ResponseWriter, r *http.Req
 // status to use (e.g. 401 for auth failures). nil = default 400.
 // opTagFor, when non-nil, makes this a signing forwarder: the request's
 // "action" is looked up, and if it resolves to a non-empty op tag the
-// local agent must sign the body before forwarding. strategy decides
-// whether the signature binds the canonical body hash.
-func (s *Server) forwardRemoteControlWithStatus(w http.ResponseWriter, r *http.Request, targetID identity.AgentID, controlType uint8, featureName string, errStatusFn func([]byte) int, opTagFor func(action string) string, strategy signStrategy) {
+// local agent must sign the body before forwarding.
+func (s *Server) forwardRemoteControlWithStatus(w http.ResponseWriter, r *http.Request, targetID identity.AgentID, controlType uint8, featureName string, errStatusFn func([]byte) int, opTagFor func(action string) string) {
 	if !requirePOST(w, r) {
 		return
 	}
@@ -2005,13 +2011,7 @@ func (s *Server) forwardRemoteControlWithStatus(w http.ResponseWriter, r *http.R
 				http.Error(w, "management signing private key not configured on this agent", http.StatusForbidden)
 				return
 			}
-			var signed []byte
-			switch strategy {
-			case signWithoutBodyHash:
-				signed, err = s.mgmtAuthProvider.StampBody(targetID, opTag, body)
-			default:
-				signed, err = s.mgmtAuthProvider.StampMutationBody(targetID, opTag, body)
-			}
+			signed, err := s.mgmtAuthProvider.StampMutationBody(targetID, opTag, body)
 			if err != nil {
 				http.Error(w, "failed to sign request: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -2308,9 +2308,7 @@ func (s *Server) handleFileBrowse(w http.ResponseWriter, r *http.Request, target
 	// For remote agents, forward via control channel. The status decoder
 	// maps BrowseResponse.ErrorCode back onto 401/403 for auth failures so
 	// the frontend surfaces the right status. File browse is privileged:
-	// every request must be signed with the management key, but the
-	// signature does NOT bind the body hash (matches the file-transfer
-	// stream verifier used by upload/download).
+	// every request is signed with the management key, bound to the body.
 	if targetID != s.remoteProvider.ID() {
 		s.forwardRemoteControlWithStatus(w, r, targetID, protocol.ControlTypeFileBrowse, "file browse", func(data []byte) int {
 			var decoded filetransfer.BrowseResponse
@@ -2318,7 +2316,7 @@ func (s *Server) handleFileBrowse(w http.ResponseWriter, r *http.Request, target
 				return 0
 			}
 			return fileTransferAuthStatus(decoded.ErrorCode)
-		}, func(_ string) string { return crypto.OpFile }, signWithoutBodyHash)
+		}, func(_ string) string { return crypto.OpFile })
 		return
 	}
 

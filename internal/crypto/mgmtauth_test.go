@@ -124,3 +124,27 @@ func TestVerifyWrongOpTag(t *testing.T) {
 		t.Fatalf("want ErrAuthBadSignature on op tag swap, got %v", err)
 	}
 }
+
+func TestCanonicalBodyHash_IgnoresAuthAndKeyOrder(t *testing.T) {
+	a, err := CanonicalBodyHash([]byte(`{"path":"/tmp","action":"stat"}`))
+	if err != nil {
+		t.Fatalf("CanonicalBodyHash: %v", err)
+	}
+	b, err := CanonicalBodyHash([]byte(`{"action":"stat","auth":{"timestamp":1},"path":"/tmp"}`))
+	if err != nil {
+		t.Fatalf("CanonicalBodyHash: %v", err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Error("hash should ignore the auth field and key order")
+	}
+	c, err := CanonicalBodyHash([]byte(`{"action":"stat","path":"/etc"}`))
+	if err != nil {
+		t.Fatalf("CanonicalBodyHash: %v", err)
+	}
+	if bytes.Equal(a, c) {
+		t.Error("hash should change with the body")
+	}
+	if _, err := CanonicalBodyHash([]byte(`[1,2]`)); err == nil {
+		t.Error("a non-object body should be rejected")
+	}
+}

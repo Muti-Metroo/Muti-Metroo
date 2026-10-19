@@ -77,6 +77,7 @@ type AgentChain struct {
 	HTTPAddrs          [4]string // HTTP health server addresses (set after start)
 	ShellConfig        *config.ShellConfig
 	FileTransferConfig *config.FileTransferConfig
+	FileTransferOnA    bool   // Also apply FileTransferConfig to agent A (transfers addressed to the gateway itself)
 	EnableHTTP         bool   // Enable HTTP server on agent A
 	HTTPAllAgents      bool   // Also enable HTTP on every agent (uses same HTTPConfigure on each)
 	SOCKS5AllAgents    bool   // Also enable SOCKS5 on every agent (e.g. expose-over-SOCKS on the exit)
@@ -241,6 +242,10 @@ func (c *AgentChain) buildConfig(i int) *config.Config {
 				TLS:       config.TLSConfig{},
 			},
 		}
+	}
+
+	if i == 0 && c.FileTransferOnA && c.FileTransferConfig != nil {
+		cfg.FileTransfer = *c.FileTransferConfig
 	}
 
 	// D is the exit node

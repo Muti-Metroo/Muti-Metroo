@@ -239,6 +239,10 @@ password. When a request fails with `403`/`signature required` or
    target's config.
 4. Operator and target clocks are within ~5 minutes of each other. Every
    envelope carries a timestamp and the server enforces a window.
+5. Both agents run 4.12.0 or later, or both run an earlier version. Since
+   4.12.0 the signature covers the request body of shell and file
+   operations, so a mixed-version gateway and target reject each other's
+   shell and file requests with `invalid_credentials`. Upgrade both.
 
 There is no `muti-metroo hash` workflow for management commands. See chapter 21 for the full
 management key lifecycle.

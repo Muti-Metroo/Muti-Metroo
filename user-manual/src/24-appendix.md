@@ -215,7 +215,7 @@ Remote agent / management (gated by `http.remote_api: true`):
 | `/agents/{id}/icmp`                     | GET    | WebSocket ICMP ping session (subprotocol `muti-metroo-icmp`)           |
 | `/agents/{id}/file/upload`              | POST   | Upload file to remote agent                                      |
 | `/agents/{id}/file/download`            | POST   | Download file from remote agent                                  |
-| `/agents/{id}/file/browse`              | POST   | Browse filesystem on remote agent                                |
+| `/agents/{id}/file/browse`              | POST   | Browse and manage files on remote agent                          |
 | `/agents/{id}/probe`                    | POST   | Probe a listener from remote agent                               |
 | `/agents/{id}/route/trace`              | POST   | Route trace from remote agent                                    |
 | `/agents/{id}/routes/manage`            | POST   | Manage routes on remote agent                                    |

@@ -32,7 +32,7 @@ func TestBrowse_AuthRequired(t *testing.T) {
 		t.Fatalf("expected ErrCodeAuthRequired, got: %q (%q)", resp.ErrorCode, resp.Error)
 	}
 
-	rejectBad := func(_ *crypto.AuthEnvelope) error { return crypto.ErrAuthBadSignature }
+	rejectBad := func(_ *crypto.AuthEnvelope, _ []byte) error { return crypto.ErrAuthBadSignature }
 	h = NewStreamHandler(StreamConfig{
 		Enabled:      true,
 		AllowedPaths: []string{"*"},

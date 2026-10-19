@@ -85,7 +85,7 @@ Resume does not apply to directories, and uploads are always sent again from the
 
 ## Browse remote directories
 
-The HTTP API can list, inspect, change permissions of, and delete files on a target agent. It uses the same `allowed_paths` and signing key as file transfer. There is no CLI command for it.
+The HTTP API can list, inspect, change permissions of, delete, rename, and create directories on a target agent. It uses the same `allowed_paths` and signing key as file transfer. There is no CLI command for it.
 
 ```bash
 curl -s -X POST http://localhost:8080/agents/1f743225d524f8acd3b42b55639702f0/file/browse \
@@ -97,7 +97,11 @@ curl -s -X POST http://localhost:8080/agents/1f743225d524f8acd3b42b55639702f0/fi
 {"path":"/var/log/app","entries":[{"name":"app.log","size":18874368,"mode":"0644","mod_time":"2026-10-11T11:51:24Z","is_dir":false}],"total":1,"truncated":false}
 ```
 
-The actions are `roots` (the browsable root paths), `list`, `stat`, `chmod`, and `delete`. See [File Transfer API](/api/file-transfer) for request and response fields, pagination, and recursive deletes.
+The actions are `roots` (the browsable root paths), `list`, `stat`, `chmod`, `delete`, `mkdir`, and `rename`. See [File Transfer API](/api/file-transfer) for request and response fields, pagination, and recursive deletes.
+
+## Mount a remote folder
+
+[Muti Metroo Manager](/muti-metroo-manager#file-shares) can serve a folder on any agent as a WebDAV file share. Users mount it from the Manager host with the operating system's own WebDAV client (Finder, Windows Explorer, `gio`, davfs2, or rclone), and Manager carries each file operation to the agent through these endpoints, with the same `allowed_paths` and signing key.
 
 ## Troubleshooting
 
@@ -107,7 +111,7 @@ The actions are `roots` (the browsable root paths), `list`, `stat`, `chmod`, and
 Error: download failed: remote error: path not in allowed list: /etc/shadow
 ```
 
-The path is outside every `allowed_paths` entry on the target agent. When `allowed_paths` is empty, the error reads `no paths are allowed (allowed_paths is empty)` instead.
+The path is outside every `allowed_paths` entry on the target agent. When `allowed_paths` is empty, the error reads `no paths are allowed (allowed_paths is empty)` instead. A path that is allowed as written but leads outside through a symbolic link reports `symlink target not allowed`.
 
 ### management signing private key not configured on this agent
 
@@ -119,7 +123,7 @@ The target agent has no `management.signing_public_key`, so it rejects every fil
 
 ### Signature rejected
 
-The gateway's private key does not match the public key on the target, or the two hosts' clocks differ by more than five minutes. Compare the keys with `muti-metroo signing-key public` and synchronize clocks.
+The gateway's private key does not match the public key on the target, the two hosts' clocks differ by more than five minutes, or one of the two agents runs a version before 4.12.0 (see [Mixed versions](/security/authentication#how-a-request-is-signed)). Compare the keys with `muti-metroo signing-key public`, synchronize clocks, and upgrade both agents.
 
 ### file too large
 

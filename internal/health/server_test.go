@@ -2536,10 +2536,6 @@ func (m *mockMgmtAuthProvider) StampMutationBody(_ identity.AgentID, _ string, b
 	return body, nil
 }
 
-func (m *mockMgmtAuthProvider) StampBody(_ identity.AgentID, _ string, body []byte) ([]byte, error) {
-	return body, nil
-}
-
 // installMgmtAuth is a shorthand used by mutation tests.
 func installMgmtAuth(s *Server) {
 	s.SetMgmtAuthProvider(&mockMgmtAuthProvider{canSign: true})

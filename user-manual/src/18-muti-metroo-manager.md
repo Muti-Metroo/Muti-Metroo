@@ -161,6 +161,22 @@ export METROO_MANAGER_AGENT_TOKEN=yourtoken
 ./muti-metroo-manager -agent http://localhost:8080
 ```
 
+## Access Token
+
+Muti Metroo Manager can require its own access token for every `/api/*` route, including the proxied agent API that carries shells and file transfer. Set it with `-auth-token-file` (preferred), `-auth-token`, or the `METROO_MANAGER_AUTH_TOKEN` environment variable:
+
+```bash
+openssl rand -hex 32 > /etc/muti-metroo-manager/auth-token
+./muti-metroo-manager -addr :3000 -agent http://192.168.1.10:8080 \
+  -auth-token-file /etc/muti-metroo-manager/auth-token
+```
+
+Browsers then see a login screen, and the token is exchanged for an `HttpOnly`, `SameSite=Strict` session cookie. The cookie is marked `Secure` when the request arrives over HTTPS, including when a reverse proxy sets `X-Forwarded-Proto: https`. Scripts send `Authorization: Bearer <token>`.
+
+Without an access token Muti Metroo Manager has no login: anyone who can reach it acts with the permissions of the agent it connects to, including remote shells and file transfer across the mesh. It logs a warning at startup and refuses to listen on a non-loopback address unless `-insecure-no-auth` is set. File shares (see "File Shares (WebDAV)") are not covered by this token; each share has its own user name and password.
+
+If the agent's own HTTP API uses an `https://` URL with a certificate from a private CA, pass the CA with `-agent-ca-bundle <pem-file>`. `-insecure-skip-verify` disables verification of the agent's certificate instead; the agent token can then be intercepted, so prefer the CA bundle.
+
 ## Features
 
 ### Topology Map
@@ -224,6 +240,8 @@ Run commands on any reachable agent from the browser. Supports streaming mode (s
 
 Upload and download files to/from any reachable agent through the browser. Supports individual files and directory transfers. The target agent must have file transfer enabled.
 
+The **Share** button in the Files tab serves the current folder as a WebDAV file share that users can mount as a network drive (see "File Shares (WebDAV)" below).
+
 The file browser toolbar is laid out as four equal-weight text buttons (**Up**, **Path**, **Upload**, **Refresh**), with drag-and-drop carrying the primary upload affordance via a drop overlay. The breadcrumb's leading `/` segment is clickable: it opens an editable path input so an operator can jump directly to a known directory. The input expands a leading `~` to the agent user's home directory on Unix targets and shows a platform-appropriate placeholder.
 
 ![File browser showing browsable paths on a Windows workstation](./11-agent-files.png)
@@ -259,7 +277,7 @@ The commands are generated from the wizard's own paths and pinned to whatever th
 
 ### Settings
 
-A persistent settings dialog lets operators override the agent API URL and the default SOCKS5 address surfaced in setup hints. Those two values are stored in Muti Metroo Manager's local SQLite store (`muti-metroo-manager.db`) and survive restarts; the Mutiauk wizard seeds itself from them. The bearer token used for proxied API calls can also be set in the Settings dialog, but it lives only in the browser's session storage; it is not persisted to SQLite and disappears when the tab is closed. This keeps the most sensitive credential off-disk on the host running Muti Metroo Manager.
+A persistent settings dialog lets operators override the agent API URL and the default SOCKS5 address surfaced in setup hints. Those two values are stored in Muti Metroo Manager's local SQLite store (`muti-metroo-manager.db`) and survive restarts; the Mutiauk wizard seeds itself from them. When Muti Metroo Manager has no agent bearer token and the agent answers `401`, the browser shows an **Authentication required** dialog. The token entered there is kept in the browser's session storage, or in local storage for 8 hours when **Remember on this device for 8 hours** is ticked; it is not persisted to SQLite. **Sign out** in the actions menu clears it. A token configured on Muti Metroo Manager always replaces a token sent by the browser.
 
 ### Per-Agent Notes and Icons
 
@@ -275,3 +293,123 @@ Each agent has a free-text notes field (saved on blur or Ctrl/Cmd-S) and a selec
 | `Esc`    | Close the active agent panel                                  |
 
 The URL carries the selected tab and agent, for example `/topology?agent=<id>&panel=<tab>`, so links open an agent panel directly. Legacy `#/agents/<id>` links are rewritten to this form. Destructive actions (removing routes, peers, or port forwards) go through a confirmation dialog.
+
+## File Shares (WebDAV)
+
+Muti Metroo Manager can share a folder on any agent as a network drive. You pick an agent and a folder in the file browser, and Muti Metroo Manager serves that folder over WebDAV from the Manager host. Users mount it with the WebDAV client built into their operating system: Finder on macOS, Explorer or `net use` on Windows, and GNOME Files, davfs2 or rclone on Linux.
+
+Muti Metroo Manager does not copy the folder. Every WebDAV request becomes a call to the connected agent's file transfer API (`file/browse`, `file/download`, `file/upload`, see Chapter 13). The connected agent signs each operation with the management key and relays it through the mesh to the target agent. A share can therefore reach only what the target agent's `file_transfer.allowed_paths` allows, exactly like the Files tab.
+
+### Requirements
+
+On the target agent (the one that holds the folder):
+
+- `file_transfer.enabled: true`
+- The shared folder inside `file_transfer.allowed_paths`. Glob roots work; the share root must itself be an existing directory.
+- `management.signing_public_key` set, so it accepts signed file operations.
+- Muti Metroo 4.12.0 or later, on this agent and on the agent Muti Metroo Manager connects to. Earlier versions sign file operations differently (see "How a Request Is Signed" in Chapter 21) and lack the `mkdir`, `rename`, and ranged download operations a share needs.
+
+On the agent Muti Metroo Manager connects to (`-agent`):
+
+- `management.signing_private_key` set, so it can sign operations on the Manager's behalf.
+- If its HTTP API requires a bearer token, give the token to Muti Metroo Manager with `-agent-token-file` (or `METROO_MANAGER_AGENT_TOKEN`). The WebDAV gateway runs inside Muti Metroo Manager and cannot use a token that was only pasted into the browser.
+
+On the Manager host:
+
+- Clients must be able to reach the Manager listener (`-addr`). A loopback bind such as `127.0.0.1:3000` allows mounts from the Manager host only.
+- Writes are buffered in the host's temp directory until the client closes the file, so it needs free space for the largest file you expect to upload.
+
+### Creating a Share
+
+1. Open an agent, go to the **Files** tab and navigate to the folder.
+2. Click **Share**.
+3. Choose a share name. It becomes part of the URL (`/dav/<name>/`), so it is limited to lower-case letters, digits, `-` and `_`.
+4. Leave **Read-only** checked unless clients need to change files. Read-write lets anyone with the password create, overwrite, rename and delete files in the folder.
+5. Optionally set a user name (defaults to the share name) and a password (8 to 72 characters). Leave the password empty to have Muti Metroo Manager generate one.
+6. Click **Create share**. Muti Metroo Manager checks that the folder exists on the agent and is a directory, then shows the mount URL, the user name, the password and mount instructions for each operating system.
+
+The generated password is shown once. Muti Metroo Manager stores only a bcrypt hash; if the password is lost, rotate it.
+
+### Managing Shares
+
+Open **Actions > File shares** to see every share with its status, agent, folder, access mode and mount URL. From there you can:
+
+- **Disable / Enable** a share. A disabled share answers 404 and keeps its settings.
+- Switch between **read-only** and **read-write**.
+- **Rotate password**. The new password is shown once; the old one stops working immediately, including for clients that are already mounted.
+- **Delete** the share. Files on the agent are not touched.
+- Open **Mount help** for the per-OS instructions.
+
+Shares are stored in the Muti Metroo Manager SQLite database and survive restarts.
+
+### Mounting
+
+The mount URL is `http://<manager-host>:<port>/dav/<name>/` (or `https://` behind a TLS proxy). Use the host name or address the clients use to reach Muti Metroo Manager.
+
+**macOS:** in Finder choose **Go > Connect to Server** (Cmd+K), enter the mount URL and sign in with the share's user name and password. The share appears under `/Volumes`. A read-only share mounts read-only.
+
+**Windows:** the **WebClient** service must be running (`sc start WebClient`; set it to Automatic to keep it across reboots). Then run:
+
+```bash
+net use Z: http://manager.example:3000/dav/docs/ /user:docs *
+```
+
+The `*` prompts for the password. **Map network drive** in File Explorer accepts the same URL.
+
+Two Windows defaults get in the way. Both are DWORD values under this registry key:
+
+```
+HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters
+```
+
+- Windows refuses HTTP Basic authentication over plain HTTP. Either use HTTPS, or set `BasicAuthLevel` to `2` and restart the WebClient service.
+- Windows limits WebDAV file transfers to 50 MB. Raise `FileSizeLimitInBytes` (up to `4294967295`) and restart WebClient.
+
+**Linux:** in GNOME Files, open **Other Locations** and enter the URL in **Connect to Server** (`davs://` for HTTPS):
+
+```
+dav://manager.example:3000/dav/docs/
+```
+
+From a terminal:
+
+```bash
+gio mount 'dav://docs@manager.example:3000/dav/docs/'
+```
+
+davfs2:
+
+```bash
+sudo mkdir -p /mnt/docs
+sudo mount -t davfs 'http://manager.example:3000/dav/docs/' /mnt/docs
+```
+
+rclone (no root needed; the mount point must exist):
+
+```bash
+rclone mount :webdav: ~/docs \
+  --webdav-url 'http://manager.example:3000/dav/docs/' \
+  --webdav-user docs \
+  --webdav-pass "$(rclone obscure 'PASSWORD')" \
+  --vfs-cache-mode writes
+```
+
+### Security
+
+- `/dav/` is not covered by the Manager access token, because operating system WebDAV clients can only send a user name and password. Each share has its own credentials instead, and every request to `/dav/<name>/` must carry them. The access token does not open a share, and share credentials do not open the Manager API.
+- After 10 failed logins within 5 minutes from one client address, Muti Metroo Manager refuses further requests from that address with HTTP 429 until the 5 minutes are over. Behind a reverse proxy all clients share the proxy's address, so a client with a wrong saved password can briefly lock out everyone.
+- Muti Metroo Manager has no TLS listener of its own. Over plain HTTP the share password and the file contents cross the network unencrypted. For anything beyond a trusted network, put Muti Metroo Manager behind a TLS-terminating reverse proxy and mount the `https://` URL.
+- Shares are read-only by default, and a read-only share refuses every changing request (upload, delete, create folder, copy, move, lock) before it reaches the agent.
+- Share paths are confined to the shared folder: `..` segments, backslashes, and (for Windows agents) drive letters in names are rejected. The agent still enforces `allowed_paths`, also after resolving symbolic links, so a link inside the folder that points outside the allowed paths cannot be opened through the share.
+- Files are served with a `Content-Security-Policy: sandbox` header, so an HTML or SVG file on an agent cannot run script against the Manager UI when opened in a browser.
+- Create, update and delete of shares are written to the Manager log as audit events. Failed share logins are logged with the client address.
+
+### Limitations
+
+- Every operation is a round trip through the mesh, so listing large folders and opening many small files is slower than a local file server. File metadata is cached for 2 seconds.
+- Reads are fetched in ranges with a read-ahead of 1 to 4 MiB, so previews and seeks do not download whole files. Writes are buffered on the Manager host and uploaded when the client closes the file; large uploads are limited by `file_transfer.max_file_size` on the target agent and by the 30 minute upload timeout.
+- Locks (needed by Finder and Office to write) are kept in memory and are lost when Muti Metroo Manager restarts. Only exclusive write locks are supported; a client that asks for a shared lock gets "not implemented".
+- Custom WebDAV properties are not stored; clients that set them (for example Windows timestamps) get a "forbidden" result for those properties, which they ignore.
+- `PROPFIND` with `Depth: infinity` is refused.
+- New files are created with the agent's default upload mode (`0600`); overwritten files keep their existing mode.
+- macOS Finder writes `._*` and `.DS_Store` files into writable shares, as it does on any network volume.

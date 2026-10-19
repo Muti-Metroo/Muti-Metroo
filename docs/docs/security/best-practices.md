@@ -31,7 +31,7 @@ Anyone with the CA key can issue certificates that every agent accepts, which wi
 
 - Put the private key only on operator agents, and keep the number of operator agents small.
 - Bind operator agents' HTTP API to `127.0.0.1` and set `http.token_hash`.
-- Keep file transfer disabled on operator agents; an agent with the private key accepts unsigned file browse requests from other agents (see [Authentication](/security/authentication#how-a-request-is-signed)).
+- Keep file transfer disabled on operator agents unless you need it there: any caller of an operator agent's HTTP API can browse and transfer files on it, since the agent signs its own requests (see [Authentication](/security/authentication#how-a-request-is-signed)).
 - Keep `management.signing_public_key` on every agent. It is safe to distribute and can live in version control.
 - Keep agent clocks synchronized with NTP; signatures are only accepted within five minutes of the verifier's clock.
 

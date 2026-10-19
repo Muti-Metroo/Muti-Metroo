@@ -16,15 +16,17 @@ These endpoints move files to and from a remote agent and manage files on it. Th
 | -------- | ----------- |
 | `POST /agents/{id}/file/upload` | Upload a file or directory |
 | `POST /agents/{id}/file/download` | Download a file or directory |
-| `POST /agents/{id}/file/browse` | List directories, inspect, chmod, and delete files |
+| `POST /agents/{id}/file/browse` | List directories, inspect, chmod, delete, create directories, and rename |
 
 ## Requirements
 
 - The agent serving the request has `management.signing_private_key`. It signs every operation on the client's behalf; clients do not send credentials beyond the bearer token.
 - The target agent has `management.signing_public_key` and `file_transfer.enabled: true`, and every path is inside `file_transfer.allowed_paths`. Uploads are limited by `file_transfer.max_file_size`. See [File Transfer Configuration](/configuration/file-transfer).
-- `{id}` is a remote agent. Upload and download do not work with the local agent's own ID; `file/browse` with the local ID is answered by the local agent.
+- `{id}` is any agent, including the serving agent's own ID. A request for the own ID is signed with the agent's own key and checked against its own `file_transfer` settings, like a request from the mesh.
 
-Paths are absolute paths on the target. A leading `~` is expanded to the home directory of the user the target agent runs as.
+Paths are absolute paths on the target. A leading `~` is expanded to the home directory of the user the target agent runs as. Every path must stay inside `allowed_paths` after symbolic links are resolved: a link inside an allowed directory that points outside it, as the last path component or as a parent directory, is refused. `delete` and `rename` act on a link itself, so a link that points outside can still be deleted or renamed.
+
+Muti Metroo Manager uses these endpoints to serve a folder as a WebDAV [file share](/muti-metroo-manager#file-shares).
 
 ## `POST /agents/{id}/file/upload`
 
@@ -32,9 +34,10 @@ Uploads a file as `multipart/form-data`.
 
 | Form field | Required | Description |
 | ---------- | -------- | ----------- |
-| `file` | Yes | File content |
-| `path` | Yes | Destination path on the target |
+| `file` | Yes | File content. It may be empty. |
+| `path` | Yes | Destination path on the target. Missing parent directories are created. |
 | `directory` | No | `true` when `file` is a tar archive (optionally gzip-compressed) to unpack into `path` as a directory |
+| `mode` | No | Octal permission bits up to `0777` for a newly created file, for example `"0644"`. Default `0600`. |
 | `rate_limit` | No | Maximum transfer rate in bytes per second; `0` or omitted means unlimited |
 
 ```bash
@@ -54,7 +57,7 @@ curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/
 }
 ```
 
-`bytes_written` is the size received by the serving agent. A single uploaded file is written on the target with mode `0600`; files inside an uploaded directory archive keep their modes. Upload a directory by packing it first:
+`bytes_written` is the size received by the serving agent. A new file gets mode `0600` (or `mode`), and a file that already exists is overwritten in place and keeps its mode. Files inside an uploaded directory archive keep their modes. Upload a directory by packing it first:
 
 ```bash
 tar czf site.tar.gz -C ./site .
@@ -72,7 +75,8 @@ Downloads a file or directory. The request body is JSON.
 | ----- | ---- | -------- | ----------- |
 | `path` | string | Yes | Path on the target |
 | `rate_limit` | integer | No | Maximum transfer rate in bytes per second |
-| `offset` | integer | No | Resume a file download from this byte offset |
+| `offset` | integer | No | Start a file download at this byte offset, for example to resume |
+| `length` | integer | No | Return at most this many bytes from `offset`; `0` or omitted means to the end of the file. Files only. |
 | `original_size` | integer | No | Expected total size when resuming; the download fails if the file has changed size |
 
 ```bash
@@ -105,7 +109,16 @@ Content-Type: application/gzip
 | `X-File-Mode` | Permission bits of the file on the target, in octal |
 | `X-Original-Size` | File size in bytes on the target |
 
-Resuming is supported for files, not directories. Upload and download time out after 30 minutes.
+`X-Original-Size` is always the full file size, also for a download with `offset` or `length`. Ranges are supported for files, not directories. Upload and download time out after 30 minutes.
+
+Read bytes 1024 to 2047 of a file:
+
+```bash
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/download \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/var/log/app.log", "offset": 1024, "length": 1024}' \
+  -o part.bin
+```
 
 ### Upload and download errors
 
@@ -117,7 +130,7 @@ Resuming is supported for files, not directories. Upload and download time out a
 | 401 | `{"success": false, "code": "auth_required", "error": "..."}` | The target has no signing public key or the signature is missing |
 | 403 | `{"success": false, "code": "invalid_credentials", "error": "..."}` | The target rejected the signature |
 | 405 | `method not allowed` | Method other than `POST` |
-| 502 | `{"success": false, "error": "remote error: path not in allowed list: /etc/passwd"}` | The target refused the operation |
+| 502 | `{"success": false, "code": "not_allowed", "error": "remote error: path not in allowed list: /etc/passwd"}` | The target refused the operation. `code` is present when the cause has a stable code (`not_found`, `not_allowed`; see [Browse errors](#browse-errors)). |
 | 502 | `{"success": false, "error": "no route to agent ..."}` | The target is unknown or unreachable |
 | 502 | `{"success": false, "error": "management signing private key not configured (set management.signing_private_key)"}` | The serving agent has no signing private key |
 
@@ -127,8 +140,9 @@ Performs one file operation per request. The request body is JSON with an `actio
 
 | Field | Type | Used by | Description |
 | ----- | ---- | ------- | ----------- |
-| `action` | string | all | `list` (default), `stat`, `roots`, `chmod`, or `delete` |
-| `path` | string | all except `roots` | Path on the target |
+| `action` | string | all | `list` (default), `stat`, `roots`, `chmod`, `delete`, `mkdir`, or `rename` |
+| `path` | string | all except `roots` | Path on the target; for `rename`, the source |
+| `new_path` | string | `rename` | Destination path |
 | `offset` | integer | `list` | Number of entries to skip; default `0` |
 | `limit` | integer | `list` | Maximum entries to return; default `100`, maximum `5000` |
 | `mode` | string | `chmod` | Octal permission bits up to `0777`, for example `"0755"` |
@@ -256,15 +270,36 @@ curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/
   -d '{"action": "delete", "path": "/srv/files/sub", "recursive": true}'
 ```
 
+### `mkdir`
+
+Creates one directory with mode `0700` and returns it in the same shape as `stat`. The parent must exist (`not_found` otherwise), and the path must not (`already_exists`).
+
+```bash
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/browse \
+  -H "Content-Type: application/json" \
+  -d '{"action": "mkdir", "path": "/srv/files/reports"}'
+```
+
+### `rename`
+
+Renames or moves a file, directory, or symbolic link within the allowed paths and returns the entry at `new_path` in the same shape as `stat`. The destination must not exist (`already_exists`); delete it first to replace it.
+
+```bash
+curl -X POST http://localhost:8080/agents/331974cd4a0be0d7f945ed9d367a0211/file/browse \
+  -H "Content-Type: application/json" \
+  -d '{"action": "rename", "path": "/srv/files/draft.txt", "new_path": "/srv/files/reports/final.txt"}'
+```
+
 ### Browse errors
 
-Errors reported by the target keep the response shape and add `error`, plus `error_code` for signature failures:
+Errors reported by the target keep the response shape and add `error`, plus `error_code` where the cause has a stable code:
 
 ```json
 {
   "total": 0,
   "truncated": false,
-  "error": "path not in allowed list: /etc"
+  "error": "path not in allowed list: /etc",
+  "error_code": "not_allowed"
 }
 ```
 
@@ -277,6 +312,15 @@ Errors reported by the target keep the response shape and add `error`, plus `err
 | 403 | `file browse restricted: management key decryption unavailable` (plain text) | `management.public_key` is set without `management.private_key` |
 | 405 | `method not allowed` | Method other than `POST` |
 | 502 | `failed to send request: <reason>` (plain text) | The target is unknown or unreachable |
+
+`error_code` values for refused operations:
+
+| `error_code` | Cause |
+| ------------ | ----- |
+| `not_found` | The path does not exist (for `mkdir`, its parent; for `rename`, the source or the destination's parent) |
+| `already_exists` | The `mkdir` path or `rename` destination exists |
+| `not_allowed` | The path is outside `allowed_paths`, directly or through a symbolic link |
+| `not_empty` | `delete` of a non-empty directory without `recursive` |
 
 ## See Also
 

@@ -242,9 +242,19 @@ Separate from topology encryption, signing keys authenticate **every privileged 
 - **Sleep / wake** (`muti-metroo sleep`, `muti-metroo wake`)
 - **Agent shutdown** (`muti-metroo stop`)
 
-Each operation has its own opaque op tag bound into the signed envelope, so a captured signature for one operation cannot be replayed as another. Mutation envelopes additionally bind the body hash, so `add X` cannot be replayed as `remove Y`. Signatures expire after a 5-minute timestamp window.
-
 There is no separate per-feature password for any of these operations. Agents configured with the public key reject unsigned, expired, or incorrectly signed requests; agents without the private key cannot issue them; agents without either cannot use these features at all. (Sleep and wake have a narrow backward-compatibility carve-out; see [Backward Compatibility](#backward-compatibility) below.)
+
+### How a Request Is Signed
+
+1. The CLI sends the request to the gateway agent's HTTP API. The CLI itself holds no key.
+2. The gateway agent signs an envelope containing its own agent ID, the target agent ID, a timestamp, the operation type, and a hash of the request body: the shell command and its arguments, the file path and transfer options, or the configuration change.
+3. The target agent checks that the envelope names it as the target, that the timestamp is within five minutes of its own clock, and that the signature verifies against its `signing_public_key` over the request it actually received.
+
+A signed envelope is valid for that five-minute window and has no one-time nonce. Because it covers the operation type and the request body, an envelope captured from one request cannot authorize a different one: a shell command cannot be swapped for another, a file delete cannot be pointed at another path, and `add X` cannot be replayed as `remove Y`. Keep agent clocks synchronized; a skew of more than five minutes causes every signed operation to fail.
+
+> **Mixed versions.** Agents before 4.12.0 signed shell and file operations without the request body. A gateway and a target on different sides of that change reject each other's shell and file requests with `invalid_credentials`; upgrade both. Configuration changes are not affected.
+
+> **The gateway signs for its callers.** An operator agent signs every privileged request that reaches its HTTP API. Anyone who can call that API can therefore run commands and transfer files on every agent in the mesh. Bind operator agents' HTTP API to `127.0.0.1` and set `http.token_hash`.
 
 ### Purpose
 

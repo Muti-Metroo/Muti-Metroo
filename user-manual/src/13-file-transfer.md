@@ -64,6 +64,8 @@ muti-metroo download abc123 /var/log/app ./app-logs
 
 File transfer requires the local agent reached via `-a` to hold `management.signing_private_key`, and the target agent to hold `management.signing_public_key`. The CLI signs each request automatically; there is no `--password` / `-p` flag.
 
+The signature covers the file path and transfer options, so a captured request cannot be reused for another path or operation. Agents before 4.12.0 signed file operations without the request body: a gateway and a target on different sides of that change reject each other's file requests with `invalid_credentials`, so upgrade both (Chapter 21).
+
 ## Rate Limiting
 
 Limit transfer speed to avoid saturating network links:
@@ -141,13 +143,81 @@ file_transfer:
 | `/home/*/uploads` | `/home/alice/uploads` | `/home/uploads` |
 | `/var/log/*.log` | `/var/log/syslog.log` | `/var/log/app/error.log` |
 
-## File Browsing
+Paths must be absolute and must not contain `..`. A leading `~` is expanded to the home directory of the user the target agent runs as.
 
-Browse the filesystem on remote agents via the HTTP API. Shares `allowed_paths` and the same management-signature authorization as file transfer.
+### Symbolic Links
 
-### API: POST /agents/{agent-id}/file/browse
+Every path must stay inside `allowed_paths` after symbolic links are resolved. A link inside an allowed directory that points outside it cannot be used to read, write, list, or change anything outside, whether the link is the last path component or a parent directory; such requests fail with `symlink target not allowed`. `delete` and `rename` act on the link itself, so a link that points outside can still be deleted or renamed.
 
-Five actions are available: `list`, `stat`, `roots`, `chmod`, and `delete`.
+## HTTP API
+
+The CLI and the Muti Metroo Manager file browser are clients of three HTTP endpoints on the local agent. All three accept only `POST`:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /agents/{agent-id}/file/upload` | Upload a file or directory |
+| `POST /agents/{agent-id}/file/download` | Download a file or directory |
+| `POST /agents/{agent-id}/file/browse` | List directories, inspect, chmod, delete, create directories, and rename |
+
+`{agent-id}` can be any agent in the mesh, including the serving agent's own ID. A request for the own ID is signed with the agent's own key and checked against its own `file_transfer` settings, like a request from the mesh.
+
+### Upload
+
+`file/upload` takes `multipart/form-data`:
+
+| Form field | Required | Description |
+|------------|----------|-------------|
+| `file` | Yes | File content. It may be empty. |
+| `path` | Yes | Destination path on the target. Missing parent directories are created. |
+| `directory` | No | `true` when `file` is a tar archive (optionally gzip-compressed) to unpack into `path` |
+| `mode` | No | Octal permission bits up to `0777` for a newly created file, for example `"0644"`. Default `0600`. |
+| `rate_limit` | No | Maximum transfer rate in bytes per second; `0` or omitted means unlimited |
+
+```bash
+curl -X POST http://localhost:8080/agents/abc123/file/upload \
+  -F "file=@./app.conf" \
+  -F "path=/srv/app/app.conf" \
+  -F "mode=0644"
+```
+
+A new file gets mode `0600` (or `mode`). A file that already exists is overwritten in place and keeps its mode. Files inside an uploaded directory archive keep their modes.
+
+### Download
+
+`file/download` takes a JSON body:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Path on the target |
+| `rate_limit` | No | Maximum transfer rate in bytes per second |
+| `offset` | No | Start a file download at this byte offset, for example to resume |
+| `length` | No | Return at most this many bytes from `offset`; `0` or omitted means to the end of the file. Files only. |
+| `original_size` | No | Expected total size when resuming; the download fails if the file has changed size |
+
+A file is returned as raw content with the headers `X-File-Mode` (permission bits in octal) and `X-Original-Size` (file size in bytes). `X-Original-Size` is always the full file size, also for a download with `offset` or `length`. A directory is returned as a gzip-compressed tar archive; ranges are supported for files only. Upload and download time out after 30 minutes.
+
+Read bytes 1024 to 2047 of a file:
+
+```bash
+curl -X POST http://localhost:8080/agents/abc123/file/download \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/var/log/app.log","offset":1024,"length":1024}' \
+  -o part.bin
+```
+
+### Browse
+
+`file/browse` performs one file operation per request. It shares `allowed_paths` and the same management-signature authorization as file transfer. The request body is JSON:
+
+| Field | Used by | Description |
+|-------|---------|-------------|
+| `action` | all | `list` (default), `stat`, `roots`, `chmod`, `delete`, `mkdir`, or `rename` |
+| `path` | all except `roots` | Path on the target; for `rename`, the source |
+| `new_path` | `rename` | Destination path |
+| `offset` | `list` | Number of entries to skip; default `0` |
+| `limit` | `list` | Maximum entries to return; default `100`, maximum `5000` |
+| `mode` | `chmod` | Octal permission bits up to `0777`, for example `"0755"` |
+| `recursive` | `delete` | Required to delete a directory that is not empty |
 
 **List directory contents:**
 
@@ -173,6 +243,8 @@ Response:
 }
 ```
 
+Entries are sorted with directories first, then files, alphabetically by name. `total` counts the entries before `offset` and `limit` are applied, and `truncated` is `true` when more entries follow. Symbolic links include `is_symlink` and `link_target`; their `size` and `is_dir` describe the link target. For a broken link, or a link that points outside `allowed_paths`, they describe the link itself.
+
 **Stat a single path:**
 
 ```bash
@@ -192,14 +264,10 @@ curl -X POST http://localhost:8080/agents/abc123/file/browse \
 Response:
 
 ```json
-{ "roots": ["/tmp", "/data"] }
+{ "total": 0, "truncated": false, "roots": ["/tmp", "/data"], "home": "/home/muti" }
 ```
 
-When `allowed_paths: ["*"]`, the response includes a `wildcard` flag:
-
-```json
-{ "roots": ["/"], "wildcard": true }
-```
+Glob patterns such as `/data/**` are reduced to their base directory. `home` is the home directory of the user the target agent runs as. When `allowed_paths: ["*"]`, `roots` is `["/"]` and the response includes `"wildcard": true`.
 
 **Change file permissions:**
 
@@ -223,16 +291,58 @@ curl -X POST http://localhost:8080/agents/abc123/file/browse \
   -d '{"action":"delete","path":"/tmp/old-logs","recursive":true}'
 ```
 
-Files, symlinks, and empty directories are deleted directly. Non-empty directories require `"recursive": true`. Without it, the request is rejected.
+Files, symlinks, and empty directories are deleted directly. Non-empty directories require `"recursive": true`; without it, the request is rejected with `not_empty`.
 
-The `list` action supports pagination via `offset` and `limit` (default 100, max 200). Entries are sorted with directories first, then files, alphabetically by name. Symlinks include `is_symlink` and `link_target` fields.
+**Create a directory:**
+
+```bash
+curl -X POST http://localhost:8080/agents/abc123/file/browse \
+  -H "Content-Type: application/json" \
+  -d '{"action":"mkdir","path":"/tmp/reports"}'
+```
+
+`mkdir` creates one directory with mode `0700`. The parent must exist (`not_found` otherwise), and the path must not (`already_exists`).
+
+**Rename or move:**
+
+```bash
+curl -X POST http://localhost:8080/agents/abc123/file/browse \
+  -H "Content-Type: application/json" \
+  -d '{"action":"rename","path":"/tmp/draft.txt","new_path":"/tmp/reports/final.txt"}'
+```
+
+`rename` moves a file, directory, or symbolic link to `new_path` within the allowed paths. The destination must not exist (`already_exists`); delete it first to replace it.
+
+`stat`, `chmod`, `delete`, `mkdir`, and `rename` return a single `entry` in the same shape as a list entry: the entry after the change, or for `delete`, as it was before deletion.
+
+### Browse Errors
+
+Errors reported by the target keep the response shape and add `error`, plus `error_code` where the cause has a stable code:
+
+```json
+{
+  "total": 0,
+  "truncated": false,
+  "error": "path not in allowed list: /etc",
+  "error_code": "not_allowed"
+}
+```
+
+| `error_code` | Cause |
+|--------------|-------|
+| `not_found` | The path does not exist (for `mkdir`, its parent; for `rename`, the source or the destination's parent) |
+| `already_exists` | The `mkdir` path or `rename` destination exists |
+| `not_allowed` | The path is outside `allowed_paths`, directly or through a symbolic link |
+| `not_empty` | `delete` of a non-empty directory without `recursive` |
+
+Signature failures return `auth_required` (HTTP 401, the target has no signing public key or the signature is missing) or `invalid_credentials` (HTTP 403, the target rejected the signature).
 
 ## Implementation Details
 
 - **Streaming**: Files transferred in 16KB chunks
 - **No size limits**: Stream directly without memory buffering
 - **Directories**: Automatically tar/gzip with permission preservation
-- **Permissions**: File mode preserved (Unix)
+- **Permissions**: Downloads and files inside uploaded directories keep their mode (Unix). A single uploaded file is created with mode `0600` unless the upload sets `mode`; an overwritten file keeps its mode.
 
 ## Example Configuration
 
@@ -288,6 +398,14 @@ Increase `max_file_size` or set to 0 for unlimited:
 file_transfer:
   max_file_size: 0
 ```
+
+### Signature Rejected
+
+```
+invalid_credentials
+```
+
+The gateway's signing private key does not match the public key on the target, the two hosts' clocks differ by more than five minutes, or one of the two agents runs a version before 4.12.0. Compare the keys with `muti-metroo signing-key public`, synchronize clocks, and upgrade both agents.
 
 ### Transfer Stalls
 

@@ -26,12 +26,38 @@ const (
 	ErrCodeAuthRequired = "auth_required"
 	// ErrCodeInvalidCredentials signals a signature that did not verify.
 	ErrCodeInvalidCredentials = "invalid_credentials"
+	// ErrCodeNotFound signals a path (or, for mkdir, its parent) that does
+	// not exist.
+	ErrCodeNotFound = "not_found"
+	// ErrCodeAlreadyExists signals a mkdir or rename destination that exists.
+	ErrCodeAlreadyExists = "already_exists"
+	// ErrCodeNotAllowed signals a path outside file_transfer.allowed_paths,
+	// directly or through a symlink.
+	ErrCodeNotAllowed = "not_allowed"
+	// ErrCodeNotEmpty signals a non-recursive delete of a non-empty directory.
+	ErrCodeNotEmpty = "not_empty"
 )
 
-// AuthErrorCode maps a management-auth error to its wire code, or "" for
-// any other error. Callers use this to set BrowseResponse.ErrorCode /
-// TransferMetadata.ErrorCode so frontends can distinguish auth failures.
-func AuthErrorCode(err error) string {
+// CodedError is an error that carries one of the ErrCode* wire codes, so
+// callers can classify it without matching on the message.
+type CodedError struct {
+	Code string
+	Err  error
+}
+
+func (e *CodedError) Error() string { return e.Err.Error() }
+func (e *CodedError) Unwrap() error { return e.Err }
+
+// codedf builds a CodedError with a formatted message.
+func codedf(code, format string, args ...any) error {
+	return &CodedError{Code: code, Err: fmt.Errorf(format, args...)}
+}
+
+// ErrorCode maps an error to its wire code: the auth codes for
+// management-auth errors, the code of a wrapped CodedError, or "" for any
+// other error. Callers use it to set BrowseResponse.ErrorCode /
+// TransferMetadata.ErrorCode / RemoteError.Code.
+func ErrorCode(err error) string {
 	switch {
 	case errors.Is(err, crypto.ErrAuthMissing):
 		return ErrCodeAuthRequired
@@ -39,16 +65,20 @@ func AuthErrorCode(err error) string {
 		errors.Is(err, crypto.ErrAuthWrongTarget),
 		errors.Is(err, crypto.ErrAuthStale):
 		return ErrCodeInvalidCredentials
-	default:
-		return ""
 	}
+	var ce *CodedError
+	if errors.As(err, &ce) {
+		return ce.Code
+	}
+	return ""
 }
 
 // AuthVerifier checks a file-transfer request's management signature.
-// Returning nil authorizes the request; any error rejects it. Typical
-// implementations wrap crypto.VerifyManagement with the agent's self ID
-// and configured public key.
-type AuthVerifier func(env *crypto.AuthEnvelope) error
+// bodyHash is crypto.CanonicalBodyHash of the request as received, which
+// the signature must cover. Returning nil authorizes the request; any
+// error rejects it. Typical implementations wrap crypto.VerifyManagement
+// with the agent's self ID and configured public key.
+type AuthVerifier func(env *crypto.AuthEnvelope, bodyHash []byte) error
 
 // RemoteError carries a typed error returned by a remote agent across the
 // mesh. HTTP handlers use errors.As to extract Code and map it to a status.
@@ -69,17 +99,22 @@ func (e *RemoteError) Error() string {
 
 // TransferMetadata is sent as the first data frame in a file transfer stream.
 type TransferMetadata struct {
-	Path         string               `json:"path"`                    // Absolute destination path
-	Mode         uint32               `json:"mode"`                    // File permissions (e.g., 0644)
-	Size         int64                `json:"size"`                    // File size in bytes (-1 for directories)
-	IsDirectory  bool                 `json:"is_directory"`            // True if transferring a directory
-	Auth         *crypto.AuthEnvelope `json:"auth,omitempty"`          // Management-key signature (required on the wire)
-	Compress     bool                 `json:"compress"`                // Whether data is gzip compressed
-	Checksum     string               `json:"checksum,omitempty"`      // Optional SHA256 checksum (hex)
-	RateLimit    int64                `json:"rate_limit,omitempty"`    // Max bytes per second (0 = unlimited)
-	Offset       int64                `json:"offset,omitempty"`        // Resume from this byte offset (uncompressed)
-	OriginalSize int64                `json:"original_size,omitempty"` // Expected file size for resume validation
-	Error        string               `json:"error,omitempty"`         // Error message (set when transfer fails)
+	Path        string               `json:"path"`           // Absolute destination path
+	Mode        uint32               `json:"mode"`           // File permissions (e.g., 0644)
+	Size        int64                `json:"size"`           // File size in bytes (-1 for directories)
+	IsDirectory bool                 `json:"is_directory"`   // True if transferring a directory
+	Auth        *crypto.AuthEnvelope `json:"auth,omitempty"` // Management-key signature (required on the wire)
+	// BodyHash is crypto.CanonicalBodyHash of the metadata as received,
+	// set by the receiver before validation. It is never sent; a missing
+	// hash fails verification.
+	BodyHash     []byte `json:"-"`
+	Compress     bool   `json:"compress"`                // Whether data is gzip compressed
+	Checksum     string `json:"checksum,omitempty"`      // Optional SHA256 checksum (hex)
+	RateLimit    int64  `json:"rate_limit,omitempty"`    // Max bytes per second (0 = unlimited)
+	Offset       int64  `json:"offset,omitempty"`        // Resume from this byte offset (uncompressed)
+	OriginalSize int64  `json:"original_size,omitempty"` // Expected file size for resume validation
+	Length       int64  `json:"length,omitempty"`        // Read at most this many bytes from Offset (0 = to end; downloads only)
+	Error        string `json:"error,omitempty"`         // Error message (set when transfer fails)
 	// ErrorCode is a stable, machine-readable tag for Error. Frontends
 	// switch on this to distinguish auth failures from other errors. See
 	// ErrCodeAuthRequired / ErrCodeInvalidCredentials.
@@ -122,24 +157,19 @@ func (h *StreamHandler) validateCommon(meta *TransferMetadata) error {
 	if !h.cfg.Enabled {
 		return fmt.Errorf("file transfer is disabled")
 	}
-	if err := h.verify(meta.Auth); err != nil {
+	if err := h.verify(meta.Auth, meta.BodyHash); err != nil {
 		return err
 	}
 	meta.Path = expandTildeHome(meta.Path)
-	return h.validatePath(meta.Path)
+	if err := h.validatePath(meta.Path); err != nil {
+		return err
+	}
+	return h.validateResolved(meta.Path, false)
 }
 
 // ValidateUploadMetadata validates upload metadata and returns an error if invalid.
 func (h *StreamHandler) ValidateUploadMetadata(meta *TransferMetadata) error {
 	if err := h.validateCommon(meta); err != nil {
-		return err
-	}
-
-	// Reject a destination that already exists as a symlink pointing outside
-	// the allowlist: writing through it would land the upload outside the
-	// allowed paths even though the path itself validated. A destination that
-	// does not exist yet, the normal upload case, passes through untouched.
-	if err := h.validateSymlinkTarget(meta.Path); err != nil {
 		return err
 	}
 
@@ -157,15 +187,10 @@ func (h *StreamHandler) ValidateDownloadMetadata(meta *TransferMetadata) error {
 		return err
 	}
 
-	// Check for symlinks and validate their targets
-	if err := h.validateSymlinkTarget(meta.Path); err != nil {
-		return err
-	}
-
 	// Check if path exists (follows symlinks)
 	info, err := os.Stat(meta.Path)
 	if err != nil {
-		return fmt.Errorf("path not found: %w", err)
+		return codedf(ErrCodeNotFound, "path not found: %w", err)
 	}
 
 	// Check size limit for files
@@ -176,33 +201,52 @@ func (h *StreamHandler) ValidateDownloadMetadata(meta *TransferMetadata) error {
 	return nil
 }
 
-// validateSymlinkTarget checks if a path is a symlink and validates that its target
-// is within the allowed paths. This prevents symlink-based escape attacks.
-func (h *StreamHandler) validateSymlinkTarget(path string) error {
-	// Use Lstat to check if the path itself is a symlink (doesn't follow symlinks)
-	info, err := os.Lstat(path)
+// validateResolved checks that path stays inside the allowlist after every
+// symlink in its existing components is resolved, so neither a symlinked
+// file nor a symlinked parent directory can lead outside the allowed paths.
+// With keepLeaf the final component is not followed, for operations that
+// act on a link itself (delete, rename); its parent is still resolved.
+// Components that do not exist yet (an upload or mkdir target) are checked
+// as written below their deepest existing ancestor.
+func (h *StreamHandler) validateResolved(path string, keepLeaf bool) error {
+	dir, leaf := path, ""
+	if keepLeaf {
+		dir, leaf = filepath.Dir(path), filepath.Base(path)
+	}
+	resolved, err := resolveExisting(dir)
 	if err != nil {
-		// Path doesn't exist or can't be accessed - let later checks handle this
-		return nil
+		return codedf(ErrCodeNotAllowed, "%w", err)
 	}
-
-	// If not a symlink, nothing to validate
-	if info.Mode()&os.ModeSymlink == 0 {
-		return nil
+	if leaf != "" {
+		resolved = filepath.Join(resolved, leaf)
 	}
-
-	// Resolve the symlink target
-	target, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return fmt.Errorf("cannot resolve symlink: %w", err)
-	}
-
-	// Validate the resolved target path
-	if err := h.validateResolvedPath(target); err != nil {
+	if err := h.validateResolvedPath(resolved); err != nil {
 		return fmt.Errorf("symlink target not allowed: %w", err)
 	}
-
 	return nil
+}
+
+// resolveExisting resolves symlinks in the longest existing prefix of path
+// and appends the remaining, not yet existing components unchanged. A
+// dangling symlink is an error: writing through it would create its target,
+// which the lexical remainder does not describe.
+func resolveExisting(path string) (string, error) {
+	rest := ""
+	for p := path; ; {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return filepath.Join(resolved, rest), nil
+		}
+		if _, lerr := os.Lstat(p); lerr == nil || !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("cannot resolve symlink: %w", err)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return path, nil
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
 }
 
 // validateResolvedPath checks a symlink-resolved path against the allowlist.
@@ -229,7 +273,7 @@ func (h *StreamHandler) validateResolvedPath(resolved string) error {
 		if base == "" {
 			continue
 		}
-		resolvedBase, err := filepath.EvalSymlinks(base)
+		resolvedBase, err := resolveExisting(base)
 		if err != nil {
 			continue
 		}
@@ -238,7 +282,7 @@ func (h *StreamHandler) validateResolvedPath(resolved string) error {
 		}
 	}
 
-	return fmt.Errorf("path not in allowed list: %s", resolved)
+	return codedf(ErrCodeNotAllowed, "path not in allowed list: %s", resolved)
 }
 
 // globMeta is the set of glob metacharacters recognised in allowed-path
@@ -320,7 +364,7 @@ func isPathUnderPrefix(path, prefix string) bool {
 func (h *StreamHandler) validatePath(path string) error {
 	// Check for null bytes and dangerous characters first (before any processing)
 	if containsDangerousChars(path) {
-		return fmt.Errorf("path contains dangerous characters")
+		return codedf(ErrCodeNotAllowed, "path contains dangerous characters")
 	}
 
 	// Apply Unicode normalization
@@ -328,17 +372,17 @@ func (h *StreamHandler) validatePath(path string) error {
 
 	// Must be absolute
 	if !filepath.IsAbs(normalizedPath) {
-		return fmt.Errorf("path must be absolute: %s", path)
+		return codedf(ErrCodeNotAllowed, "path must be absolute: %s", path)
 	}
 
 	// Check for directory traversal (after cleaning)
 	if strings.Contains(normalizedPath, "..") {
-		return fmt.Errorf("directory traversal not allowed")
+		return codedf(ErrCodeNotAllowed, "directory traversal not allowed")
 	}
 
 	// Empty list = no paths allowed (consistent with RPC whitelist)
 	if len(h.cfg.AllowedPaths) == 0 {
-		return fmt.Errorf("no paths are allowed (allowed_paths is empty)")
+		return codedf(ErrCodeNotAllowed, "no paths are allowed (allowed_paths is empty)")
 	}
 
 	// Check allowed paths with prefix matching and glob support
@@ -352,7 +396,7 @@ func (h *StreamHandler) validatePath(path string) error {
 		}
 	}
 
-	return fmt.Errorf("path not in allowed list: %s", path)
+	return codedf(ErrCodeNotAllowed, "path not in allowed list: %s", path)
 }
 
 // isPathAllowed checks if a path matches an allowed pattern.
@@ -467,7 +511,7 @@ func (h *StreamHandler) WriteUploadedFile(ctx context.Context, path string, r io
 // The file is closed when compression completes or on error. ctx aborts the
 // background copy so a stalled consumer does not leak the goroutine when the
 // agent shuts down.
-func gzipPipeReader(ctx context.Context, f *os.File) io.Reader {
+func gzipPipeReader(ctx context.Context, f io.ReadCloser) io.Reader {
 	pr, pw := io.Pipe()
 	go func() {
 		gzw := gzip.NewWriter(pw)
@@ -494,7 +538,7 @@ func (h *StreamHandler) ReadFileForDownload(ctx context.Context, path string, co
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, 0, 0, false, fmt.Errorf("path not found: %w", err)
+		return nil, 0, 0, false, codedf(ErrCodeNotFound, "path not found: %w", err)
 	}
 
 	if info.IsDir() {
@@ -528,19 +572,21 @@ func (h *StreamHandler) ReadFileForDownload(ctx context.Context, path string, co
 	return withCtx(ctx, f), info.Size(), uint32(info.Mode().Perm()), false, nil
 }
 
-// ReadFileForDownloadAtOffset creates a reader starting at the given byte offset.
-// This is used for resuming downloads. The offset is in uncompressed bytes.
-// The function seeks to the offset in the original file and starts a fresh gzip stream.
-// Directories (tar archives) do not support resume - returns error if isDirectory.
-// Returns: reader, remainingSize (-1 if compressed), mode, isDirectory, error
+// ReadFileRange creates a reader for up to length bytes of a file starting at
+// offset (length 0 = to the end of the file), for resumed and ranged
+// downloads. The range is cut before compression, so offset and length count
+// file bytes, and a compressed range is a fresh gzip stream. Directories
+// (tar archives) do not support ranges and return an error.
+// Returns: reader, remainingSize (-1 if compressed), mode, isDirectory, error.
+// An uncompressed reader is an io.ReadCloser that closes the file.
 //
 // ctx cancels the background gzip goroutine on shutdown / peer disconnect.
-func (h *StreamHandler) ReadFileForDownloadAtOffset(ctx context.Context, path string, offset int64, compress bool) (io.Reader, int64, uint32, bool, error) {
+func (h *StreamHandler) ReadFileRange(ctx context.Context, path string, offset, length int64, compress bool) (io.Reader, int64, uint32, bool, error) {
 	path = filepath.Clean(path)
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, 0, 0, false, fmt.Errorf("path not found: %w", err)
+		return nil, 0, 0, false, codedf(ErrCodeNotFound, "path not found: %w", err)
 	}
 
 	if info.IsDir() {
@@ -554,6 +600,9 @@ func (h *StreamHandler) ReadFileForDownloadAtOffset(ctx context.Context, path st
 	}
 	if offset > info.Size() {
 		return nil, 0, 0, false, fmt.Errorf("offset %d exceeds file size %d", offset, info.Size())
+	}
+	if length < 0 {
+		return nil, 0, 0, false, fmt.Errorf("invalid length: %d", length)
 	}
 
 	// Open file and seek to offset
@@ -570,12 +619,20 @@ func (h *StreamHandler) ReadFileForDownloadAtOffset(ctx context.Context, path st
 	}
 
 	remainingSize := info.Size() - offset
-
-	if compress {
-		return gzipPipeReader(ctx, f), -1, uint32(info.Mode().Perm()), false, nil
+	var src io.ReadCloser = f
+	if length > 0 && length < remainingSize {
+		remainingSize = length
+		src = struct {
+			io.Reader
+			io.Closer
+		}{io.LimitReader(f, length), f}
 	}
 
-	return withCtx(ctx, f), remainingSize, uint32(info.Mode().Perm()), false, nil
+	if compress {
+		return gzipPipeReader(ctx, src), -1, uint32(info.Mode().Perm()), false, nil
+	}
+
+	return withCtx(ctx, src), remainingSize, uint32(info.Mode().Perm()), false, nil
 }
 
 // ParseMetadata parses transfer metadata from JSON bytes.
@@ -678,6 +735,15 @@ func (c *CtxReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return c.R.Read(p)
+}
+
+// Close closes the wrapped reader when it is an io.Closer, so a file
+// handed out through withCtx can still be released by the caller.
+func (c *CtxReader) Close() error {
+	if cl, ok := c.R.(io.Closer); ok {
+		return cl.Close()
+	}
+	return nil
 }
 
 // withCtx wraps r so reads honor ctx. nil ctx skips wrapping.

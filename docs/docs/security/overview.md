@@ -52,7 +52,6 @@ Muti Metroo layers several independent controls. Some are always on; most must b
 | Agent identity | Agent IDs in the peer handshake are self-asserted at every TLS mode, and the identity key pair never authenticates the link. On an unauthenticated link, any reachable endpoint can join the mesh as any agent ID and inject route advertisements. Pin `peers[].id` where identity matters. See [TLS and mTLS](/security/tls-mtls#agent-ids-are-self-asserted). |
 | Compromised ingress or exit agents | They are session endpoints and see plaintext. |
 | Operator agents' HTTP API | An operator agent signs every privileged request that reaches its API. Access to that API grants control of the mesh. |
-| File browse on operator agents | An agent that holds the signing private key accepts unsigned file browse requests (including `chmod` and `delete`) from other agents. See [Authentication](/security/authentication#how-a-request-is-signed). |
 | Unrouted SOCKS destinations | The ingress agent dials them directly from its own host. |
 | The link from Mutiauk or a SOCKS client to the ingress | Plain SOCKS5 over TCP, including the password, is not encrypted; end-to-end encryption starts at the ingress agent. Use the [WebSocket listener](/configuration/socks5#websocket-listener) with TLS when workstations connect across untrusted networks. |
 | UDP and ICMP destinations | Exit routes do not restrict them. Disable `udp` and `icmp` where they are not needed. |

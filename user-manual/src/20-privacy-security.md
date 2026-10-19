@@ -275,6 +275,8 @@ Operator Station      Remote Agents
       |                    | (verify only)
 ```
 
+Each signature covers the operation type and a hash of the request body (the shell command and its arguments, the file path and transfer options, or the configuration change), so a captured envelope cannot authorize a different request. Agents before 4.12.0 signed shell and file operations without the body; upgrade the gateway and target agents together, or shell and file requests between them fail with `invalid_credentials`. See Chapter 21.
+
 ### Best Practices
 
 1. **Generate keys offline** on a secure machine

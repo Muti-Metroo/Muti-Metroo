@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,30 +15,33 @@ import (
 
 // allowAllVerifier accepts every envelope. Used for tests that do not
 // exercise the signature path.
-func allowAllVerifier(_ *crypto.AuthEnvelope) error { return nil }
+func allowAllVerifier(_ *crypto.AuthEnvelope, _ []byte) error { return nil }
 
 // rejectMissingVerifier rejects envelopes that lack a signature, mirroring
 // what a real agent does when an inbound request has no Auth field.
-func rejectMissingVerifier(env *crypto.AuthEnvelope) error {
+func rejectMissingVerifier(env *crypto.AuthEnvelope, _ []byte) error {
 	if env == nil || len(env.Signature) == 0 {
 		return crypto.ErrAuthMissing
 	}
 	return nil
 }
 
-// TestAuthErrorCode verifies the wire-code mapping for management-auth errors.
-func TestAuthErrorCode(t *testing.T) {
-	if got := AuthErrorCode(crypto.ErrAuthMissing); got != ErrCodeAuthRequired {
-		t.Errorf("AuthErrorCode(ErrAuthMissing) = %q, want %q", got, ErrCodeAuthRequired)
+// TestErrorCode verifies the wire-code mapping for management-auth errors.
+func TestErrorCode(t *testing.T) {
+	if got := ErrorCode(crypto.ErrAuthMissing); got != ErrCodeAuthRequired {
+		t.Errorf("ErrorCode(ErrAuthMissing) = %q, want %q", got, ErrCodeAuthRequired)
 	}
-	if got := AuthErrorCode(crypto.ErrAuthBadSignature); got != ErrCodeInvalidCredentials {
-		t.Errorf("AuthErrorCode(ErrAuthBadSignature) = %q, want %q", got, ErrCodeInvalidCredentials)
+	if got := ErrorCode(crypto.ErrAuthBadSignature); got != ErrCodeInvalidCredentials {
+		t.Errorf("ErrorCode(ErrAuthBadSignature) = %q, want %q", got, ErrCodeInvalidCredentials)
 	}
-	if got := AuthErrorCode(crypto.ErrAuthWrongTarget); got != ErrCodeInvalidCredentials {
-		t.Errorf("AuthErrorCode(ErrAuthWrongTarget) = %q, want %q", got, ErrCodeInvalidCredentials)
+	if got := ErrorCode(crypto.ErrAuthWrongTarget); got != ErrCodeInvalidCredentials {
+		t.Errorf("ErrorCode(ErrAuthWrongTarget) = %q, want %q", got, ErrCodeInvalidCredentials)
 	}
-	if got := AuthErrorCode(errors.New("other")); got != "" {
-		t.Errorf("AuthErrorCode(other) = %q, want \"\"", got)
+	if got := ErrorCode(fmt.Errorf("wrapped: %w", codedf(ErrCodeNotFound, "path not found: x"))); got != ErrCodeNotFound {
+		t.Errorf("ErrorCode(wrapped CodedError) = %q, want %q", got, ErrCodeNotFound)
+	}
+	if got := ErrorCode(errors.New("other")); got != "" {
+		t.Errorf("ErrorCode(other) = %q, want \"\"", got)
 	}
 }
 
@@ -59,7 +63,7 @@ func TestBrowse_PopulatesErrorCodeOnAuthFailure(t *testing.T) {
 	})
 
 	t.Run("bad signature", func(t *testing.T) {
-		reject := func(_ *crypto.AuthEnvelope) error { return crypto.ErrAuthBadSignature }
+		reject := func(_ *crypto.AuthEnvelope, _ []byte) error { return crypto.ErrAuthBadSignature }
 		h := NewStreamHandler(StreamConfig{
 			Enabled:      true,
 			AllowedPaths: []string{"*"},
@@ -124,7 +128,7 @@ func TestStreamHandler_ValidateUploadMetadata(t *testing.T) {
 				Enabled:      true,
 				AllowedPaths: []string{"*"},
 			},
-			verify: func(_ *crypto.AuthEnvelope) error { return crypto.ErrAuthBadSignature },
+			verify: func(_ *crypto.AuthEnvelope, _ []byte) error { return crypto.ErrAuthBadSignature },
 			meta: &TransferMetadata{
 				Path: "/tmp/test.txt",
 				Auth: &crypto.AuthEnvelope{Signature: make([]byte, crypto.Ed25519SignatureSize)},
@@ -575,9 +579,9 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 		content := []byte("0123456789abcdef")
 		os.WriteFile(srcPath, content, 0644)
 
-		r, size, mode, isDir, err := h.ReadFileForDownloadAtOffset(context.Background(), srcPath, 5, false)
+		r, size, mode, isDir, err := h.ReadFileRange(context.Background(), srcPath, 5, 0, false)
 		if err != nil {
-			t.Fatalf("ReadFileForDownloadAtOffset failed: %v", err)
+			t.Fatalf("ReadFileRange failed: %v", err)
 		}
 
 		if size != 11 {
@@ -605,9 +609,9 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 		content := []byte("0123456789abcdefghijklmnop")
 		os.WriteFile(srcPath, content, 0644)
 
-		r, size, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), srcPath, 10, true)
+		r, size, _, _, err := h.ReadFileRange(context.Background(), srcPath, 10, 0, true)
 		if err != nil {
-			t.Fatalf("ReadFileForDownloadAtOffset failed: %v", err)
+			t.Fatalf("ReadFileRange failed: %v", err)
 		}
 
 		if size != -1 {
@@ -640,9 +644,9 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 		content := []byte("hello world")
 		os.WriteFile(srcPath, content, 0644)
 
-		r, size, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), srcPath, 0, false)
+		r, size, _, _, err := h.ReadFileRange(context.Background(), srcPath, 0, 0, false)
 		if err != nil {
-			t.Fatalf("ReadFileForDownloadAtOffset failed: %v", err)
+			t.Fatalf("ReadFileRange failed: %v", err)
 		}
 
 		if size != int64(len(content)) {
@@ -661,7 +665,7 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 	t.Run("directory not supported", func(t *testing.T) {
 		srcDir := t.TempDir()
 
-		_, _, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), srcDir, 0, false)
+		_, _, _, _, err := h.ReadFileRange(context.Background(), srcDir, 0, 0, false)
 		if err == nil {
 			t.Error("expected error for directory")
 		}
@@ -675,7 +679,7 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 		srcPath := filepath.Join(srcDir, "test.txt")
 		os.WriteFile(srcPath, []byte("hello"), 0644)
 
-		_, _, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), srcPath, -1, false)
+		_, _, _, _, err := h.ReadFileRange(context.Background(), srcPath, -1, 0, false)
 		if err == nil {
 			t.Error("expected error for negative offset")
 		}
@@ -686,14 +690,14 @@ func TestStreamHandler_ReadFileForDownloadAtOffset(t *testing.T) {
 		srcPath := filepath.Join(srcDir, "test.txt")
 		os.WriteFile(srcPath, []byte("hello"), 0644)
 
-		_, _, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), srcPath, 100, false)
+		_, _, _, _, err := h.ReadFileRange(context.Background(), srcPath, 100, 0, false)
 		if err == nil {
 			t.Error("expected error for offset exceeding file size")
 		}
 	})
 
 	t.Run("nonexistent file", func(t *testing.T) {
-		_, _, _, _, err := h.ReadFileForDownloadAtOffset(context.Background(), "/nonexistent/path", 0, false)
+		_, _, _, _, err := h.ReadFileRange(context.Background(), "/nonexistent/path", 0, 0, false)
 		if err == nil {
 			t.Error("expected error for nonexistent path")
 		}

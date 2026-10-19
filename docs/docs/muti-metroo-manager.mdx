@@ -45,8 +45,8 @@ flowchart LR
 
 The React frontend is embedded in the binary; no web server or Node.js runtime is needed. The Manager keeps its own small SQLite database for UI state (settings, agent notes and icons, network names, station positions).
 
-:::warning[The Manager has no login of its own]
-Anyone who can open the Manager's address can use it with the permissions of the token it was started with. The default listen address `:3000` binds every interface. Bind it to `127.0.0.1:3000`, or put it behind a reverse proxy that authenticates users, on any host reachable from a network you do not trust.
+:::warning[Protect the Manager]
+Anyone who can use the Manager acts with the permissions of the agent it connects to, including remote shells and file transfer across the mesh. Without an [access token](#access-token) it has no login, so it refuses a non-loopback listen address unless you pass `-insecure-no-auth`. Bind it to `127.0.0.1:3000`, or set an access token, on any host reachable from a network you do not trust.
 :::
 
 ## Download
@@ -166,7 +166,21 @@ If the agent has `http.token_hash` set, the Manager needs the matching token. Gi
   -agent-token-file /etc/muti-metroo-manager/token
 ```
 
-When the Manager has no token and the agent answers `401`, the browser shows an **Authentication required** dialog instead. The token entered there is kept in the browser's session storage, or in local storage for 8 hours when **Remember on this device for 8 hours** is ticked. **Sign out** in the actions menu clears it. A token configured on the Manager always replaces a token sent by the browser.
+When the Manager has no agent token and the agent answers `401`, the browser shows an **Authentication required** dialog instead. The token entered there is kept in the browser's session storage, or in local storage for 8 hours when **Remember on this device for 8 hours** is ticked. **Sign out** in the actions menu clears it. A token configured on the Manager always replaces a token sent by the browser.
+
+### Access token
+
+The Manager can require its own token for every `/api/*` route, including the proxied agent API that carries shells and file transfer. Set it with `-auth-token-file` (preferred), `-auth-token`, or the `METROO_MANAGER_AUTH_TOKEN` environment variable:
+
+```bash
+openssl rand -hex 32 > /etc/muti-metroo-manager/auth-token
+./muti-metroo-manager -addr :3000 -agent http://192.168.1.10:8080 \
+  -auth-token-file /etc/muti-metroo-manager/auth-token
+```
+
+Browsers then see a login screen; the token is exchanged for an `HttpOnly`, `SameSite=Strict` session cookie, marked `Secure` when the request arrives over HTTPS (including `X-Forwarded-Proto: https` from a reverse proxy). Scripts send `Authorization: Bearer <token>`.
+
+Without an access token the Manager logs a warning at startup and refuses to listen on a non-loopback address unless `-insecure-no-auth` is set. [File shares](#file-shares) are not covered by this token; each share has its own user name and password.
 
 ## Using the web UI
 
@@ -174,7 +188,7 @@ When the Manager has no token and the agent answers `401`, the browser shows an 
 
 - **Header**: the connected agent's name and short ID, the main tabs, the actions menu (the vertical dots button), and a light/dark theme toggle. The theme follows the operating system preference until you change it and is remembered per browser.
 - **Main tabs**: **Topology**, **Routes**, **Port Forwarding**, and **DNS**.
-- **Actions menu**: **Mesh connectivity test**, **Generate Muti Metroo agent config...**, **Generate Mutiauk config...**, **Settings...**, **Suspend mesh** or **Resume mesh** (when sleep mode is enabled), and **Sign out** (when the browser holds a token).
+- **Actions menu**: **Mesh connectivity test**, **File shares...**, **Generate Muti Metroo agent config...**, **Generate Mutiauk config...**, **Settings...**, **Suspend mesh** or **Resume mesh** (when sleep mode is enabled), and **Sign out** (when the browser holds a token).
 - **Footer**: the most recent topology event, the [mesh health](#mesh-test) summary, and the Manager version.
 
 ![Actions menu open on the Topology tab, listing Mesh connectivity test, Generate Muti Metroo agent config, Generate Mutiauk config, Settings, and Suspend mesh](/img/screenshots/muti-metroo-manager/22-actions-menu.png)
@@ -344,6 +358,122 @@ Both addresses are labels only; the agent the Manager talks to is set with `-age
 
 Each tab has its own URL path (`/topology`, `/routes/active`, `/routes/test`, `/forwards`, `/dns/hosts`, `/dns/tlds`). Add `?agent=<id>` with a short or full agent ID to open that agent's panel, for example `http://localhost:3000/topology?agent=abc12345`. Older `#/agents/<id>` links are redirected.
 
+## File shares
+
+Muti Metroo Manager can share a folder on any agent as a network drive. You pick an agent and a folder in the file browser, and Manager serves that folder over WebDAV from the Manager host. Users mount it with the WebDAV client built into their operating system: Finder on macOS, Explorer or `net use` on Windows, and GNOME Files, davfs2 or rclone on Linux.
+
+Manager does not copy the folder. Every WebDAV request becomes a call to the connected agent's file transfer API (`file/browse`, `file/download`, `file/upload`). The connected agent signs each operation with the management key and relays it through the mesh to the target agent. A share can therefore reach only what the target agent's `file_transfer.allowed_paths` allows, exactly like the Files tab.
+
+### Requirements
+
+On the target agent (the one that holds the folder):
+
+- `file_transfer.enabled: true`
+- The shared folder inside `file_transfer.allowed_paths`. Glob roots work; the share root must itself be an existing directory.
+- `management.signing_public_key` set, so it accepts signed file operations.
+- Muti Metroo 4.12.0 or later, on this agent and on the agent Manager connects to. Earlier versions sign file operations differently (see [Mixed versions](/security/authentication#how-a-request-is-signed)) and lack the `mkdir`, `rename`, and ranged download operations a share needs.
+
+On the agent Manager connects to (`-agent`):
+
+- `management.signing_private_key` set, so it can sign operations on Manager's behalf.
+- If its HTTP API requires a bearer token, give the token to Manager with `-agent-token-file` (or `METROO_MANAGER_AGENT_TOKEN`). The WebDAV gateway runs inside Manager and cannot use a token that was only pasted into the browser.
+
+On the Manager host:
+
+- Clients must be able to reach Manager's listener (`-addr`). A loopback bind such as `127.0.0.1:3000` allows mounts from the Manager host only.
+- Writes are buffered in the host's temp directory until the client closes the file, so it needs free space for the largest file you expect to upload.
+
+### Creating a share
+
+1. Open an agent, go to the **Files** tab and navigate to the folder.
+2. Click **Share**.
+3. Choose a share name. It becomes part of the URL (`/dav/<name>/`), so it is limited to lower-case letters, digits, `-` and `_`.
+4. Leave **Read-only** checked unless clients need to change files. Read-write lets anyone with the password create, overwrite, rename and delete files in the folder.
+5. Optionally set a user name (defaults to the share name) and a password (8 to 72 characters). Leave the password empty to have Manager generate one.
+6. Click **Create share**. Manager checks that the folder exists on the agent and is a directory, then shows the mount URL, the user name, the password and mount instructions for each operating system.
+
+The generated password is shown once. Manager stores only a bcrypt hash; if the password is lost, rotate it.
+
+### Managing shares
+
+Open **Actions > File shares** to see every share with its status, agent, folder, access mode and mount URL. From there you can:
+
+- **Disable / Enable** a share. A disabled share answers 404 and keeps its settings.
+- Switch between **read-only** and **read-write**.
+- **Rotate password**. The new password is shown once; the old one stops working immediately, including for clients that are already mounted.
+- **Delete** the share. Files on the agent are not touched.
+- Open **Mount help** for the per-OS instructions.
+
+Shares are stored in Manager's SQLite database and survive restarts.
+
+### Mounting
+
+The mount URL is `http://<manager-host>:<port>/dav/<name>/` (or `https://` behind a TLS proxy). Use the host name or address the clients use to reach Manager.
+
+#### macOS
+
+In Finder choose **Go > Connect to Server** (Cmd+K), enter the mount URL and sign in with the share's user name and password. The share appears under `/Volumes`. A read-only share mounts read-only.
+
+#### Windows
+
+The **WebClient** service must be running (`sc start WebClient`; set it to Automatic to keep it across reboots). Then run:
+
+```bash
+net use Z: http://manager.example:3000/dav/docs/ /user:docs *
+```
+
+The `*` prompts for the password. **Map network drive** in File Explorer accepts the same URL.
+
+Two Windows defaults get in the way:
+
+- Windows refuses HTTP Basic authentication over plain HTTP. Either use HTTPS, or set `BasicAuthLevel` to `2` (DWORD) under `HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters` and restart the WebClient service.
+- Windows limits WebDAV file transfers to 50 MB. Raise `FileSizeLimitInBytes` (DWORD, up to `4294967295`) in the same key and restart WebClient.
+
+#### Linux
+
+GNOME Files: open **Other Locations**, enter `dav://manager.example:3000/dav/docs/` (`davs://` for HTTPS) in **Connect to Server**. From a terminal:
+
+```bash
+gio mount 'dav://docs@manager.example:3000/dav/docs/'
+```
+
+davfs2:
+
+```bash
+sudo mkdir -p /mnt/docs
+sudo mount -t davfs 'http://manager.example:3000/dav/docs/' /mnt/docs
+```
+
+rclone (no root needed; the mount point must exist):
+
+```bash
+rclone mount :webdav: ~/docs \
+  --webdav-url 'http://manager.example:3000/dav/docs/' \
+  --webdav-user docs \
+  --webdav-pass "$(rclone obscure 'PASSWORD')" \
+  --vfs-cache-mode writes
+```
+
+### Security
+
+- `/dav/` is not covered by Manager's own access token, because operating system WebDAV clients can only send a user name and password. Each share has its own credentials instead, and every request to `/dav/<name>/` must carry them. The Manager token does not open a share, and share credentials do not open the Manager API.
+- After 10 failed logins within 5 minutes from one client address, Manager refuses further requests from that address with HTTP 429 until the 5 minutes are over. Behind a reverse proxy all clients share the proxy's address, so a client with a wrong saved password can briefly lock out everyone.
+- Manager has no TLS listener of its own. Over plain HTTP the share password and the file contents cross the network unencrypted. For anything beyond a trusted network, put Manager behind a TLS-terminating reverse proxy and mount the `https://` URL.
+- Shares are read-only by default, and a read-only share refuses every changing request (upload, delete, create folder, copy, move, lock) before it reaches the agent.
+- Share paths are confined to the shared folder: `..` segments, backslashes, and (for Windows agents) drive letters in names are rejected. The agent still enforces `allowed_paths`, also after resolving symbolic links, so a link inside the folder that points outside the allowed paths cannot be opened through the share.
+- Files are served from Manager's origin with a `Content-Security-Policy: sandbox` header, so an HTML or SVG file on an agent cannot run script against the Manager UI when opened in a browser.
+- Create, update and delete of shares are written to Manager's log as audit events. Failed share logins are logged with the client address.
+
+### Limitations
+
+- Every operation is a round trip through the mesh, so listing large folders and opening many small files is slower than a local file server. File metadata is cached for 2 seconds.
+- Reads are fetched in ranges with a read-ahead of 1 to 4 MiB, so previews and seeks do not download whole files. Writes are buffered on the Manager host and uploaded when the client closes the file; large uploads are limited by `file_transfer.max_file_size` on the target agent and by the 30 minute upload timeout.
+- Locks (needed by Finder and Office to write) are kept in Manager's memory and are lost when Manager restarts. Only exclusive write locks are supported; a client that asks for a shared lock gets "not implemented".
+- Custom WebDAV properties are not stored; clients that set them (for example Windows timestamps) get a "forbidden" result for those properties, which they ignore.
+- `PROPFIND` with `Depth: infinity` is refused.
+- New files are created with the agent's default upload mode (`0600`); overwritten files keep their existing mode.
+- macOS Finder writes `._*` and `.DS_Store` files into writable shares, as it does on any network volume.
+
 ## Command-line reference
 
 ```text
@@ -369,6 +499,11 @@ These flags apply to `run`, `check`, and `config show`. Flags use a single dash.
 | `-agent`            | `http://127.0.0.1:8080`  | Agent HTTP API URL (`scheme://host:port[/prefix]`)                                                  |
 | `-agent-token`      |                          | Bearer token for the agent                                                                          |
 | `-agent-token-file` |                          | File containing the bearer token                                                                    |
+| `-agent-ca-bundle`  |                          | PEM file with extra CA certificates for verifying an `https://` agent                               |
+| `-insecure-skip-verify` | `false`              | Do not verify the agent's TLS certificate. The agent token can then be intercepted.                 |
+| `-auth-token`       |                          | The Manager's own [access token](#access-token)                                                     |
+| `-auth-token-file`  |                          | File containing the access token                                                                    |
+| `-insecure-no-auth` | `false`                  | Allow a non-loopback `-addr` without an access token                                                |
 | `-data-dir`         | see [Data directory](#data-directory) | Directory for the database and the instance lock                                       |
 | `-log-level`        | `info`                   | `debug`, `info`, `warn`, or `error`                                                                 |
 | `-log-format`       | `text`                   | `text` or `json`                                                                                    |
@@ -383,6 +518,7 @@ Settings are resolved in this order, later ones winning: built-in defaults, the 
 addr = "127.0.0.1:3000"
 agent = "http://127.0.0.1:8080"
 agent_token_file = "/etc/muti-metroo-manager/token"
+auth_token_file = "/etc/muti-metroo-manager/auth-token"
 data_dir = "/var/lib/muti-metroo-manager"
 log_level = "info"
 log_format = "json"
@@ -390,13 +526,14 @@ metrics_addr = ""
 no_sounds = false
 ```
 
-The token itself cannot be set in the TOML file; use `agent_token_file`.
+The tokens themselves cannot be set in the TOML file; use `agent_token_file` and `auth_token_file`.
 
 ### Environment variables
 
 | Variable                     | Description                                     |
 | ---------------------------- | ----------------------------------------------- |
 | `METROO_MANAGER_AGENT_TOKEN` | Bearer token for the agent                      |
+| `METROO_MANAGER_AUTH_TOKEN`  | The Manager's own access token                  |
 | `MUTI_METROO_TOKEN`          | Deprecated name for the same; logs a warning    |
 
 ### Data directory
