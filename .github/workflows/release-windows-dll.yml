@@ -1,0 +1,95 @@
+name: Rebuild Windows DLL
+
+# Rebuilds the Windows amd64 DLL for an existing release and refreshes
+# checksums.txt. Use it when the build-dll job of the release workflow
+# failed for an external reason (for example a package feed outage) and
+# the release went out without the DLL. Release Please still creates every
+# release; this only fills in a missing asset.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example muti-metroo-v4.12.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  build-dll:
+    runs-on: windows-latest
+    env:
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build DLL
+        env:
+          CGO_ENABLED: "1"
+          TAG: ${{ inputs.tag }}
+        shell: pwsh
+        run: |
+          $VERSION = $env:TAG -replace '^v', '' -replace '^muti-metroo-v', ''
+          go build -buildmode=c-shared -trimpath `
+            -ldflags="-s -w -X main.Version=$VERSION" `
+            -o "muti-metroo-windows-amd64.dll" `
+            ./cmd/muti-dll
+          Remove-Item -Force "muti-metroo-windows-amd64.dll.h" -ErrorAction SilentlyContinue
+
+      - name: Install UPX
+        shell: pwsh
+        env:
+          UPX_VERSION: "5.2.1"
+          UPX_SHA256: "eabc6792a347d45e945be7748423e7868fd01b0d2bcaa2f4b1031fd71ff69bda"
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "upx.zip"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v$env:UPX_VERSION/upx-$env:UPX_VERSION-win64.zip" -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($hash -ne $env:UPX_SHA256) { throw "UPX checksum mismatch: $hash" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\upx-$env:UPX_VERSION-win64" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Compress DLL with UPX
+        shell: pwsh
+        run: |
+          upx --best --lzma "muti-metroo-windows-amd64.dll"
+
+      - name: Upload DLL to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        shell: pwsh
+        run: |
+          gh release upload "$env:TAG" "muti-metroo-windows-amd64.dll" --clobber
+
+  checksums:
+    needs: build-dll
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all binaries
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release download "$TAG" --repo "${{ github.repository }}" --pattern "muti-metroo-*"
+
+      - name: Create checksums
+        run: |
+          sha256sum muti-metroo-* > checksums.txt
+          cat checksums.txt
+
+      - name: Upload checksums
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" checksums.txt --repo "${{ github.repository }}" --clobber
