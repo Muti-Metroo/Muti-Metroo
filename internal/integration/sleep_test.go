@@ -175,6 +175,12 @@ func (m *SleepMesh) buildConfig(name string) *config.Config {
 	cfg.Sleep.PersistState = false
 	cfg.Sleep.MaxQueuedMessages = 100
 
+	// Re-advertise often so a route flood lost while the five links come up
+	// at once heals within WaitForRoutes' timeout. At the default 2m the
+	// periodic advertise never fires inside the wait, and one missed flood
+	// fails the test.
+	cfg.Routing.AdvertiseInterval = 5 * time.Second
+
 	return cfg
 }
 
@@ -262,8 +268,8 @@ func (m *SleepMesh) VerifyConnectivity(t *testing.T) bool {
 // The 60s timeout is generous on purpose: under suite-wide load the QUIC
 // dial / handshake / route flood pipeline can take several seconds, and
 // brief mid-flight peer churn can drop a single flood. We rely on the
-// periodic route advertise loop (default 2m, see RoutingConfig) plus the
-// per-connection SendFullTable to converge -- 60s comfortably covers both.
+// per-connection SendFullTable plus the periodic route advertise loop
+// (5s in this mesh, see buildConfig) to converge.
 func (m *SleepMesh) WaitForRoutes(t *testing.T) bool {
 	timeout := 60 * time.Second
 	interval := 100 * time.Millisecond
@@ -281,9 +287,14 @@ func (m *SleepMesh) WaitForRoutes(t *testing.T) bool {
 
 	stats := m.Agents["A"].Stats()
 	t.Logf("Route propagation timeout: Agent A has %d routes", stats.RouteCount)
-	for _, r := range m.Agents["A"].GetRoutes() {
-		t.Logf("  Agent A route: %s via %s (origin=%s, metric=%d)",
-			r.Network, r.NextHop.ShortString(), r.OriginAgent.ShortString(), r.Metric)
+	// Dump every agent's table so a failure shows which hop lost the route.
+	for _, name := range []string{"A", "B", "C", "E", "F"} {
+		a := m.Agents[name]
+		t.Logf("Agent %s (%s): %d peers", name, a.ID().ShortString(), a.Stats().PeerCount)
+		for _, r := range a.GetRoutes() {
+			t.Logf("  route: %s via %s (origin=%s, metric=%d)",
+				r.Network, r.NextHop.ShortString(), r.OriginAgent.ShortString(), r.Metric)
+		}
 	}
 	return false
 }
