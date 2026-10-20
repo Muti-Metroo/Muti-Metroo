@@ -55,7 +55,7 @@ func detachSelf() error {
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
-	cmd.Dir = durableDir(exe)
+	cmd.Dir = childDir(exe)
 	cmd.Env = scrubbedEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: creationFlags}
 
@@ -147,6 +147,18 @@ func probeChildExit(h windows.Handle) error {
 		"run `muti-metroo run -c <path>` without -D to see startup errors", code)
 }
 
+// childDir is the working directory of the detached agent: the current
+// one, so a relative -c path (including the ./config.yaml default) and
+// relative paths inside the config resolve as they would without -D.
+func childDir(exe string) string {
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		return wd
+	}
+	return durableDir(exe)
+}
+
+// durableDir is the fallback working directory when the current one is
+// unknown.
 func durableDir(exe string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return home
