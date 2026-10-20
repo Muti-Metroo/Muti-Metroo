@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.2](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.12.1...muti-metroo-v4.12.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* keep the working directory when detaching with run -D ([f25e99b](https://github.com/Muti-Metroo/Muti-Metroo/commit/f25e99ba2a49c7d3435bdc6e14e28449fca0b8ef))
+
 ## [4.12.1](https://github.com/Muti-Metroo/Muti-Metroo/compare/muti-metroo-v4.12.0...muti-metroo-v4.12.1) (2026-10-19)
 
 
