@@ -472,7 +472,7 @@ rclone mount :webdav: ~/docs \
 - Custom WebDAV properties are not stored; clients that set them (for example Windows timestamps) get a "forbidden" result for those properties, which they ignore.
 - `PROPFIND` with `Depth: infinity` is refused.
 - New files are created with the agent's default upload mode (`0600`); overwritten files keep their existing mode.
-- macOS Finder writes `._*` and `.DS_Store` files into writable shares, as it does on any network volume.
+- macOS metadata (`._*` AppleDouble files, `.DS_Store`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`, `.TemporaryItems`) is never written to the agent. Manager keeps it in memory, so Finder and `cp` work as usual, and drops it when Manager restarts: extended attributes and Finder view settings of files copied from a Mac are not stored on the target. Such files already present in the folder are hidden from the share.
 
 ## Command-line reference
 
